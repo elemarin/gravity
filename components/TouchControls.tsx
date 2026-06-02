@@ -132,7 +132,7 @@ function StageButton({
       <span className="text-[10px] tracking-[0.15em] leading-none">STAGE</span>
       <span className="text-lg leading-none mt-0.5">⏏</span>
       {stageCount > 1 && (
-        <span className="text-[8px] tracking-wider leading-none mt-0.5 tabular-nums">{remaining} left</span>
+        <span className="text-[10px] tracking-wider leading-none mt-0.5 tabular-nums">{remaining} left</span>
       )}
     </button>
   );

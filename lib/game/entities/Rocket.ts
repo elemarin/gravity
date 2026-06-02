@@ -256,7 +256,7 @@ export class Rocket {
       const cap = Math.max(this.stageStats[this.activeStage]?.fuelCapacity ?? 1, 1);
       const burnedL = this.activeBurnRate * this.throttle * dt;
       const fuelDelta = (burnedL / cap) * 100;
-      this.stageFuel[this.activeStage] = Math.max(0, this.fuel - fuelDelta);
+      this.stageFuel[this.activeStage] = Math.max(0, this.stageFuel[this.activeStage] - fuelDelta);
       if (this.fuel <= 0 && !this.canStage) this.throttle = 0;
     }
     this.syncMesh();
