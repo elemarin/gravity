@@ -13,6 +13,7 @@ const CATEGORY_ORDER: { type: PartType; label: string }[] = [
   { type: 'tank',    label: 'Tanks'   },
   { type: 'nose',    label: 'Noses'   },
   { type: 'capsule', label: 'Capsules'},
+  { type: 'lander',  label: 'Landers' },
   { type: 'utility', label: 'Utility' },
 ];
 
@@ -93,6 +94,8 @@ export default function RocketBuilder() {
     });
 
   const setNose = (id: string) => setBuild((b) => ({ ...b, noseId: id }));
+  const toggleLander = (id: string) =>
+    setBuild((b) => ({ ...b, landerId: b.landerId === id ? undefined : id }));
   const toggleUtility = (id: string) =>
     setBuild((b) => ({
       ...b,
@@ -132,6 +135,7 @@ export default function RocketBuilder() {
           <RocketStack
             stages={stages}
             noseId={build.noseId}
+            landerId={build.landerId}
             utilityIds={build.utilityIds}
             selectedStage={activeStage}
             onSelectStage={setSelectedStage}
@@ -185,6 +189,7 @@ export default function RocketBuilder() {
                           if (p.type === 'engine')  setStageEngine(p.id);
                           else if (p.type === 'tank') addTankToStage(p.id);
                           else if (p.type === 'nose' || p.type === 'capsule') setNose(p.id);
+                          else if (p.type === 'lander') toggleLander(p.id);
                           else if (p.type === 'utility') toggleUtility(p.id);
                         }}
                         className={`text-left rounded-xl border p-3 transition-all active:scale-[0.98]
@@ -218,6 +223,7 @@ function isSelected(build: RocketBuild, stage: StageSpec | undefined, p: RocketP
   if (p.type === 'engine')  return stage?.engineId === p.id;
   if (p.type === 'tank')    return !!stage?.tankIds.includes(p.id);
   if (p.type === 'nose' || p.type === 'capsule') return build.noseId === p.id;
+  if (p.type === 'lander')  return build.landerId === p.id;
   if (p.type === 'utility') return build.utilityIds.includes(p.id);
   return false;
 }
@@ -234,6 +240,14 @@ function PartStats({ part }: { part: RocketPart }) {
   if (part.type === 'tank') {
     return <div className="mt-2 text-[9px] tabular-nums text-cyan">⛽ {part.fuelCapacity} L</div>;
   }
+  if (part.type === 'lander') {
+    return (
+      <div className="mt-2 flex gap-2 text-[9px] tabular-nums text-dim">
+        <span className="text-orange">⚡ {part.thrust} kN</span>
+        <span className="text-cyan">⛽ {part.fuelCapacity} L</span>
+      </div>
+    );
+  }
   return <div className="mt-2 text-[9px] tabular-nums text-dim">{part.mass} t</div>;
 }
 
@@ -247,11 +261,12 @@ function Stat({ label, value, highlight }: { label: string; value: string; highl
 }
 
 function RocketStack({
-  stages, noseId, utilityIds, selectedStage,
+  stages, noseId, landerId, utilityIds, selectedStage,
   onSelectStage, onRemoveTank, onRemoveStage,
 }: {
   stages: StageSpec[];
   noseId: string;
+  landerId?: string;
   utilityIds: string[];
   selectedStage: number;
   onSelectStage: (i: number) => void;
@@ -259,6 +274,7 @@ function RocketStack({
   onRemoveStage: (stageIndex: number) => void;
 }) {
   const noseColor = colorFor(noseId);
+  const lander = landerId ? PARTS_CATALOG.find((x) => x.id === landerId) : undefined;
 
   return (
     <div className="relative flex flex-col items-center mx-auto" style={{ width: 132 }}>
@@ -269,6 +285,14 @@ function RocketStack({
              borderRight: '24px solid transparent',
              borderBottom: `48px solid ${noseColor}`,
            }} />
+
+      {lander && (
+        <div className="mb-0.5 flex items-center gap-1 rounded-full border border-cyan/40 bg-cyan/[0.08]
+                        px-2 py-0.5 text-[9px] font-bold text-cyan">
+          <span>{lander.icon}</span>
+          <span className="truncate max-w-[80px]">{lander.name}</span>
+        </div>
+      )}
 
       {/* Stages, top-most stage first in DOM */}
       {stages.map((_, idx) => stages.length - 1 - idx).map((si) => {

@@ -1,4 +1,4 @@
-export type PartType = 'engine' | 'tank' | 'nose' | 'capsule' | 'utility';
+export type PartType = 'engine' | 'tank' | 'nose' | 'capsule' | 'utility' | 'lander';
 
 export type RocketPart = {
   id: string;
@@ -203,6 +203,34 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Stable touchdown on flat ground.',
     icon: '⎍',
     color: 0xaaaaaa,
+  },
+
+  // LANDERS — separable descent payload with their own engine + fuel.
+  {
+    id: 'lander-light',
+    name: 'Scout Lander',
+    type: 'lander',
+    mass: 0.6,
+    thrust: 28,
+    burnRate: 5,
+    fuelCapacity: 60,
+    unlockedByDefault: true,
+    description: 'Light descent stage. Separates to touch down softly.',
+    icon: '🛬',
+    color: 0xc9d4e0,
+  },
+  {
+    id: 'lander-heavy',
+    name: 'Pioneer Lander',
+    type: 'lander',
+    mass: 1.1,
+    thrust: 55,
+    burnRate: 9,
+    fuelCapacity: 140,
+    unlockedByDefault: false,
+    description: 'Heavy lander with plenty of descent fuel for low-gravity worlds.',
+    icon: '🛸',
+    color: 0xe0c97a,
   },
 ];
 

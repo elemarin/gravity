@@ -18,6 +18,10 @@ export type FlightState = {
   activeStage: number;   // index of the currently firing stage
   stageCount: number;    // total stages in the rocket
   canStage: boolean;     // true when there is a lower stage to jettison
+  launchBodyId?: string;        // body the flight launched from
+  landedBodyId?: string | null; // body currently/last landed on
+  reachedBodyIds?: string[];    // bodies whose vicinity has been reached
+  landerDeployed?: boolean;     // a lander payload has separated
 };
 
 /** A single stage = one engine plus the fuel tanks feeding it. */
@@ -38,6 +42,12 @@ export type RocketBuild = {
    * compatibility with older saves and single-stage code paths.
    */
   stages?: StageSpec[];
+  /**
+   * Optional separable lander payload. When present it forms an extra top
+   * "stage" with its own descent engine + fuel that the `deployLander`
+   * maneuver action separates near a target body.
+   */
+  landerId?: string;
 };
 
 export const DEFAULT_BUILD: RocketBuild = {
@@ -58,6 +68,12 @@ export type MissionResult = {
   reachedOrbit: boolean;
   rating: string;        // letter grade
   score: number;
+  /** Body ids whose vicinity the craft reached (e.g. 'earth', 'moon'). */
+  reachedBodies: string[];
+  /** Body the craft came to rest on, or null. */
+  landedBody: string | null;
+  /** True when the craft reached a body other than its launch body. */
+  transferCompleted: boolean;
 };
 
 export type RocketStats = {
@@ -71,9 +87,11 @@ export type RocketStats = {
 export type GameCallbacks = {
   onState?:             (state: FlightState) => void;
   onMilestoneComplete?: (milestoneId: string, unlocks: string[]) => void;
-  onPhaseChange?:       (phase: FlightPhase) => void;
-  onOutOfFuel?:         () => void;
-  onLanded?:            (vSpeed: number) => void;
-  onCrashed?:           () => void;
+  onModeChange?:        (mode: 'plan' | 'sim') => void;
+  onPreview?:           (info: { apoapsis: number; periapsis: number; impact: boolean }) => void;
+  onThrustStart?:       () => void;
+  onStageSeparation?:   () => void;
+  onLanderDeploy?:      () => void;
+  onTouchdown?:         (outcome: 'landed' | 'crashed', vSpeed: number) => void;
   onMissionEnd?:        (result: MissionResult) => void;
 };

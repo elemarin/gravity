@@ -63,6 +63,32 @@ export const MILESTONES: Milestone[] = [
     unlocks: ['engine-nuclear'],
   },
   {
+    id: 'lander-deploy',
+    name: 'Lander Away',
+    description: 'Deploy a separable lander payload in flight',
+    check: (s) => !!s.landerDeployed && s.altitude >= 50,
+    unlocks: ['lander-heavy'],
+  },
+  {
+    id: 'transfer',
+    name: 'Interplanetary Transfer',
+    description: 'Reach the vicinity of another body',
+    check: (s) =>
+      !!s.reachedBodyIds &&
+      s.reachedBodyIds.some((id) => id !== (s.launchBodyId ?? '')),
+    unlocks: ['engine-nuclear'],
+  },
+  {
+    id: 'soft-landing',
+    name: 'Soft Landing',
+    description: 'Touch down safely on another body',
+    check: (s) =>
+      s.phase === 'landed' &&
+      s.landedBodyId != null &&
+      s.landedBodyId !== (s.launchBodyId ?? ''),
+    unlocks: ['lander-heavy', 'engine-ion'],
+  },
+  {
     id: 'satellite-deploy',
     name: 'Satellite Deployed',
     description: 'Deploy a satellite from orbit',

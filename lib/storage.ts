@@ -1,8 +1,10 @@
 import { RocketBuild, DEFAULT_BUILD } from './game/types';
+import { FlightPlan, DEFAULT_PLAN, clonePlan } from './game/plan/FlightPlan';
 
 const BUILD_KEY    = 'gravity:build';
 const MILESTONES_KEY = 'gravity:milestones';
 const UNLOCKS_KEY  = 'gravity:unlocks';
+const PLAN_KEY     = 'gravity:plan';
 
 const isClient = typeof window !== 'undefined';
 
@@ -78,4 +80,32 @@ export function resetProgress() {
   localStorage.removeItem(BUILD_KEY);
   localStorage.removeItem(MILESTONES_KEY);
   localStorage.removeItem(UNLOCKS_KEY);
+  localStorage.removeItem(PLAN_KEY);
+}
+
+export function loadPlan(): FlightPlan {
+  if (!isClient) return clonePlan(DEFAULT_PLAN);
+  try {
+    const raw = localStorage.getItem(PLAN_KEY);
+    if (!raw) return clonePlan(DEFAULT_PLAN);
+    const parsed = JSON.parse(raw) as FlightPlan;
+    if (!parsed?.launch || !Array.isArray(parsed.nodes)) return clonePlan(DEFAULT_PLAN);
+    return {
+      scenarioId: typeof parsed.scenarioId === 'string' ? parsed.scenarioId : DEFAULT_PLAN.scenarioId,
+      launch: {
+        heading: Number.isFinite(parsed.launch.heading) ? parsed.launch.heading : 0,
+        power:   Number.isFinite(parsed.launch.power) ? parsed.launch.power : 1,
+      },
+      nodes: parsed.nodes
+        .filter((n) => n && n.trigger && n.actions && typeof n.id === 'string')
+        .map((n) => ({ id: n.id, trigger: { ...n.trigger }, actions: { ...n.actions } })),
+    };
+  } catch {
+    return clonePlan(DEFAULT_PLAN);
+  }
+}
+
+export function savePlan(plan: FlightPlan) {
+  if (!isClient) return;
+  localStorage.setItem(PLAN_KEY, JSON.stringify(plan));
 }

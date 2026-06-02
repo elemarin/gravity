@@ -51,12 +51,19 @@ export default function MissionSummary({
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 gap-2 text-left mb-6">
+        <div className="grid grid-cols-2 gap-2 text-left mb-4">
           <Row label="Max altitude" value={fmtAlt(result.maxAltitude)} />
           <Row label="Top speed"    value={`${(result.maxSpeed * 1000).toFixed(0)} m/s`} />
           <Row label="Touchdown"    value={`${result.landingSpeed.toFixed(0)} m/s`} danger={crashed} />
           <Row label="Reached"      value={result.reachedOrbit ? 'Orbit' : result.reachedSpace ? 'Space' : 'Atmosphere'} />
         </div>
+
+        {result.transferCompleted && (
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-purple/50
+                          bg-purple/15 px-4 py-1.5 text-xs font-black tracking-wider text-purple">
+            🪐 Transfer to {result.landedBody ?? 'another body'}
+          </div>
+        )}
 
         <div className="flex flex-col gap-3">
           <button onClick={onRestart} className="btn btn-primary w-full text-base">
