@@ -1,6 +1,13 @@
 import * as THREE from 'three';
 
 const MAX_POINTS = 500;
+const APSIS_MARKER_SIZE = 96;
+const APSIS_DOT_X = APSIS_MARKER_SIZE / 2;
+const APSIS_DOT_Y = 50;
+const APSIS_LABEL_Y = 25;
+const LANDING_MARKER_SIZE = 128;
+const LANDING_CENTER = LANDING_MARKER_SIZE / 2;
+const MIN_RADIAL_LENGTH_SQ = 1e-8;
 
 export class TrajectoryLine {
   line: THREE.Line;
@@ -66,8 +73,8 @@ export class TrajectoryLine {
 
   private makeMarker(label: string, color: string) {
     const canvas = document.createElement('canvas');
-    canvas.width = 96;
-    canvas.height = 96;
+    canvas.width = APSIS_MARKER_SIZE;
+    canvas.height = APSIS_MARKER_SIZE;
     const tex = new THREE.CanvasTexture(canvas);
     const mat = new THREE.SpriteMaterial({
       map: tex,
@@ -84,8 +91,8 @@ export class TrajectoryLine {
 
   private makeLandingMarker() {
     const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 128;
+    canvas.width = LANDING_MARKER_SIZE;
+    canvas.height = LANDING_MARKER_SIZE;
     const tex = new THREE.CanvasTexture(canvas);
     const mat = new THREE.SpriteMaterial({
       map: tex,
@@ -109,7 +116,7 @@ export class TrajectoryLine {
     ctx.strokeStyle = 'rgba(10, 23, 38, 0.9)';
     ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.arc(48, 50, 8, 0, Math.PI * 2);
+    ctx.arc(APSIS_DOT_X, APSIS_DOT_Y, 8, 0, Math.PI * 2);
     ctx.stroke();
     ctx.fill();
 
@@ -117,8 +124,8 @@ export class TrajectoryLine {
     ctx.font = '700 24px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.strokeText(label, 48, 25);
-    ctx.fillText(label, 48, 25);
+    ctx.strokeText(label, APSIS_DOT_X, APSIS_LABEL_Y);
+    ctx.fillText(label, APSIS_DOT_X, APSIS_LABEL_Y);
   }
 
   private drawLandingMarker(canvas: HTMLCanvasElement) {
@@ -130,7 +137,7 @@ export class TrajectoryLine {
     ctx.lineWidth = 8;
     for (const r of [34, 21, 8]) {
       ctx.beginPath();
-      ctx.arc(64, 64, r, 0, Math.PI * 2);
+      ctx.arc(LANDING_CENTER, LANDING_CENTER, r, 0, Math.PI * 2);
       ctx.stroke();
     }
 
@@ -138,17 +145,17 @@ export class TrajectoryLine {
     ctx.lineWidth = 4;
     for (const r of [34, 21, 8]) {
       ctx.beginPath();
-      ctx.arc(64, 64, r, 0, Math.PI * 2);
+      ctx.arc(LANDING_CENTER, LANDING_CENTER, r, 0, Math.PI * 2);
       ctx.stroke();
     }
 
     ctx.strokeStyle = '#ff5577';
     ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.moveTo(64, 22);
-    ctx.lineTo(64, 106);
-    ctx.moveTo(22, 64);
-    ctx.lineTo(106, 64);
+    ctx.moveTo(LANDING_CENTER, 22);
+    ctx.lineTo(LANDING_CENTER, 106);
+    ctx.moveTo(22, LANDING_CENTER);
+    ctx.lineTo(106, LANDING_CENTER);
     ctx.stroke();
   }
 
@@ -182,7 +189,7 @@ export class TrajectoryLine {
     if (showLandingSite) {
       const site = points[points.length - 1];
       const radial = site.clone().sub(focus);
-      if (radial.lengthSq() > 1e-8) {
+      if (radial.lengthSq() > MIN_RADIAL_LENGTH_SQ) {
         this.landingMarker.position.copy(focus).addScaledVector(radial.normalize(), radius + 0.04);
         this.landingMarker.visible = true;
       } else {
