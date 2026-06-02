@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import Link from 'next/link';
 import type { Game } from '@/lib/game/Game';
 import type { FlightState, MissionResult } from '@/lib/game/types';
 import type { FlightPlan } from '@/lib/game/plan/FlightPlan';
@@ -21,6 +20,7 @@ import PlanPanel from './PlanPanel';
 import SimControls from './SimControls';
 import MissionSummary from './MissionSummary';
 import MilestoneToast from './MilestoneToast';
+import NavDrawer from './NavDrawer';
 
 type ToastInfo = { id: number; title: string; subtitle: string };
 type PreviewInfo = { apoapsis: number; periapsis: number; impact: boolean };
@@ -197,15 +197,7 @@ export default function GameScreen() {
         <HUDOverlay state={flightState} nextTarget={nextTarget} timeScale={timeScale} />
       )}
 
-      {/* Back button */}
-      <Link
-        href="/"
-        className="absolute z-40 top-[calc(0.75rem+env(safe-area-inset-top))] left-[calc(0.75rem+env(safe-area-inset-left))]
-                   inline-flex items-center justify-center w-10 h-10 rounded-full
-                   border border-white/15 bg-bg/60 backdrop-blur text-ink/80 hover:text-ink hover:border-white/30
-                   active:scale-95 transition"
-        aria-label="Back to menu"
-      >←</Link>
+      <NavDrawer title="Flight Menu" />
 
       {/* Plan mode: scenario banner + objective */}
       {mode === 'plan' && scenario && (

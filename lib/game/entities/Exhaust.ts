@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-const MAX_PARTICLES = 200;
+const MAX_PARTICLES = 420;
 
 export class Exhaust {
   private points: THREE.Points;
@@ -52,30 +52,7 @@ export class Exhaust {
     this.active = throttle > 0.01;
 
     if (this.active) {
-      const spawnCount = Math.round(throttle * 22);
-      let spawned = 0;
-      for (let i = 0; i < MAX_PARTICLES && spawned < spawnCount; i++) {
-        if (this.lifetimes[i] <= 0) {
-          this.positions[i * 3]     = nozzlePos.x + (Math.random() - 0.5) * 0.1;
-          this.positions[i * 3 + 1] = nozzlePos.y + (Math.random() - 0.5) * 0.1;
-          this.positions[i * 3 + 2] = nozzlePos.z + (Math.random() - 0.5) * 0.1;
-
-          const speed = (10 + Math.random() * 14) * throttle;
-          const spread = 0.13 * speed;
-          this.velocities[i * 3]     = thrustDir.x * speed + (Math.random() - 0.5) * spread;
-          this.velocities[i * 3 + 1] = thrustDir.y * speed + (Math.random() - 0.5) * spread * 0.3;
-          this.velocities[i * 3 + 2] = thrustDir.z * speed + (Math.random() - 0.5) * spread;
-
-          // Born bright white-yellow
-          this.colors[i * 3]     = 1.0;
-          this.colors[i * 3 + 1] = 0.88;
-          this.colors[i * 3 + 2] = 0.45;
-
-          this.lifetimes[i] = 0.001;
-          this.maxLife[i]   = 0.16 + Math.random() * 0.24;
-          spawned++;
-        }
-      }
+      this.spawn(nozzlePos, thrustDir, Math.round(18 + throttle * 36), (13 + Math.random() * 20) * throttle, 0.18, 0.18, [1, 0.88, 0.45]);
     }
 
     for (let i = 0; i < MAX_PARTICLES; i++) {
@@ -118,7 +95,44 @@ export class Exhaust {
     this.geo.getAttribute('color').needsUpdate    = true;
 
     const mat = this.points.material as THREE.PointsMaterial;
-    mat.opacity = this.active ? 1.0 : 0.0;
+    mat.opacity = 1.0;
+  }
+
+  burst(origin: THREE.Vector3, dir: THREE.Vector3, count: number, color: [number, number, number], speed = 8) {
+    this.spawn(origin, dir, count, speed, 0.9, 0.45, color);
+  }
+
+  private spawn(
+    origin: THREE.Vector3,
+    dir: THREE.Vector3,
+    count: number,
+    speed: number,
+    spreadScale: number,
+    life: number,
+    color: [number, number, number],
+  ) {
+    let spawned = 0;
+    const direction = dir.clone().normalize();
+    for (let i = 0; i < MAX_PARTICLES && spawned < count; i++) {
+      if (this.lifetimes[i] > 0) continue;
+      this.positions[i * 3]     = origin.x + (Math.random() - 0.5) * 0.18;
+      this.positions[i * 3 + 1] = origin.y + (Math.random() - 0.5) * 0.18;
+      this.positions[i * 3 + 2] = origin.z + (Math.random() - 0.5) * 0.18;
+
+      const particleSpeed = speed * (0.55 + Math.random() * 0.7);
+      const spread = spreadScale * particleSpeed;
+      this.velocities[i * 3]     = direction.x * particleSpeed + (Math.random() - 0.5) * spread;
+      this.velocities[i * 3 + 1] = direction.y * particleSpeed + (Math.random() - 0.5) * spread;
+      this.velocities[i * 3 + 2] = direction.z * particleSpeed + (Math.random() - 0.5) * spread;
+
+      this.colors[i * 3]     = color[0];
+      this.colors[i * 3 + 1] = color[1];
+      this.colors[i * 3 + 2] = color[2];
+
+      this.lifetimes[i] = 0.001;
+      this.maxLife[i]   = life * (0.65 + Math.random() * 0.9);
+      spawned++;
+    }
   }
 
   dispose() {
