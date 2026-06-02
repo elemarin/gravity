@@ -70,12 +70,12 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
         {/* Header row */}
         <button
           onClick={() => setOpen((o) => !o)}
-          className="flex items-center justify-between px-3 py-2.5 border-b border-white/5"
+          className="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-white/5"
         >
-          <span className="text-[7px] tracking-[0.2em] uppercase text-cyan" style={{ textShadow: '0 0 8px rgba(0,229,255,0.4)' }}>
+          <span className="shrink-0 text-[7px] tracking-[0.2em] uppercase text-cyan" style={{ textShadow: '0 0 8px rgba(0,229,255,0.4)' }}>
             ▸ FLIGHT PLAN
           </span>
-          <span className="flex items-center gap-2 text-[7px] text-dim tabular-nums">
+          <span className="min-w-0 flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-[7px] text-dim tabular-nums leading-tight">
             {preview && (
               <>
                 <span className="text-green">AP {fmtKm(preview.apoapsis)}</span>

@@ -66,7 +66,8 @@ export default function HUDOverlay({
       {/* Main HUD card — top right */}
       <div
         className="absolute top-[calc(0.6rem+env(safe-area-inset-top))]
-                   right-[calc(0.6rem+env(safe-area-inset-right))]"
+                   right-[calc(0.6rem+env(safe-area-inset-right))]
+                   max-w-[calc(100vw-1.2rem)] overflow-hidden"
         style={{
           background: 'rgba(4,6,14,0.85)',
           border: `1px solid ${meta.color}55`,
@@ -111,7 +112,7 @@ export default function HUDOverlay({
         {/* Orbit info */}
         {showOrbit && (
           <div
-            className="px-2.5 pb-2 flex gap-2 text-[6px]"
+            className="px-2.5 pb-2 flex flex-wrap gap-x-2 gap-y-1 text-[6px] leading-tight"
             style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
           >
             <span>

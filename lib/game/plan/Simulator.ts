@@ -9,6 +9,7 @@ export type SimPhase =
 const KARMAN_LINE  = 100.0;        // km above surface
 const DRAG_COEFF   = 0.04;
 const CHUTE_CROSS  = 320;          // cross-section for deployed chute (~10 m/s terminal)
+const CHUTE_STABILIZE_RATE = 2.5;  // how quickly an open chute pulls the craft upright
 const BASE_SAFE_MS = 10;
 const CHUTE_MS     = 45;
 const LEGS_MS      = 10;
@@ -153,6 +154,7 @@ export class Simulator {
 
     s.velocity.addScaledVector(total, dt);
     s.position.addScaledVector(s.velocity, dt);
+    if (s.deployedParachute) this.stabilizeParachute(s, dt);
 
     // --- Fuel burn ---
     this.burnFuel(dt);
@@ -253,6 +255,7 @@ export class Simulator {
   private doDeployParachute(): boolean {
     const s = this.state;
     if (!this.cfg.hasParachute || s.deployedParachute) return false;
+    s.throttle = 0;
     s.deployedParachute = true;
     s.justDeployedParachute = true;
     return true;
@@ -298,6 +301,11 @@ export class Simulator {
     return s.velocity.clone().normalize().multiplyScalar(-mag);
   }
 
+  private stabilizeParachute(s: SimState, dt: number) {
+    const settle = 1 - Math.exp(-dt * CHUTE_STABILIZE_RATE);
+    s.angle = THREE.MathUtils.lerp(s.angle, 0, settle);
+  }
+
   private mass(): number {
     const s = this.state;
     let m = this.cfg.payloadMass;
@@ -324,7 +332,7 @@ export class Simulator {
 
   private safeLandingMs(): number {
     let safe = BASE_SAFE_MS;
-    if (this.state.deployedParachute || this.cfg.hasParachute) safe += CHUTE_MS;
+    if (this.state.deployedParachute) safe += CHUTE_MS;
     if (this.cfg.hasLegs)        safe += LEGS_MS;
     if (this.state.deployedLander) safe += LANDER_MS;
     return safe;
