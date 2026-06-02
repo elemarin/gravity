@@ -182,6 +182,7 @@ export class Game {
     let apo = 0;
     let peri = Number.POSITIVE_INFINITY;
     let impact = false;
+    let touchdown = false;
     let passedApo = false;
     let prevAlt = 0;
 
@@ -197,6 +198,7 @@ export class Game {
         impact = preview.state.phase === 'destroyed' ||
                  (preview.state.landedBodyId !== null && alt < 0.2 && preview.state.maxAltitude > 0.2 &&
                   preview.state.lastImpactSpeedMs > 30);
+        touchdown = preview.state.landedBodyId !== null || preview.state.phase === 'destroyed';
         points.push(preview.state.position.clone());
         break;
       }
@@ -210,7 +212,7 @@ export class Game {
     else if (peri >= 80) color = 0x2ee59d;
 
     const body = this.launchBody();
-    this.trajectory.update(points, color, body.center, body.radius);
+    this.trajectory.update(points, color, body.center, body.radius, touchdown);
     this.trajectory.setVisible(true);
 
     this.flightState = { ...this.flightState, apoapsis: apo, periapsis: impact ? 0 : peri };
@@ -428,10 +430,15 @@ export class Game {
     s.reachedBodyIds = new Set(cur.reachedBodyIds);
 
     const points: THREE.Vector3[] = [cur.position.clone()];
+    let touchdown = false;
     for (let i = 0; i < PREVIEW_STEPS; i++) {
       preview.step(PREVIEW_DT);
       if (i % PREVIEW_SAMPLE === 0) points.push(preview.state.position.clone());
-      if (preview.finished) { points.push(preview.state.position.clone()); break; }
+      if (preview.finished) {
+        touchdown = preview.state.landedBodyId !== null || preview.state.phase === 'destroyed';
+        points.push(preview.state.position.clone());
+        break;
+      }
     }
 
     let color = 0x00e5ff;
@@ -440,7 +447,7 @@ export class Game {
     else if (preview.state.periapsis >= 80) color = 0x2ee59d;
 
     const body = this.dominant();
-    this.trajectory.update(points, color, body.center, body.radius);
+    this.trajectory.update(points, color, body.center, body.radius, touchdown);
   }
 
   getNextMilestone() { return this.milestones.getNextTarget(); }

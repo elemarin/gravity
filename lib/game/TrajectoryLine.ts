@@ -9,6 +9,7 @@ export class TrajectoryLine {
   private material: THREE.LineBasicMaterial;
   private apoMarker: THREE.Sprite;
   private periMarker: THREE.Sprite;
+  private landingMarker: THREE.Sprite;
   private apoCanvas: HTMLCanvasElement;
   private periCanvas: HTMLCanvasElement;
 
@@ -31,14 +32,16 @@ export class TrajectoryLine {
 
     const apo = this.makeMarker('AP', '#2ee59d');
     const peri = this.makeMarker('PE', '#00e5ff');
+    const landing = this.makeLandingMarker();
     this.apoMarker = apo.sprite;
     this.periMarker = peri.sprite;
+    this.landingMarker = landing.sprite;
     this.apoCanvas = apo.canvas;
     this.periCanvas = peri.canvas;
-    scene.add(this.apoMarker, this.periMarker);
+    scene.add(this.apoMarker, this.periMarker, this.landingMarker);
   }
 
-  update(points: THREE.Vector3[], color = 0x00e5ff, focus?: THREE.Vector3, radius = 0) {
+  update(points: THREE.Vector3[], color = 0x00e5ff, focus?: THREE.Vector3, radius = 0, showLandingSite = false) {
     const n = Math.min(points.length, MAX_POINTS);
     for (let i = 0; i < n; i++) {
       const p = points[i];
@@ -51,18 +54,19 @@ export class TrajectoryLine {
     this.geometry.computeBoundingSphere();
     this.material.color.setHex(color);
     this.line.visible = n > 1;
-    this.updateMarkers(points.slice(0, n), focus, radius);
+    this.updateMarkers(points.slice(0, n), focus, radius, showLandingSite);
   }
 
   setVisible(v: boolean) {
     this.line.visible = v;
     this.apoMarker.visible = v && this.apoMarker.visible;
     this.periMarker.visible = v && this.periMarker.visible;
+    this.landingMarker.visible = v && this.landingMarker.visible;
   }
 
   private makeMarker(label: string, color: string) {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
+    canvas.width = 96;
     canvas.height = 96;
     const tex = new THREE.CanvasTexture(canvas);
     const mat = new THREE.SpriteMaterial({
@@ -72,9 +76,27 @@ export class TrajectoryLine {
       depthWrite: false,
     });
     const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(9, 3.4, 1);
+    sprite.scale.set(1.7, 1.7, 1);
     sprite.visible = false;
     this.drawLabel(canvas, label, color);
+    return { sprite, canvas };
+  }
+
+  private makeLandingMarker() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({
+      map: tex,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(2.5, 2.5, 1);
+    sprite.visible = false;
+    this.drawLandingMarker(canvas);
     return { sprite, canvas };
   }
 
@@ -82,24 +104,59 @@ export class TrajectoryLine {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = 'rgba(10, 23, 38, 0.78)';
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.roundRect(10, 12, 236, 72, 18);
-    ctx.fill();
-    ctx.stroke();
+
     ctx.fillStyle = color;
-    ctx.font = '700 28px monospace';
+    ctx.strokeStyle = 'rgba(10, 23, 38, 0.9)';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(48, 50, 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fill();
+
+    ctx.fillStyle = color;
+    ctx.font = '700 24px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, 128, 48);
+    ctx.strokeText(label, 48, 25);
+    ctx.fillText(label, 48, 25);
   }
 
-  private updateMarkers(points: THREE.Vector3[], focus?: THREE.Vector3, radius = 0) {
+  private drawLandingMarker(canvas: HTMLCanvasElement) {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = 'rgba(10, 23, 38, 0.92)';
+    ctx.lineWidth = 8;
+    for (const r of [34, 21, 8]) {
+      ctx.beginPath();
+      ctx.arc(64, 64, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 4;
+    for (const r of [34, 21, 8]) {
+      ctx.beginPath();
+      ctx.arc(64, 64, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = '#ff5577';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(64, 22);
+    ctx.lineTo(64, 106);
+    ctx.moveTo(22, 64);
+    ctx.lineTo(106, 64);
+    ctx.stroke();
+  }
+
+  private updateMarkers(points: THREE.Vector3[], focus?: THREE.Vector3, radius = 0, showLandingSite = false) {
     if (!focus || points.length < 4) {
       this.apoMarker.visible = false;
       this.periMarker.visible = false;
+      this.landingMarker.visible = false;
       return;
     }
 
@@ -117,21 +174,29 @@ export class TrajectoryLine {
     this.periMarker.position.copy(peri);
     this.apoMarker.visible = Number.isFinite(apoAlt);
     this.periMarker.visible = Number.isFinite(periAlt) && peri.distanceTo(apo) > 0.5;
-    this.drawLabel(this.apoCanvas, `AP ${this.fmtAlt(apoAlt)}`, '#2ee59d');
-    this.drawLabel(this.periCanvas, `PE ${this.fmtAlt(Math.max(0, periAlt))}`, '#00e5ff');
+    this.drawLabel(this.apoCanvas, 'AP', '#2ee59d');
+    this.drawLabel(this.periCanvas, 'PE', '#00e5ff');
     (this.apoMarker.material as THREE.SpriteMaterial).map!.needsUpdate = true;
     (this.periMarker.material as THREE.SpriteMaterial).map!.needsUpdate = true;
-  }
 
-  private fmtAlt(km: number): string {
-    if (km >= 1000) return `${(km / 1000).toFixed(1)}Mm`;
-    return `${Math.round(km)}km`;
+    if (showLandingSite) {
+      const site = points[points.length - 1];
+      const radial = site.clone().sub(focus);
+      if (radial.lengthSq() > 1e-8) {
+        this.landingMarker.position.copy(focus).addScaledVector(radial.normalize(), radius + 0.04);
+        this.landingMarker.visible = true;
+      } else {
+        this.landingMarker.visible = false;
+      }
+    } else {
+      this.landingMarker.visible = false;
+    }
   }
 
   dispose() {
     this.geometry.dispose();
     this.material.dispose();
-    [this.apoMarker, this.periMarker].forEach((sprite) => {
+    [this.apoMarker, this.periMarker, this.landingMarker].forEach((sprite) => {
       const mat = sprite.material as THREE.SpriteMaterial;
       mat.map?.dispose();
       mat.dispose();
