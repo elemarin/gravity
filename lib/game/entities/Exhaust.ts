@@ -29,6 +29,7 @@ export class Exhaust {
       transparent: true,
       opacity: 1.0,
       depthWrite: false,
+      depthTest: false,
       blending: THREE.AdditiveBlending,
       vertexColors: true,
     });

@@ -10,12 +10,15 @@ type Props = {
   canStage: boolean;
   hasParachute: boolean;
   parachuteDeployed: boolean;
+  hasLander: boolean;
+  landerDeployed: boolean;
   onEdit: () => void;
   onReplay: () => void;
   onWarp: () => void;
   onSkip: () => void;
   onStage: () => void;
   onChute: () => void;
+  onLander: () => void;
 };
 
 function PixelBtn({
@@ -52,11 +55,13 @@ function hexToRgb(hex: string): string {
 export default function SimControls({
   finished, phase, timeScale, canSkip,
   canStage, hasParachute, parachuteDeployed,
-  onEdit, onReplay, onWarp, onSkip, onStage, onChute,
+  hasLander, landerDeployed,
+  onEdit, onReplay, onWarp, onSkip, onStage, onChute, onLander,
 }: Props) {
   const active = !finished && phase !== 'prelaunch';
-  const showChute = hasParachute && !parachuteDeployed &&
-    phase !== 'prelaunch' && phase !== 'landed' && phase !== 'destroyed';
+  const inFlight = phase !== 'prelaunch' && phase !== 'landed' && phase !== 'destroyed';
+  const showChute = hasParachute && !parachuteDeployed && inFlight;
+  const showLander = hasLander && !landerDeployed && inFlight;
 
   return (
     <div
@@ -72,6 +77,9 @@ export default function SimControls({
         )}
         {active && showChute && (
           <PixelBtn label="CHUTE" color="#2ee59d" onClick={onChute} glow />
+        )}
+        {active && showLander && (
+          <PixelBtn label="LANDER" color="#b070ff" onClick={onLander} glow />
         )}
         {finished && (
           <PixelBtn label="✎ EDIT" color="#8aa0b5" onClick={onEdit} />

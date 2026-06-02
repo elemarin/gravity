@@ -15,7 +15,7 @@ import { EARTH_BODY } from './bodies';
 import { KARMAN_LINE } from './constants';
 
 const FIXED_DT = 1 / 60;
-const SKIP_MAX_STEPS = 200_000;
+const SKIP_MAX_STEPS = 600_000;
 
 // Preview: forward-run the plan to draw the predicted arc.
 const PREVIEW_DT = 0.25;
@@ -57,6 +57,7 @@ export class Game {
   private running = false;
   private missionEnded = false;
   private fastForwarding = false;
+  private simTrajectoryTimer = 0;
 
   constructor(opts: GameOptions) {
     this.callbacks = opts.callbacks ?? {};
@@ -122,7 +123,7 @@ export class Game {
     this.timeScale = 1;
     this.sim.reset();
     this.rocket.reset(this.startPosition());
-    this.trajectory.setVisible(false);
+    this.simTrajectoryTimer = 0; // update trajectory immediately
     this.flightState = this.buildFlightState();
     this.callbacks.onModeChange?.('sim');
     this.callbacks.onState?.(this.flightState);
@@ -226,6 +227,13 @@ export class Game {
       if (this.sim.finished) break;
     }
     this.fastForwarding = false;
+
+    // If the rocket is in a stable orbit and never landed, end the mission now.
+    if (!this.missionEnded && this.sim.state.everOrbit) {
+      this.missionEnded = true;
+      this.callbacks.onMissionEnd?.(this.buildMissionResult('landed'));
+    }
+
     this.rocket.applyState(this.sim.state, this.dominant().center, FIXED_DT);
     this.flightState = this.buildFlightState();
     this.callbacks.onState?.(this.flightState);
@@ -238,7 +246,8 @@ export class Game {
     if (!this.running) return;
     this.rafHandle = requestAnimationFrame(this.loop);
 
-    let rawDt = Math.min((time - this.lastTime) / 1000, 0.1);
+    const realDt = Math.min((time - this.lastTime) / 1000, 0.1);
+    let rawDt = realDt;
     this.lastTime = time;
 
     if (this.mode === 'sim' && !this.sim.finished) {
@@ -256,6 +265,12 @@ export class Game {
       this.renderer.followTarget(this.rocket.position, FIXED_DT);
       this.flightState = this.buildFlightState();
       this.callbacks.onState?.(this.flightState);
+
+      this.simTrajectoryTimer -= realDt;
+      if (this.simTrajectoryTimer <= 0) {
+        this.simTrajectoryTimer = 2.0;
+        this.updateSimTrajectory();
+      }
     } else {
       const center = this.dominant().center;
       this.rocket.applyState(this.sim.state, center, FIXED_DT);
@@ -350,6 +365,7 @@ export class Game {
   }
 
   get hasParachute(): boolean { return this.cfg.hasParachute; }
+  get hasLander(): boolean { return this.cfg.landerIndex >= 0; }
 
   manualStage() {
     if (this.mode !== 'sim' || this.sim.finished) return;
@@ -360,6 +376,55 @@ export class Game {
   manualParachute() {
     if (this.mode !== 'sim' || this.sim.finished) return;
     this.sim.manualParachute();
+  }
+
+  manualLander() {
+    if (this.mode !== 'sim' || this.sim.finished) return;
+    const deployed = this.sim.manualDeployLander();
+    if (deployed) this.callbacks.onLanderDeploy?.();
+  }
+
+  /** Forward-predict trajectory from current sim state and refresh the line. */
+  private updateSimTrajectory() {
+    const cur = this.sim.state;
+    const preview = new Simulator(this.cfg, this.plan);
+    preview.reset();
+    const s = preview.state;
+    s.position.copy(cur.position);
+    s.velocity.copy(cur.velocity);
+    s.angle          = cur.angle;
+    s.throttle       = cur.throttle;
+    s.activeStage    = cur.activeStage;
+    s.stageFuel      = [...cur.stageFuel];
+    s.deployedLander    = cur.deployedLander;
+    s.deployedParachute = cur.deployedParachute;
+    s.elapsed        = cur.elapsed;
+    s.phase          = cur.phase;
+    s.maxAltitude    = cur.maxAltitude;
+    s.maxSpeed       = cur.maxSpeed;
+    s.apoapsis       = cur.apoapsis;
+    s.periapsis      = cur.periapsis;
+    s.crashed        = cur.crashed;
+    s.everOrbit      = cur.everOrbit;
+    s.landedBodyId   = cur.landedBodyId;
+    s.lastImpactSpeedMs = cur.lastImpactSpeedMs;
+    s.prevRadialVel  = cur.prevRadialVel;
+    s.firedNodeIds   = new Set(cur.firedNodeIds);
+    s.reachedBodyIds = new Set(cur.reachedBodyIds);
+
+    const points: THREE.Vector3[] = [cur.position.clone()];
+    for (let i = 0; i < PREVIEW_STEPS; i++) {
+      preview.step(PREVIEW_DT);
+      if (i % PREVIEW_SAMPLE === 0) points.push(preview.state.position.clone());
+      if (preview.finished) { points.push(preview.state.position.clone()); break; }
+    }
+
+    let color = 0x00e5ff;
+    if (preview.state.crashed) color = 0xff5577;
+    else if (preview.state.periapsis > 0 && preview.state.periapsis < 80) color = 0xffd54a;
+    else if (preview.state.periapsis >= 80) color = 0x2ee59d;
+
+    this.trajectory.update(points, color);
   }
 
   getNextMilestone() { return this.milestones.getNextTarget(); }

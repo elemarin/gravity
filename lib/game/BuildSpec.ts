@@ -1,7 +1,7 @@
 import { RocketBuild, RocketStats, StageSpec } from './types';
 import { PARTS_CATALOG, RocketPart } from './career/Parts';
 
-const FUEL_MASS_PER_L = 0.002; // tonnes per liter
+const FUEL_MASS_PER_L = 0.008; // tonnes per liter
 
 const partById = (id: string): RocketPart | undefined =>
   PARTS_CATALOG.find((p) => p.id === id);
