@@ -2,10 +2,13 @@ import * as THREE from 'three';
 
 const MAX_POINTS = 500;
 const APSIS_MARKER_SIZE = 96;
+const APSIS_MARKER_SCALE = 1.7;
 const APSIS_DOT_X = APSIS_MARKER_SIZE / 2;
 const APSIS_DOT_Y = 50;
 const APSIS_LABEL_Y = 25;
 const LANDING_MARKER_DIMENSION = 128;
+const LANDING_MARKER_SCALE = 2.5;
+const LANDING_MARKER_SURFACE_OFFSET = 0.04;
 const LANDING_CENTER = LANDING_MARKER_DIMENSION / 2;
 // Ring sizes are proportional to the 128px canvas so the bullseye stays readable when scaled down.
 const BULLSEYE_RADII = [34, 21, 8] as const;
@@ -88,7 +91,7 @@ export class TrajectoryLine {
       depthWrite: false,
     });
     const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(1.7, 1.7, 1);
+    sprite.scale.set(APSIS_MARKER_SCALE, APSIS_MARKER_SCALE, 1);
     sprite.visible = false;
     this.drawLabel(canvas, label, color);
     return { sprite, canvas };
@@ -106,7 +109,7 @@ export class TrajectoryLine {
       depthWrite: false,
     });
     const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(2.5, 2.5, 1);
+    sprite.scale.set(LANDING_MARKER_SCALE, LANDING_MARKER_SCALE, 1);
     sprite.visible = false;
     this.drawLandingMarker(canvas);
     return { sprite, canvas };
@@ -195,7 +198,10 @@ export class TrajectoryLine {
       const radial = site.clone().sub(focus);
       const radialLengthSq = radial.lengthSq();
       if (radialLengthSq > MIN_RADIAL_LENGTH_SQ) {
-        this.landingMarker.position.copy(focus).addScaledVector(radial.normalize(), radius + 0.04);
+        this.landingMarker.position.copy(focus).addScaledVector(
+          radial.normalize(),
+          radius + LANDING_MARKER_SURFACE_OFFSET,
+        );
         this.landingMarker.visible = true;
       } else {
         this.landingMarker.visible = false;
