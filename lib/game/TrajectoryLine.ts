@@ -4,8 +4,8 @@ const MAX_POINTS = 500;
 const APSIS_MARKER_SIZE = 96;
 const APSIS_MARKER_SCALE = 1.7;
 const APSIS_DOT_X = APSIS_MARKER_SIZE / 2;
-const APSIS_DOT_Y = 50;
-const APSIS_LABEL_Y = 25;
+const APSIS_DOT_Y = APSIS_MARKER_SIZE / 2;
+const APSIS_LABEL_Y = APSIS_MARKER_SIZE / 4;
 const LANDING_MARKER_DIMENSION = 128;
 const LANDING_MARKER_SCALE = 2.5;
 const LANDING_MARKER_SURFACE_OFFSET = 0.04;
@@ -14,7 +14,7 @@ const LANDING_CENTER = LANDING_MARKER_DIMENSION / 2;
 const BULLSEYE_RADII = [34, 21, 8] as const;
 const BULLSEYE_CROSSHAIR_INSET = 22;
 const BULLSEYE_CROSSHAIR_END = LANDING_MARKER_DIMENSION - BULLSEYE_CROSSHAIR_INSET;
-// Avoid normalizing a nearly zero radial vector when the predicted site is invalid.
+// Squared distance threshold to avoid normalizing a nearly zero radial vector when the predicted site is invalid.
 const MIN_RADIAL_LENGTH_SQ = 1e-8;
 
 export class TrajectoryLine {
