@@ -5,8 +5,11 @@ const APSIS_MARKER_SIZE = 96;
 const APSIS_DOT_X = APSIS_MARKER_SIZE / 2;
 const APSIS_DOT_Y = 50;
 const APSIS_LABEL_Y = 25;
-const LANDING_MARKER_SIZE = 128;
-const LANDING_CENTER = LANDING_MARKER_SIZE / 2;
+const LANDING_MARKER_DIMENSION = 128;
+const LANDING_CENTER = LANDING_MARKER_DIMENSION / 2;
+const BULLSEYE_RADII = [34, 21, 8] as const;
+const BULLSEYE_CROSSHAIR_INSET = 22;
+const BULLSEYE_CROSSHAIR_END = LANDING_MARKER_DIMENSION - BULLSEYE_CROSSHAIR_INSET;
 const MIN_RADIAL_LENGTH_SQ = 1e-8;
 
 export class TrajectoryLine {
@@ -91,8 +94,8 @@ export class TrajectoryLine {
 
   private makeLandingMarker() {
     const canvas = document.createElement('canvas');
-    canvas.width = LANDING_MARKER_SIZE;
-    canvas.height = LANDING_MARKER_SIZE;
+    canvas.width = LANDING_MARKER_DIMENSION;
+    canvas.height = LANDING_MARKER_DIMENSION;
     const tex = new THREE.CanvasTexture(canvas);
     const mat = new THREE.SpriteMaterial({
       map: tex,
@@ -135,7 +138,7 @@ export class TrajectoryLine {
 
     ctx.strokeStyle = 'rgba(10, 23, 38, 0.92)';
     ctx.lineWidth = 8;
-    for (const r of [34, 21, 8]) {
+    for (const r of BULLSEYE_RADII) {
       ctx.beginPath();
       ctx.arc(LANDING_CENTER, LANDING_CENTER, r, 0, Math.PI * 2);
       ctx.stroke();
@@ -143,7 +146,7 @@ export class TrajectoryLine {
 
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 4;
-    for (const r of [34, 21, 8]) {
+    for (const r of BULLSEYE_RADII) {
       ctx.beginPath();
       ctx.arc(LANDING_CENTER, LANDING_CENTER, r, 0, Math.PI * 2);
       ctx.stroke();
@@ -152,10 +155,10 @@ export class TrajectoryLine {
     ctx.strokeStyle = '#ff5577';
     ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.moveTo(LANDING_CENTER, 22);
-    ctx.lineTo(LANDING_CENTER, 106);
-    ctx.moveTo(22, LANDING_CENTER);
-    ctx.lineTo(106, LANDING_CENTER);
+    ctx.moveTo(LANDING_CENTER, BULLSEYE_CROSSHAIR_INSET);
+    ctx.lineTo(LANDING_CENTER, BULLSEYE_CROSSHAIR_END);
+    ctx.moveTo(BULLSEYE_CROSSHAIR_INSET, LANDING_CENTER);
+    ctx.lineTo(BULLSEYE_CROSSHAIR_END, LANDING_CENTER);
     ctx.stroke();
   }
 
