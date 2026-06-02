@@ -9,6 +9,7 @@ export type SimPhase =
 const KARMAN_LINE  = 100.0;        // km above surface
 const DRAG_COEFF   = 0.04;
 const CHUTE_CROSS  = 320;          // cross-section for deployed chute (~10 m/s terminal)
+const CHUTE_STABILIZE_RATE = 2.5;  // how quickly an open chute pulls the craft upright
 const BASE_SAFE_MS = 10;
 const CHUTE_MS     = 45;
 const LEGS_MS      = 10;
@@ -153,7 +154,7 @@ export class Simulator {
 
     s.velocity.addScaledVector(total, dt);
     s.position.addScaledVector(s.velocity, dt);
-    this.stabilizeParachute(dt);
+    if (s.deployedParachute) this.stabilizeParachute(dt);
 
     // --- Fuel burn ---
     this.burnFuel(dt);
@@ -302,8 +303,7 @@ export class Simulator {
 
   private stabilizeParachute(dt: number) {
     const s = this.state;
-    if (!s.deployedParachute) return;
-    const settle = 1 - Math.exp(-dt * 2.5);
+    const settle = 1 - Math.exp(-dt * CHUTE_STABILIZE_RATE);
     s.angle = THREE.MathUtils.lerp(s.angle, 0, settle);
   }
 
