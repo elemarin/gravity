@@ -3,15 +3,18 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import type { Game } from '@/lib/game/Game';
-import type { FlightState, FlightPhase } from '@/lib/game/types';
-import { loadBuild, loadCompletedMilestones, loadUnlockedParts, addCompletedMilestone, addUnlockedParts } from '@/lib/storage';
+import type { FlightState, FlightPhase, MissionResult } from '@/lib/game/types';
+import { loadBuild, loadCompletedMilestones, addCompletedMilestone, addUnlockedParts } from '@/lib/storage';
 import { MILESTONES } from '@/lib/game/career/Milestones';
 import HUDOverlay from './HUDOverlay';
 import TouchControls from './TouchControls';
 import OutOfFuelModal from './OutOfFuelModal';
+import MissionSummary from './MissionSummary';
 import MilestoneToast from './MilestoneToast';
 
 type ToastInfo = { id: number; title: string; subtitle: string };
+
+const SKIPPABLE: FlightPhase[] = ['flight', 'orbit', 'reentry'];
 
 export default function GameScreen() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -20,6 +23,7 @@ export default function GameScreen() {
   const [flightState, setFlightState] = useState<FlightState | null>(null);
   const [nextTarget, setNextTarget] = useState<string>('Reach 500 m');
   const [outOfFuel, setOutOfFuel] = useState(false);
+  const [missionResult, setMissionResult] = useState<MissionResult | null>(null);
   const [timeScale, setTimeScale] = useState(1);
   const [toast, setToast] = useState<ToastInfo | null>(null);
   const toastId = useRef(0);
@@ -57,6 +61,10 @@ export default function GameScreen() {
           },
           onPhaseChange: (_p: FlightPhase) => {},
           onOutOfFuel: () => setOutOfFuel(true),
+          onMissionEnd: (r) => {
+            setOutOfFuel(false);
+            setMissionResult(r);
+          },
         },
       });
 
@@ -81,6 +89,7 @@ export default function GameScreen() {
   const handleRestart = useCallback(() => {
     gameRef.current?.reset();
     setOutOfFuel(false);
+    setMissionResult(null);
     setTimeScale(1);
   }, []);
 
@@ -88,10 +97,23 @@ export default function GameScreen() {
     setTimeScale((ts) => (ts >= 16 ? 1 : ts >= 8 ? 16 : ts >= 4 ? 8 : ts * 2));
   }, []);
 
+  const handleStage = useCallback(() => {
+    gameRef.current?.triggerStage();
+  }, []);
+
+  const handleSkip = useCallback(() => {
+    setOutOfFuel(false);
+    setTimeScale(1);
+    gameRef.current?.skipToCompletion();
+  }, []);
+
   const handleCloseFuelModal = useCallback(() => {
     setOutOfFuel(false);
     setTimeScale(8);
   }, []);
+
+  const phase = flightState?.phase ?? 'prelaunch';
+  const canSkip = SKIPPABLE.includes(phase);
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-bg">
@@ -133,16 +155,28 @@ export default function GameScreen() {
         onAction={(action, held) => gameRef.current?.input.setAction(action, held)}
         onReset={() => gameRef.current?.input.triggerReset()}
         onWarp={handleWarp}
+        onStage={handleStage}
+        onSkip={handleSkip}
         timeScale={timeScale}
+        canStage={flightState?.canStage ?? false}
+        stageCount={flightState?.stageCount ?? 1}
+        activeStage={flightState?.activeStage ?? 0}
+        canSkip={canSkip}
       />
 
-      {/* Modal */}
-      {outOfFuel && (
+      {/* Out-of-fuel modal */}
+      {outOfFuel && !missionResult && (
         <OutOfFuelModal
           state={flightState}
           onRestart={handleRestart}
           onWarp={handleCloseFuelModal}
+          onSkip={handleSkip}
         />
+      )}
+
+      {/* Mission summary (end of flight) */}
+      {missionResult && (
+        <MissionSummary result={missionResult} onRestart={handleRestart} />
       )}
 
       {/* Milestone toast */}

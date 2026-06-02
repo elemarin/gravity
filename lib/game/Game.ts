@@ -8,11 +8,19 @@ import { Atmosphere } from './physics/Atmosphere';
 import { MilestoneManager } from './career/Milestones';
 import { TrajectoryPredictor } from './TrajectoryPredictor';
 import { TrajectoryLine } from './TrajectoryLine';
-import { FlightState, FlightPhase, GameCallbacks, RocketBuild, DEFAULT_BUILD } from './types';
+import { FlightState, FlightPhase, GameCallbacks, MissionResult, RocketBuild, DEFAULT_BUILD } from './types';
 import { EARTH_CENTER, EARTH_RADIUS, KARMAN_LINE, GM } from './constants';
 
 const FIXED_DT = 1 / 60;
 const DRAG_COEFF = 0.008;
+
+// Crash model: impact speed (m/s) tolerated before the rocket is destroyed.
+const BASE_SAFE_LANDING_MS = 10;
+const PARACHUTE_BONUS_MS   = 45;
+const LEGS_BONUS_MS        = 10;
+
+// Fast-forward cap (~55 sim-minutes) so a skip never loops forever.
+const SKIP_MAX_STEPS = 200_000;
 
 export type GameOptions = {
   container: HTMLElement;
@@ -42,6 +50,12 @@ export class Game {
   timeScale = 1;
   private predictTimer = 0;
   private outOfFuelFired = false;
+  private maxSpeed = 0;
+  private everOrbit = false;
+  private crashed = false;
+  private missionEnded = false;
+  private lastImpactSpeedMs = 0;
+  private fastForwarding = false;
 
   constructor(opts: GameOptions) {
     this.callbacks  = opts.callbacks ?? {};
@@ -82,9 +96,39 @@ export class Game {
   reset() {
     this.rocket.reset();
     this.outOfFuelFired = false;
+    this.maxSpeed = 0;
+    this.everOrbit = false;
+    this.crashed = false;
+    this.missionEnded = false;
+    this.lastImpactSpeedMs = 0;
     this.flightState = this.buildFlightState('prelaunch');
+    this.trajectory.setVisible(false);
     this.callbacks.onPhaseChange?.('prelaunch');
     this.callbacks.onState?.(this.flightState);
+  }
+
+  /** Jettison the active stage (called from the UI or keyboard). */
+  triggerStage() { this.input.triggerStage(); }
+
+  /**
+   * Fast-forward the simulation to the next end-of-flight event (touchdown or
+   * crash) so the player never has to wait out a long ballistic coast.
+   */
+  skipToCompletion() {
+    const phase = this.flightState.phase;
+    if (phase === 'prelaunch' || phase === 'landed' || phase === 'destroyed') return;
+
+    this.fastForwarding = true;
+    for (let i = 0; i < SKIP_MAX_STEPS; i++) {
+      this.update(FIXED_DT);
+      const p = this.flightState.phase;
+      if (p === 'landed' || p === 'destroyed') break;
+    }
+    this.fastForwarding = false;
+
+    this.updateTrajectory(this.flightState.altitude, this.flightState.phase);
+    this.callbacks.onState?.(this.flightState);
+    this.renderer.render();
   }
 
   private loop = (time: number) => {
@@ -104,9 +148,12 @@ export class Game {
   };
 
   private update(dt: number) {
-    if (this.input.consumeReset()) {
+    if (!this.fastForwarding && this.input.consumeReset()) {
       this.reset();
       return;
+    }
+    if (!this.fastForwarding && this.input.consumeStage()) {
+      this.rocket.stage();
     }
 
     const throttleDelta = this.input.getThrottleDelta();
@@ -134,14 +181,17 @@ export class Game {
     this.rocket.update(dt);
     this.earth.update(dt);
 
+    this.maxSpeed = Math.max(this.maxSpeed, this.rocket.velocity.length());
+
     const newPhase = this.determinePhase(altitude);
+    if (newPhase === 'orbit') this.everOrbit = true;
     const phaseChanged = newPhase !== this.flightState.phase;
     this.flightState = this.buildFlightState(newPhase);
 
-    // Detect out-of-fuel
+    // Detect a truly spent rocket (no fuel and no stage left to fire).
     if (
       !this.outOfFuelFired &&
-      this.rocket.fuel <= 0.01 &&
+      this.rocket.isSpent &&
       (newPhase === 'flight' || newPhase === 'reentry') &&
       this.flightState.maxAltitude * 1000 > 100 // launched past 100 m
     ) {
@@ -149,33 +199,79 @@ export class Game {
       this.callbacks.onOutOfFuel?.();
     }
 
-    // Trajectory prediction (throttled)
-    this.predictTimer -= dt;
-    if (this.predictTimer <= 0) {
-      this.predictTimer = 0.2;
-      this.updateTrajectory(altitude, newPhase);
+    // Trajectory prediction (throttled, skipped while fast-forwarding).
+    if (!this.fastForwarding) {
+      this.predictTimer -= dt;
+      if (this.predictTimer <= 0) {
+        this.predictTimer = 0.2;
+        this.updateTrajectory(altitude, newPhase);
+      }
     }
 
     this.milestones.check(this.flightState);
 
     if (phaseChanged) {
       this.callbacks.onPhaseChange?.(newPhase);
-      if (newPhase === 'landed') {
-        const vSpeed = Math.abs(this.rocket.velocity.dot(
-          new THREE.Vector3().subVectors(this.rocket.position, EARTH_CENTER).normalize()
-        )) * 1000;
-        this.callbacks.onLanded?.(vSpeed);
-      }
+      if (newPhase === 'landed')    this.endMission('landed');
+      if (newPhase === 'destroyed') this.endMission('crashed');
     }
 
-    this.renderer.updateCameraOffset(altitude);
-    this.renderer.followTarget(this.rocket.position, dt);
+    if (!this.fastForwarding) {
+      this.renderer.updateCameraOffset(altitude);
+      this.renderer.followTarget(this.rocket.position, dt);
+      this.callbacks.onState?.(this.flightState);
+    }
+  }
 
-    this.callbacks.onState?.(this.flightState);
+  private endMission(outcome: 'landed' | 'crashed') {
+    if (this.missionEnded) return;
+    this.missionEnded = true;
+
+    const landingSpeed = this.lastImpactSpeedMs;
+    if (outcome === 'landed') this.callbacks.onLanded?.(landingSpeed);
+    else                      this.callbacks.onCrashed?.();
+
+    this.callbacks.onMissionEnd?.(this.buildMissionResult(outcome, landingSpeed));
+  }
+
+  private buildMissionResult(outcome: 'landed' | 'crashed', landingSpeed: number): MissionResult {
+    const maxAltitude = this.flightState.maxAltitude;
+    const reachedSpace = maxAltitude >= KARMAN_LINE;
+    const reachedOrbit = this.everOrbit;
+
+    let score = Math.round(maxAltitude * 10);
+    if (reachedSpace)        score += 500;
+    if (reachedOrbit)        score += 1500;
+    if (outcome === 'landed') score += 1000;
+
+    let rating = 'D';
+    if (score >= 3000)      rating = 'S';
+    else if (score >= 2000) rating = 'A';
+    else if (score >= 1000) rating = 'B';
+    else if (score >= 300)  rating = 'C';
+
+    return {
+      outcome,
+      maxAltitude,
+      maxSpeed: this.maxSpeed,
+      landingSpeed,
+      reachedSpace,
+      reachedOrbit,
+      rating,
+      score,
+    };
+  }
+
+  private safeLandingSpeedMs(): number {
+    const utils = this.rocket.build.utilityIds;
+    let safe = BASE_SAFE_LANDING_MS;
+    if (utils.includes('parachute'))     safe += PARACHUTE_BONUS_MS;
+    if (utils.includes('landing-legs'))  safe += LEGS_BONUS_MS;
+    return safe;
   }
 
   private updateTrajectory(altitude: number, phase: FlightPhase) {
-    if (phase === 'prelaunch' || altitude < 0.2) {
+    if (phase === 'prelaunch' || phase === 'landed' || phase === 'destroyed' || altitude < 0.2) {
       this.trajectory.setVisible(false);
       return;
     }
@@ -188,7 +284,6 @@ export class Game {
       dt,
       steps,
     );
-    // Color: green if stable orbit, yellow if reentering, red if crashing
     let color = 0x00e5ff;
     if (pred.impact) color = 0xff5577;
     else if (pred.periapsis < KARMAN_LINE * 0.5) color = 0xffd54a;
@@ -196,22 +291,33 @@ export class Game {
 
     this.trajectory.update(pred.points, color);
 
-    // Stash apoapsis/periapsis on flight state
     this.flightState.apoapsis = pred.apoapsis;
     this.flightState.periapsis = pred.impact ? 0 : pred.periapsis;
   }
 
   private clampToSurface() {
-    const toSurface = new THREE.Vector3()
-      .subVectors(this.rocket.position, EARTH_CENTER)
-      .normalize()
-      .multiplyScalar(EARTH_RADIUS + 0.001);
-    this.rocket.position.copy(EARTH_CENTER).add(toSurface);
-
     const radial = new THREE.Vector3()
       .subVectors(this.rocket.position, EARTH_CENTER)
       .normalize();
     const vRadial = radial.dot(this.rocket.velocity);
+    const impactMs = Math.max(0, -vRadial) * 1000;
+    this.lastImpactSpeedMs = impactMs;
+
+    const toSurface = radial.clone().multiplyScalar(EARTH_RADIUS + 0.001);
+    this.rocket.position.copy(EARTH_CENTER).add(toSurface);
+
+    // Hard impact after a real flight destroys the rocket.
+    if (
+      !this.missionEnded &&
+      !this.crashed &&
+      this.flightState.maxAltitude >= 0.2 &&
+      impactMs > this.safeLandingSpeedMs()
+    ) {
+      this.crashed = true;
+      this.rocket.velocity.set(0, 0, 0);
+      return;
+    }
+
     if (vRadial < 0) {
       this.rocket.velocity.addScaledVector(radial, -vRadial);
       this.rocket.velocity.multiplyScalar(0.5);
@@ -222,6 +328,8 @@ export class Game {
   }
 
   private determinePhase(altitude: number): FlightPhase {
+    if (this.crashed) return 'destroyed';
+
     const onGround = altitude < 0.01;
     const inSpace  = altitude >= KARMAN_LINE;
     const speedKm  = this.rocket.velocity.length();
@@ -262,8 +370,12 @@ export class Game {
       angle:       this.rocket.angle,
       phase,
       maxAltitude,
+      maxSpeed:    Math.max(this.maxSpeed, speed),
       apoapsis:    this.flightState?.apoapsis,
       periapsis:   this.flightState?.periapsis,
+      activeStage: this.rocket.activeStage,
+      stageCount:  this.rocket.stageCount,
+      canStage:    this.rocket.canStage,
     };
   }
 

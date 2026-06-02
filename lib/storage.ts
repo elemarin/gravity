@@ -13,7 +13,12 @@ export function loadBuild(): RocketBuild {
     if (!raw) return DEFAULT_BUILD;
     const parsed = JSON.parse(raw) as RocketBuild;
     if (!parsed?.engineId || !Array.isArray(parsed.tankIds) || !parsed.noseId) return DEFAULT_BUILD;
-    return { ...DEFAULT_BUILD, ...parsed, utilityIds: parsed.utilityIds ?? [] };
+    const merged = { ...DEFAULT_BUILD, ...parsed, utilityIds: parsed.utilityIds ?? [] };
+    // Migrate older single-stage saves to the explicit stages model.
+    if (!Array.isArray(merged.stages) || merged.stages.length === 0) {
+      merged.stages = [{ engineId: merged.engineId, tankIds: merged.tankIds }];
+    }
+    return merged;
   } catch {
     return DEFAULT_BUILD;
   }

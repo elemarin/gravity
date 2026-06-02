@@ -1,4 +1,5 @@
 import { FlightState } from '../types';
+import { EARTH_CENTER, GM } from '../constants';
 
 export type Milestone = {
   id: string;
@@ -12,16 +13,23 @@ export const MILESTONES: Milestone[] = [
   {
     id: 'first-flight',
     name: 'First Flight',
-    description: 'Reach 500 m altitude',
-    check: (s) => s.altitude * 1000 >= 500,
+    description: 'Reach 1 km altitude',
+    check: (s) => s.altitude >= 1,
     unlocks: ['tank-medium'],
   },
   {
     id: 'high-altitude',
     name: 'High Altitude',
-    description: 'Reach 10 km altitude',
-    check: (s) => s.altitude >= 10,
-    unlocks: ['tank-large', 'parachute'],
+    description: 'Reach 25 km altitude',
+    check: (s) => s.altitude >= 25,
+    unlocks: ['tank-large'],
+  },
+  {
+    id: 'staging',
+    name: 'Stage Separation',
+    description: 'Separate a spent stage in flight',
+    check: (s) => s.activeStage >= 1 && s.altitude >= 1,
+    unlocks: ['parachute'],
   },
   {
     id: 'karman',
@@ -45,7 +53,14 @@ export const MILESTONES: Milestone[] = [
       s.phase === 'orbit' &&
       s.altitude >= 100 &&
       (s.periapsis ?? 0) >= 80,
-    unlocks: ['tank-xl', 'engine-nuclear'],
+    unlocks: ['tank-xl'],
+  },
+  {
+    id: 'high-orbit',
+    name: 'High Orbit',
+    description: 'Raise your orbit above 400 km',
+    check: (s) => s.phase === 'orbit' && (s.periapsis ?? 0) >= 400,
+    unlocks: ['engine-nuclear'],
   },
   {
     id: 'satellite-deploy',
@@ -64,8 +79,13 @@ export const MILESTONES: Milestone[] = [
   {
     id: 'deep-space',
     name: 'Deep Space',
-    description: 'Escape Earth gravity',
-    check: () => false,
+    description: 'Exceed escape velocity and leave Earth',
+    check: (s) => {
+      if (s.altitude < 500) return false;
+      const r = s.position.distanceTo(EARTH_CENTER);
+      const vEsc = Math.sqrt((2 * GM) / r); // km/s
+      return s.speed >= vEsc;
+    },
     unlocks: ['engine-ion'],
   },
 ];

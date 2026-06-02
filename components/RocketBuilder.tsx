@@ -4,8 +4,8 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PARTS_CATALOG, RocketPart, PartType } from '@/lib/game/career/Parts';
-import { RocketBuild, DEFAULT_BUILD } from '@/lib/game/types';
-import { computeStats, estimateDeltaV } from '@/lib/game/BuildSpec';
+import { RocketBuild, StageSpec, DEFAULT_BUILD } from '@/lib/game/types';
+import { computeStats, estimateBuildDeltaV, getStages } from '@/lib/game/BuildSpec';
 import { loadBuild, saveBuild, loadUnlockedParts } from '@/lib/storage';
 
 const CATEGORY_ORDER: { type: PartType; label: string }[] = [
@@ -16,10 +16,22 @@ const CATEGORY_ORDER: { type: PartType; label: string }[] = [
   { type: 'utility', label: 'Utility' },
 ];
 
+/** Keep the legacy engineId/tankIds mirrored to stage 0 for save compatibility. */
+function withStages(build: RocketBuild, stages: StageSpec[]): RocketBuild {
+  const safe = stages.length > 0 ? stages : [{ engineId: 'engine-basic', tankIds: ['tank-basic'] }];
+  return {
+    ...build,
+    stages: safe,
+    engineId: safe[0].engineId,
+    tankIds:  safe[0].tankIds,
+  };
+}
+
 export default function RocketBuilder() {
   const router = useRouter();
   const [build, setBuild] = useState<RocketBuild>(DEFAULT_BUILD);
   const [unlocked, setUnlocked] = useState<Set<string>>(new Set());
+  const [selectedStage, setSelectedStage] = useState(0);
 
   useEffect(() => {
     setBuild(loadBuild());
@@ -28,8 +40,9 @@ export default function RocketBuilder() {
     setUnlocked(unlockedIds);
   }, []);
 
-  const stats = useMemo(() => computeStats(build), [build]);
-  const deltaV = useMemo(() => estimateDeltaV(stats), [stats]);
+  const stages = useMemo(() => getStages(build), [build]);
+  const stats  = useMemo(() => computeStats(build), [build]);
+  const deltaV = useMemo(() => estimateBuildDeltaV(build), [build]);
 
   const partsByCategory = useMemo(() => {
     const map = new Map<PartType, RocketPart[]>();
@@ -41,11 +54,45 @@ export default function RocketBuilder() {
     return map;
   }, []);
 
-  const setEngine = (id: string) => setBuild((b) => ({ ...b, engineId: id }));
-  const setNose   = (id: string) => setBuild((b) => ({ ...b, noseId: id }));
-  const addTank   = (id: string) => setBuild((b) => ({ ...b, tankIds: [...b.tankIds, id] }));
-  const removeTank = (index: number) =>
-    setBuild((b) => ({ ...b, tankIds: b.tankIds.filter((_, i) => i !== index) }));
+  const activeStage = Math.min(selectedStage, stages.length - 1);
+
+  const setStageEngine = (id: string) =>
+    setBuild((b) => {
+      const s = getStages(b).map((st, i) => (i === activeStage ? { ...st, engineId: id } : st));
+      return withStages(b, s);
+    });
+
+  const addTankToStage = (id: string) =>
+    setBuild((b) => {
+      const s = getStages(b).map((st, i) =>
+        i === activeStage ? { ...st, tankIds: [...st.tankIds, id] } : st);
+      return withStages(b, s);
+    });
+
+  const removeTankFromStage = (si: number, index: number) =>
+    setBuild((b) => {
+      const s = getStages(b).map((st, i) =>
+        i === si ? { ...st, tankIds: st.tankIds.filter((_, k) => k !== index) } : st);
+      return withStages(b, s);
+    });
+
+  const addStage = () =>
+    setBuild((b) => {
+      const s = [...getStages(b), { engineId: 'engine-basic', tankIds: ['tank-basic'] }];
+      setSelectedStage(s.length - 1);
+      return withStages(b, s);
+    });
+
+  const removeStage = (si: number) =>
+    setBuild((b) => {
+      const cur = getStages(b);
+      if (cur.length <= 1) return b;
+      const s = cur.filter((_, i) => i !== si);
+      setSelectedStage((sel) => Math.max(0, Math.min(sel, s.length - 1)));
+      return withStages(b, s);
+    });
+
+  const setNose = (id: string) => setBuild((b) => ({ ...b, noseId: id }));
   const toggleUtility = (id: string) =>
     setBuild((b) => ({
       ...b,
@@ -59,7 +106,7 @@ export default function RocketBuilder() {
     router.push('/play');
   };
 
-  const reset = () => setBuild(DEFAULT_BUILD);
+  const reset = () => { setBuild(DEFAULT_BUILD); setSelectedStage(0); };
 
   return (
     <main className="fixed inset-0 overflow-hidden flex flex-col bg-bg">
@@ -78,11 +125,24 @@ export default function RocketBuilder() {
       <div className="flex-1 overflow-hidden grid grid-cols-1 sm:grid-cols-[260px_1fr] gap-3 p-3">
         {/* Visual stack */}
         <aside className="panel p-4 overflow-y-auto flex flex-col">
-          <h2 className="stat-label mb-3">Your Rocket</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="stat-label">Your Rocket</h2>
+            <span className="text-[10px] text-dim tabular-nums">{stages.length} stage{stages.length > 1 ? 's' : ''}</span>
+          </div>
           <RocketStack
-            build={build}
-            onRemoveTank={removeTank}
+            stages={stages}
+            noseId={build.noseId}
+            utilityIds={build.utilityIds}
+            selectedStage={activeStage}
+            onSelectStage={setSelectedStage}
+            onRemoveTank={removeTankFromStage}
+            onRemoveStage={removeStage}
           />
+          <button onClick={addStage}
+                  className="mt-3 w-full rounded-lg border border-dashed border-cyan/40 bg-cyan/[0.06]
+                             text-cyan text-xs font-bold py-2 hover:bg-cyan/15 active:scale-[0.98]">
+            ＋ Add Stage
+          </button>
           <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
             <Stat label="Dry mass" value={`${stats.dryMass.toFixed(2)} t`} />
             <Stat label="Wet mass" value={`${stats.wetMass.toFixed(2)} t`} />
@@ -102,6 +162,10 @@ export default function RocketBuilder() {
 
         {/* Palette */}
         <section className="panel p-4 overflow-y-auto">
+          <div className="mb-4 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] text-dim">
+            Editing <span className="text-cyan font-bold">Stage {activeStage + 1}</span>
+            {' '}· engines &amp; tanks apply to this stage. Lower stages fire and drop first.
+          </div>
           {CATEGORY_ORDER.map(({ type, label }) => {
             const items = partsByCategory.get(type) ?? [];
             if (items.length === 0) return null;
@@ -111,15 +175,15 @@ export default function RocketBuilder() {
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                   {items.map((p) => {
                     const isUnlocked = unlocked.has(p.id);
-                    const selected = isSelected(build, p);
+                    const selected = isSelected(build, stages[activeStage], p);
                     return (
                       <button
                         key={p.id}
                         disabled={!isUnlocked}
                         onClick={() => {
                           if (!isUnlocked) return;
-                          if (p.type === 'engine')  setEngine(p.id);
-                          else if (p.type === 'tank') addTank(p.id);
+                          if (p.type === 'engine')  setStageEngine(p.id);
+                          else if (p.type === 'tank') addTankToStage(p.id);
                           else if (p.type === 'nose' || p.type === 'capsule') setNose(p.id);
                           else if (p.type === 'utility') toggleUtility(p.id);
                         }}
@@ -150,10 +214,10 @@ export default function RocketBuilder() {
   );
 }
 
-function isSelected(build: RocketBuild, p: RocketPart): boolean {
-  if (p.type === 'engine')  return build.engineId === p.id;
+function isSelected(build: RocketBuild, stage: StageSpec | undefined, p: RocketPart): boolean {
+  if (p.type === 'engine')  return stage?.engineId === p.id;
+  if (p.type === 'tank')    return !!stage?.tankIds.includes(p.id);
   if (p.type === 'nose' || p.type === 'capsule') return build.noseId === p.id;
-  if (p.type === 'tank')    return build.tankIds.includes(p.id);
   if (p.type === 'utility') return build.utilityIds.includes(p.id);
   return false;
 }
@@ -182,14 +246,22 @@ function Stat({ label, value, highlight }: { label: string; value: string; highl
   );
 }
 
-function RocketStack({ build, onRemoveTank }: { build: RocketBuild; onRemoveTank: (i: number) => void }) {
-  const noseColor   = colorFor(build.noseId);
-  const tankColors  = build.tankIds.map((id) => colorFor(id));
-  const engineColor = colorFor(build.engineId);
+function RocketStack({
+  stages, noseId, utilityIds, selectedStage,
+  onSelectStage, onRemoveTank, onRemoveStage,
+}: {
+  stages: StageSpec[];
+  noseId: string;
+  utilityIds: string[];
+  selectedStage: number;
+  onSelectStage: (i: number) => void;
+  onRemoveTank: (stageIndex: number, tankIndex: number) => void;
+  onRemoveStage: (stageIndex: number) => void;
+}) {
+  const noseColor = colorFor(noseId);
 
   return (
-    <div className="relative flex flex-col items-center mx-auto"
-         style={{ width: 100 }}>
+    <div className="relative flex flex-col items-center mx-auto" style={{ width: 132 }}>
       {/* Nose */}
       <div className="w-0 h-0"
            style={{
@@ -198,33 +270,59 @@ function RocketStack({ build, onRemoveTank }: { build: RocketBuild; onRemoveTank
              borderBottom: `48px solid ${noseColor}`,
            }} />
 
-      {/* Tanks */}
-      {build.tankIds.map((id, i) => (
-        <div key={i} className="relative w-12 h-14 border-x-2 border-black/30" style={{ background: tankColors[i] }}>
-          {build.tankIds.length > 1 && (
-            <button onClick={() => onRemoveTank(i)}
-                    className="absolute -right-7 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full
-                               bg-red/20 text-red text-[10px] border border-red/40 hover:bg-red/40 active:scale-90"
-                    aria-label="Remove tank">✕</button>
-          )}
-        </div>
-      ))}
+      {/* Stages, top-most stage first in DOM */}
+      {stages.map((_, idx) => stages.length - 1 - idx).map((si) => {
+        const stage = stages[si];
+        const selected = si === selectedStage;
+        return (
+          <button
+            key={si}
+            type="button"
+            onClick={() => onSelectStage(si)}
+            className={`relative w-full flex flex-col items-center rounded-md py-1.5 my-0.5 transition
+                        border ${selected ? 'border-cyan/70 bg-cyan/[0.08]' : 'border-transparent hover:border-white/15'}`}
+          >
+            <span className={`absolute -left-0.5 top-1 text-[8px] font-black tracking-wider
+                              ${selected ? 'text-cyan' : 'text-dim'}`}>S{si + 1}</span>
 
-      {/* Engine */}
-      <div className="w-14 h-6"
-           style={{
-             background: engineColor,
-             clipPath: 'polygon(8% 0, 92% 0, 100% 100%, 0 100%)',
-           }} />
+            {/* Tanks (top to bottom) */}
+            {stage.tankIds.map((id, ti) => (
+              <div key={ti} className="relative w-12 h-12 border-x-2 border-black/30"
+                   style={{ background: colorFor(id) }}>
+                <span
+                  onClick={(e) => { e.stopPropagation(); onRemoveTank(si, ti); }}
+                  className="absolute -right-6 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full
+                             bg-red/20 text-red text-[10px] leading-5 text-center border border-red/40
+                             hover:bg-red/40 active:scale-90 cursor-pointer"
+                  aria-label="Remove tank">✕</span>
+              </div>
+            ))}
 
-      {build.utilityIds.length > 0 && (
-        <div className="mt-2 flex gap-1 text-[10px]">
-          {build.utilityIds.map((id) => {
+            {/* Engine */}
+            <div className="w-14 h-5"
+                 style={{
+                   background: colorFor(stage.engineId),
+                   clipPath: 'polygon(8% 0, 92% 0, 100% 100%, 0 100%)',
+                 }} />
+
+            {stages.length > 1 && (
+              <span
+                onClick={(e) => { e.stopPropagation(); onRemoveStage(si); }}
+                className="absolute -right-6 top-1 w-5 h-5 rounded-full bg-white/10 text-dim text-[9px]
+                           leading-5 text-center border border-white/20 hover:text-red hover:border-red/40
+                           active:scale-90 cursor-pointer"
+                aria-label="Remove stage">🗑</span>
+            )}
+          </button>
+        );
+      })}
+
+      {utilityIds.length > 0 && (
+        <div className="mt-2 flex flex-wrap justify-center gap-1 text-[10px]">
+          {utilityIds.map((id) => {
             const p = PARTS_CATALOG.find((x) => x.id === id);
             if (!p) return null;
-            return (
-              <span key={id} className="pill px-2 py-0.5 text-dim">{p.icon}</span>
-            );
+            return <span key={id} className="pill px-2 py-0.5 text-dim">{p.icon}</span>;
           })}
         </div>
       )}

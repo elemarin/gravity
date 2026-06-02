@@ -44,6 +44,9 @@ export default function HUDOverlay({
   const peri = state?.periapsis;
   const showOrbitInfo = state && state.altitude > 1 && apo !== undefined && peri !== undefined;
 
+  const stageCount  = state?.stageCount ?? 1;
+  const activeStage = state?.activeStage ?? 0;
+
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
       {/* TOP STATS */}
@@ -84,6 +87,11 @@ export default function HUDOverlay({
                       left-[calc(1rem+env(safe-area-inset-left))]
                       right-[calc(1rem+env(safe-area-inset-right))]
                       flex items-center gap-3">
+        {stageCount > 1 && (
+          <span className="pill px-2 py-0.5 text-[9px] font-black tracking-wider text-cyan tabular-nums shrink-0">
+            STG {activeStage + 1}/{stageCount}
+          </span>
+        )}
         <span className="stat-label text-[9px] w-16 shrink-0 tabular-nums">FUEL {fuelPct}%</span>
         <div className="flex-1 h-1.5 rounded-full bg-white/5 border border-white/10 overflow-hidden">
           <div
@@ -102,7 +110,7 @@ export default function HUDOverlay({
 
       {/* APOAPSIS / PERIAPSIS (only when in flight/orbit) */}
       {showOrbitInfo && (
-        <div className="absolute top-[calc(6.5rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2
+        <div className="absolute top-[calc(6.75rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2
                         flex gap-2 text-[9px] tracking-[0.15em] uppercase">
           <span className="pill px-2.5 py-1">
             <span className="text-dim">Ap</span>{' '}
@@ -115,8 +123,8 @@ export default function HUDOverlay({
         </div>
       )}
 
-      {/* TARGET (bottom center, above controls) */}
-      <div className="absolute bottom-[calc(11rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2
+      {/* TARGET (top center, clear of the bottom thumb controls) */}
+      <div className="absolute top-[calc(8.75rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2
                       pill flex items-center gap-2 max-w-[calc(100vw-2rem)] px-4 py-2">
         <span className="text-yellow text-[10px] font-black tracking-[0.2em] shrink-0">★ TARGET</span>
         <span className="text-ink text-xs sm:text-sm font-semibold truncate">{nextTarget}</span>
