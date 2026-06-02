@@ -3,11 +3,12 @@
 import { FlightState } from '@/lib/game/types';
 
 export default function OutOfFuelModal({
-  state, onRestart, onWarp,
+  state, onRestart, onWarp, onSkip,
 }: {
   state: FlightState | null;
   onRestart: () => void;
   onWarp:    () => void;
+  onSkip:    () => void;
 }) {
   const altKm = state ? Math.round(state.altitude) : 0;
   const inSpace = altKm >= 100;
@@ -26,6 +27,9 @@ export default function OutOfFuelModal({
         </p>
 
         <div className="flex flex-col gap-3">
+          <button onClick={onSkip} className="btn btn-primary w-full text-base">
+            ⏭ Skip to Landing
+          </button>
           <button onClick={onWarp} className="btn btn-warn w-full text-base">
             ⏩ Fast Forward
           </button>
@@ -35,7 +39,7 @@ export default function OutOfFuelModal({
         </div>
 
         <p className="text-[10px] text-dim/70 mt-4 tracking-widest uppercase">
-          Tip: Build a bigger tank in the rocket builder
+          Tip: add another stage in the rocket builder
         </p>
       </div>
     </div>

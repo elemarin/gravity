@@ -9,11 +9,13 @@ export class InputManager {
     rotateRight:  false,
   };
   private resetEdge = false;
+  private stageEdge = false;
 
   private keydown = (e: KeyboardEvent) => {
     if (e.repeat) return;
     this.keys.add(e.code);
     if (e.code === 'KeyR') this.resetEdge = true;
+    if (e.code === 'KeyG' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.stageEdge = true;
   };
   private keyup = (e: KeyboardEvent) => this.keys.delete(e.code);
   private blur  = () => this.keys.clear();
@@ -30,6 +32,7 @@ export class InputManager {
   }
 
   triggerReset() { this.resetEdge = true; }
+  triggerStage() { this.stageEdge = true; }
 
   getThrottleDelta(): number {
     const up   = this.keys.has('KeyW') || this.keys.has('Space') || this.keys.has('ArrowUp')   || this.active.throttleUp;
@@ -50,6 +53,12 @@ export class InputManager {
   consumeReset(): boolean {
     const v = this.resetEdge;
     this.resetEdge = false;
+    return v;
+  }
+
+  consumeStage(): boolean {
+    const v = this.stageEdge;
+    this.stageEdge = false;
     return v;
   }
 
