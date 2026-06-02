@@ -35,6 +35,7 @@ export default function GameScreen() {
   const [plan, setPlanState] = useState<FlightPlan | null>(null);
   const [bodies, setBodies] = useState<Body[]>([]);
   const [hasLander, setHasLander] = useState(false);
+  const [hasParachute, setHasParachute] = useState(false);
   const [flightState, setFlightState] = useState<FlightState | null>(null);
   const [preview, setPreview] = useState<PreviewInfo | null>(null);
   const [missionResult, setMissionResult] = useState<MissionResult | null>(null);
@@ -95,6 +96,7 @@ export default function GameScreen() {
       });
 
       gameRef.current = game;
+      setHasParachute(game.hasParachute);
       const first = game.getNextMilestone();
       if (first) setNextTarget(first.description);
       game.start();
@@ -150,6 +152,18 @@ export default function GameScreen() {
     gameRef.current?.skipToCompletion();
   }, []);
 
+  const handleStage = useCallback(() => {
+    gameRef.current?.manualStage();
+  }, []);
+
+  const handleChute = useCallback(() => {
+    gameRef.current?.manualParachute();
+  }, []);
+
+  const handleLander = useCallback(() => {
+    gameRef.current?.manualLander();
+  }, []);
+
   const handleScenario = useCallback((id: string) => {
     const cur = planRef.current;
     if (!cur || cur.scenarioId === id) return;
@@ -163,8 +177,11 @@ export default function GameScreen() {
   }, [setPlan]);
 
   const phase = flightState?.phase ?? 'prelaunch';
-  const finished = phase === 'landed' || phase === 'destroyed';
+  const finished = phase === 'landed' || phase === 'destroyed' || !!missionResult;
   const canSkip = mode === 'sim' && !finished && phase !== 'prelaunch';
+  const canStage = flightState?.canStage ?? false;
+  const parachuteDeployed = flightState?.parachuteDeployed ?? false;
+  const landerDeployed = flightState?.landerDeployed ?? false;
   const scenario = plan ? getScenario(plan.scenarioId) : null;
 
   return (
@@ -235,12 +252,21 @@ export default function GameScreen() {
       {mode === 'sim' && (
         <SimControls
           finished={finished}
+          phase={phase}
           timeScale={timeScale}
           canSkip={canSkip}
+          canStage={canStage}
+          hasParachute={hasParachute}
+          parachuteDeployed={parachuteDeployed}
+          hasLander={hasLander}
+          landerDeployed={landerDeployed}
           onEdit={handleEdit}
           onReplay={handleReplay}
           onWarp={handleWarp}
           onSkip={handleSkip}
+          onStage={handleStage}
+          onChute={handleChute}
+          onLander={handleLander}
         />
       )}
 

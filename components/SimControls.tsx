@@ -1,41 +1,108 @@
 'use client';
 
+import { FlightPhase } from '@/lib/game/types';
+
 type Props = {
   finished: boolean;
+  phase: FlightPhase;
   timeScale: number;
   canSkip: boolean;
+  canStage: boolean;
+  hasParachute: boolean;
+  parachuteDeployed: boolean;
+  hasLander: boolean;
+  landerDeployed: boolean;
   onEdit: () => void;
   onReplay: () => void;
   onWarp: () => void;
   onSkip: () => void;
+  onStage: () => void;
+  onChute: () => void;
+  onLander: () => void;
 };
 
-/** Bottom controls shown while watching the plan play out. */
-export default function SimControls({
-  finished, timeScale, canSkip, onEdit, onReplay, onWarp, onSkip,
-}: Props) {
+function PixelBtn({
+  label, color, onClick, glow = false, large = false,
+}: {
+  label: string; color: string; onClick: () => void; glow?: boolean; large?: boolean;
+}) {
   return (
-    <div className="absolute inset-x-0 bottom-0 z-30 flex items-center justify-center gap-2
-                    pb-[calc(1rem+env(safe-area-inset-bottom))]
-                    px-[calc(1rem+env(safe-area-inset-left))]
-                    pr-[calc(1rem+env(safe-area-inset-right))]">
-      <button onClick={onEdit} className="btn btn-secondary px-4 py-3 text-sm">✎ Edit plan</button>
+    <button
+      onClick={onClick}
+      className={`${large ? 'px-4 py-3' : 'px-3 py-2.5'} font-pixel uppercase tracking-wider
+                  border-2 active:scale-95 transition-transform`}
+      style={{
+        fontSize: large ? 10 : 8,
+        borderColor: color,
+        background: `rgba(${hexToRgb(color)},0.1)`,
+        color,
+        boxShadow: glow ? `0 0 12px ${color}66, inset 0 0 8px ${color}11` : undefined,
+        imageRendering: 'pixelated',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
 
-      {!finished && (
-        <>
-          <button onClick={onWarp}
-            className={`w-12 h-12 rounded-full border text-base font-bold backdrop-blur-md active:scale-90
-              ${timeScale > 1 ? 'border-yellow/60 bg-yellow/15 text-yellow' : 'border-white/15 bg-white/[0.05] text-dim'}`}
-            aria-label="Time warp">⏩</button>
-          {canSkip && (
-            <button onClick={onSkip}
-              className="w-12 h-12 rounded-full border border-white/15 bg-white/[0.05] text-dim text-base
-                         font-bold backdrop-blur-md active:scale-90" aria-label="Skip to end">⏭</button>
-          )}
-        </>
-      )}
+function hexToRgb(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `${r},${g},${b}`;
+}
 
-      <button onClick={onReplay} className="btn btn-primary px-4 py-3 text-sm">↻ Replay</button>
+export default function SimControls({
+  finished, phase, timeScale, canSkip,
+  canStage, hasParachute, parachuteDeployed,
+  hasLander, landerDeployed,
+  onEdit, onReplay, onWarp, onSkip, onStage, onChute, onLander,
+}: Props) {
+  const active = !finished && phase !== 'prelaunch';
+  const inFlight = phase !== 'prelaunch' && phase !== 'landed' && phase !== 'destroyed';
+  const showChute = hasParachute && !parachuteDeployed && inFlight;
+  const showLander = hasLander && !landerDeployed && inFlight;
+
+  return (
+    <div
+      className="absolute inset-x-0 bottom-0 z-30 flex items-end justify-between gap-2
+                 pb-[calc(0.75rem+env(safe-area-inset-bottom))]
+                 px-[calc(0.75rem+env(safe-area-inset-left))]
+                 pr-[calc(0.75rem+env(safe-area-inset-right))]"
+    >
+      {/* Left: action buttons */}
+      <div className="flex items-center gap-2">
+        {active && canStage && (
+          <PixelBtn label="STAGE" color="#ff8a3d" onClick={onStage} glow large />
+        )}
+        {active && showChute && (
+          <PixelBtn label="CHUTE" color="#2ee59d" onClick={onChute} glow />
+        )}
+        {active && showLander && (
+          <PixelBtn label="LANDER" color="#b070ff" onClick={onLander} glow />
+        )}
+        {finished && (
+          <PixelBtn label="✎ EDIT" color="#8aa0b5" onClick={onEdit} />
+        )}
+      </div>
+
+      {/* Right: time/nav controls */}
+      <div className="flex items-center gap-2">
+        {!finished && (
+          <>
+            {canSkip && (
+              <PixelBtn label="SKIP" color="#8aa0b5" onClick={onSkip} />
+            )}
+            <PixelBtn
+              label={timeScale > 1 ? `${timeScale}× ▶▶` : '▶▶'}
+              color={timeScale > 1 ? '#ffd54a' : '#8aa0b5'}
+              onClick={onWarp}
+              glow={timeScale > 1}
+            />
+          </>
+        )}
+        <PixelBtn label="↻ REPLAY" color="#00e5ff" onClick={onReplay} glow />
+      </div>
     </div>
   );
 }

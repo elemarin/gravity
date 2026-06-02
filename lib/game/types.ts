@@ -18,6 +18,7 @@ export type FlightState = {
   activeStage: number;   // index of the currently firing stage
   stageCount: number;    // total stages in the rocket
   canStage: boolean;     // true when there is a lower stage to jettison
+  parachuteDeployed: boolean;
   launchBodyId?: string;        // body the flight launched from
   landedBodyId?: string | null; // body currently/last landed on
   reachedBodyIds?: string[];    // bodies whose vicinity has been reached

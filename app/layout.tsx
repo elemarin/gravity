@@ -1,11 +1,11 @@
 import type { Metadata, Viewport } from 'next';
-import { Orbitron } from 'next/font/google';
+import { Press_Start_2P } from 'next/font/google';
 import './globals.css';
 
-const orbitron = Orbitron({
+const pressStart = Press_Start_2P({
   subsets: ['latin'],
-  weight: ['500', '600', '700', '900'],
-  variable: '--font-orbitron',
+  weight: ['400'],
+  variable: '--font-pixel',
   display: 'swap',
 });
 
@@ -25,8 +25,8 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={orbitron.variable}>
-      <body className="bg-bg text-ink font-display">{children}</body>
+    <html lang="en" className={pressStart.variable}>
+      <body className="bg-bg text-ink font-pixel">{children}</body>
     </html>
   );
 }

@@ -93,10 +93,11 @@ export default function PlanControls({ heading, power, onCommit }: Props) {
       <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 top-[calc(40%)]
                       flex flex-col items-center gap-1">
         {drag && (
-          <div className="panel px-4 py-2 flex items-center gap-4 pop-in">
-            <span className="text-cyan text-sm font-black tabular-nums">{Math.round(shown.heading)}°</span>
-            <span className="text-dim text-xs">·</span>
-            <span className="text-orange text-sm font-black tabular-nums">{pct}%</span>
+          <div className="pop-in px-4 py-2 flex items-center gap-4 font-pixel"
+               style={{ background: 'rgba(4,6,14,0.85)', border: '1px solid rgba(0,229,255,0.3)' }}>
+            <span className="text-cyan tabular-nums" style={{ fontSize: 11 }}>{Math.round(shown.heading)}°</span>
+            <span className="text-dim" style={{ fontSize: 8 }}>·</span>
+            <span className="text-orange tabular-nums" style={{ fontSize: 11 }}>{pct}%</span>
           </div>
         )}
       </div>
@@ -104,8 +105,9 @@ export default function PlanControls({ heading, power, onCommit }: Props) {
       {/* Hint when idle */}
       {!drag && (
         <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 bottom-[42%]
-                        text-[11px] tracking-[0.25em] uppercase text-dim/80 text-center">
-          Drag to aim · pull for power
+                        text-center font-pixel"
+             style={{ fontSize: 8, color: 'rgba(138,160,181,0.55)', letterSpacing: '0.2em' }}>
+          DRAG TO AIM · PULL FOR POWER
         </div>
       )}
     </div>

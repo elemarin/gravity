@@ -11,6 +11,13 @@ export class Renderer {
   private cameraOffset = new THREE.Vector3(0, 2, 8);
   private resizeObserver?: ResizeObserver;
 
+  // User camera control state
+  private userZoom    = 1.0;
+  private userAzimuth = 0.0;
+  private pointers    = new Map<number, { x: number; y: number }>();
+  private lastSingleX = 0;
+  private lastPinchDist = 0;
+
   constructor(container: HTMLElement) {
     this.container = container;
 
@@ -47,6 +54,10 @@ export class Renderer {
     this.resizeObserver = new ResizeObserver(() => this.handleResize());
     this.resizeObserver.observe(container);
     window.addEventListener('resize', this.handleResize);
+
+    // Camera touch controls on the canvas. Only fires in sim mode because
+    // PlanControls (z-20 full-screen overlay) intercepts touches during planning.
+    this.setupCameraControls();
   }
 
   private handleResize = () => {
@@ -75,6 +86,52 @@ export class Renderer {
     this.scene.add(new THREE.Points(geo, mat));
   }
 
+  private setupCameraControls() {
+    const el = this.renderer.domElement;
+    el.addEventListener('pointerdown',   this.onCamPointerDown);
+    el.addEventListener('pointermove',   this.onCamPointerMove);
+    el.addEventListener('pointerup',     this.onCamPointerUp);
+    el.addEventListener('pointercancel', this.onCamPointerUp);
+  }
+
+  private onCamPointerDown = (e: PointerEvent) => {
+    try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* ok */ }
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (this.pointers.size === 1) {
+      this.lastSingleX = e.clientX;
+    } else if (this.pointers.size === 2) {
+      const pts = Array.from(this.pointers.values());
+      this.lastPinchDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+    }
+  };
+
+  private onCamPointerMove = (e: PointerEvent) => {
+    if (!this.pointers.has(e.pointerId)) return;
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (this.pointers.size === 1) {
+      const dx = e.clientX - this.lastSingleX;
+      this.userAzimuth += dx * 0.006;
+      this.lastSingleX = e.clientX;
+    } else if (this.pointers.size === 2) {
+      const pts = Array.from(this.pointers.values());
+      const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      if (this.lastPinchDist > 1) {
+        const ratio = dist / this.lastPinchDist;
+        this.userZoom = Math.max(0.18, Math.min(4.5, this.userZoom / ratio));
+      }
+      this.lastPinchDist = dist;
+    }
+  };
+
+  private onCamPointerUp = (e: PointerEvent) => {
+    this.pointers.delete(e.pointerId);
+    if (this.pointers.size === 1) {
+      const [pt] = this.pointers.values();
+      this.lastSingleX = pt.x;
+    }
+  };
+
   followTarget(targetPos: THREE.Vector3, dt: number) {
     this.cameraTarget.lerp(targetPos, 1 - Math.exp(-5 * dt));
     const desired = this.cameraTarget.clone().add(this.cameraOffset);
@@ -84,9 +141,14 @@ export class Renderer {
 
   updateCameraOffset(altitude: number) {
     const t = THREE.MathUtils.clamp(altitude / 150, 0, 1);
-    const dist  = THREE.MathUtils.lerp(6, 90, t);
-    const upOff = THREE.MathUtils.lerp(2, 22, t);
-    this.cameraOffset.set(0, upOff, dist);
+    const baseDist = THREE.MathUtils.lerp(6, 90, t);
+    const upOff    = THREE.MathUtils.lerp(2, 22, t);
+    const dist     = baseDist * this.userZoom;
+    this.cameraOffset.set(
+      Math.sin(this.userAzimuth) * dist,
+      upOff,
+      Math.cos(this.userAzimuth) * dist,
+    );
   }
 
   render() {
@@ -94,6 +156,12 @@ export class Renderer {
   }
 
   dispose() {
+    const el = this.renderer.domElement;
+    el.removeEventListener('pointerdown',   this.onCamPointerDown);
+    el.removeEventListener('pointermove',   this.onCamPointerMove);
+    el.removeEventListener('pointerup',     this.onCamPointerUp);
+    el.removeEventListener('pointercancel', this.onCamPointerUp);
+
     window.removeEventListener('resize', this.handleResize);
     this.resizeObserver?.disconnect();
     this.renderer.dispose();

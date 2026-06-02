@@ -16,7 +16,8 @@ module.exports = {
         purple:   '#b070ff',
       },
       fontFamily: {
-        display: ['var(--font-orbitron)', 'system-ui', 'sans-serif'],
+        pixel:   ['var(--font-pixel)', '"Press Start 2P"', 'monospace'],
+        display: ['var(--font-pixel)', '"Press Start 2P"', 'monospace'],
       },
       backdropBlur: {
         xs: '4px',

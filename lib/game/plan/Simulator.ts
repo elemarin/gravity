@@ -6,8 +6,9 @@ import { StageStats } from '../BuildSpec';
 export type SimPhase =
   | 'prelaunch' | 'flight' | 'orbit' | 'reentry' | 'landed' | 'destroyed';
 
-const KARMAN_LINE = 100.0;        // km above surface
-const DRAG_COEFF   = 0.008;
+const KARMAN_LINE  = 100.0;        // km above surface
+const DRAG_COEFF   = 0.04;
+const CHUTE_CROSS  = 320;          // cross-section for deployed chute (~10 m/s terminal)
 const BASE_SAFE_MS = 10;
 const CHUTE_MS     = 45;
 const LEGS_MS      = 10;
@@ -207,6 +208,28 @@ export class Simulator {
     if (a.deployParachute) s.deployedParachute = true;
   }
 
+  /** Real-time user-initiated stage separation. */
+  manualStage(): boolean {
+    if (this.state.phase === 'landed' || this.state.phase === 'destroyed') return false;
+    return this.doStage();
+  }
+
+  /** Real-time user-initiated parachute deployment. */
+  manualParachute(): boolean {
+    if (!this.cfg.hasParachute || this.state.deployedParachute) return false;
+    if (this.state.phase === 'landed' || this.state.phase === 'destroyed') return false;
+    this.state.deployedParachute = true;
+    return true;
+  }
+
+  /** Real-time user-initiated lander deployment. */
+  manualDeployLander(): boolean {
+    if (this.cfg.landerIndex < 0 || this.state.deployedLander) return false;
+    if (this.state.phase === 'landed' || this.state.phase === 'destroyed') return false;
+    this.doDeployLander();
+    return true;
+  }
+
   private doStage(): boolean {
     const s = this.state;
     if (s.activeStage >= this.cfg.stages.length - 1) return false;
@@ -258,7 +281,7 @@ export class Simulator {
     const t = Math.max(0, 1 - altitude / body.atmosphereHeight);
     const rho = 1.225 * Math.pow(t, 3);
     const cd = 0.5;
-    const cross = s.deployedParachute ? DRAG_COEFF * 14 : DRAG_COEFF;
+    const cross = s.deployedParachute ? CHUTE_CROSS : DRAG_COEFF;
     const speedSq = s.velocity.lengthSq();
     if (speedSq < 1e-10) return new THREE.Vector3();
     const mag = 0.5 * rho * speedSq * cd * cross;
