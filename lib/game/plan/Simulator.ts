@@ -153,6 +153,7 @@ export class Simulator {
 
     s.velocity.addScaledVector(total, dt);
     s.position.addScaledVector(s.velocity, dt);
+    this.stabilizeParachute(dt);
 
     // --- Fuel burn ---
     this.burnFuel(dt);
@@ -253,6 +254,7 @@ export class Simulator {
   private doDeployParachute(): boolean {
     const s = this.state;
     if (!this.cfg.hasParachute || s.deployedParachute) return false;
+    s.throttle = 0;
     s.deployedParachute = true;
     s.justDeployedParachute = true;
     return true;
@@ -298,6 +300,13 @@ export class Simulator {
     return s.velocity.clone().normalize().multiplyScalar(-mag);
   }
 
+  private stabilizeParachute(dt: number) {
+    const s = this.state;
+    if (!s.deployedParachute) return;
+    const settle = 1 - Math.exp(-dt * 2.5);
+    s.angle = THREE.MathUtils.lerp(s.angle, 0, settle);
+  }
+
   private mass(): number {
     const s = this.state;
     let m = this.cfg.payloadMass;
@@ -324,7 +333,7 @@ export class Simulator {
 
   private safeLandingMs(): number {
     let safe = BASE_SAFE_MS;
-    if (this.state.deployedParachute || this.cfg.hasParachute) safe += CHUTE_MS;
+    if (this.state.deployedParachute) safe += CHUTE_MS;
     if (this.cfg.hasLegs)        safe += LEGS_MS;
     if (this.state.deployedLander) safe += LANDER_MS;
     return safe;
