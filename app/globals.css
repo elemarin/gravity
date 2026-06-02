@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --safe-top:   env(safe-area-inset-top, 0px);
+  --safe-bot:   env(safe-area-inset-bottom, 0px);
+  --safe-left:  env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+* { -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: #06000d;
+  color: #e8f4ff;
+  font-family: var(--font-orbitron), system-ui, sans-serif;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+@layer components {
+  .panel {
+    @apply rounded-xl border border-white/10;
+    background: rgba(10, 16, 28, 0.6);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 4px 22px rgba(0, 0, 0, 0.45);
+  }
+
+  .pill {
+    @apply rounded-full border border-white/10 px-4 py-2;
+    background: rgba(10, 16, 28, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border px-5 py-3
+           font-display font-bold uppercase tracking-wider text-sm
+           transition-all duration-150 active:scale-95;
+  }
+
+  .btn-primary {
+    @apply text-cyan border-cyan/40 bg-cyan/10
+           hover:bg-cyan/20 hover:border-cyan/70 hover:shadow-[0_0_20px_rgba(0,229,255,0.4)];
+  }
+
+  .btn-secondary {
+    @apply text-ink border-white/20 bg-white/5
+           hover:bg-white/10 hover:border-white/40;
+  }
+
+  .btn-warn {
+    @apply text-orange border-orange/40 bg-orange/10
+           hover:bg-orange/20 hover:border-orange/70 hover:shadow-[0_0_20px_rgba(255,138,61,0.4)];
+  }
+
+  .btn-danger {
+    @apply text-red border-red/40 bg-red/10
+           hover:bg-red/20 hover:border-red/70 hover:shadow-[0_0_18px_rgba(255,85,119,0.4)];
+  }
+
+  .stat-label {
+    @apply text-[10px] font-bold tracking-[0.18em] uppercase text-dim;
+  }
+
+  .stat-value {
+    @apply text-base font-bold tabular-nums text-ink;
+  }
+}
+
+/* Animations */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fade-up 0.4s ease both; }
+
+@keyframes pop-in {
+  0%   { opacity: 0; transform: scale(0.85); }
+  60%  { opacity: 1; transform: scale(1.05); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.pop-in { animation: pop-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
