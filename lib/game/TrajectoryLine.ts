@@ -13,7 +13,10 @@ const LANDING_CENTER = LANDING_MARKER_DIMENSION / 2;
 // Three rings at roughly half, one-third, and center-dot radius keep the 128px bullseye readable when scaled down.
 const BULLSEYE_RADII = [34, 21, 8] as const;
 const BULLSEYE_CROSSHAIR_INSET = 22;
-const BULLSEYE_CROSSHAIR_END = LANDING_MARKER_DIMENSION - BULLSEYE_CROSSHAIR_INSET;
+const BULLSEYE_CROSSHAIR_OUTER_COORD = LANDING_MARKER_DIMENSION - BULLSEYE_CROSSHAIR_INSET;
+const BULLSEYE_SHADOW_COLOR = 'rgba(10, 23, 38, 0.92)';
+const BULLSEYE_RING_COLOR = '#ffffff';
+const BULLSEYE_CROSSHAIR_COLOR = '#ff5577';
 // Squared distance threshold to avoid normalizing a nearly zero radial vector when the predicted site is invalid.
 const MIN_RADIAL_LENGTH_SQ = 1e-8;
 
@@ -140,16 +143,16 @@ export class TrajectoryLine {
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    this.strokeBullseyeRings(ctx, 'rgba(10, 23, 38, 0.92)', 8);
-    this.strokeBullseyeRings(ctx, '#ffffff', 4);
+    this.strokeBullseyeRings(ctx, BULLSEYE_SHADOW_COLOR, 8);
+    this.strokeBullseyeRings(ctx, BULLSEYE_RING_COLOR, 4);
 
-    ctx.strokeStyle = '#ff5577';
+    ctx.strokeStyle = BULLSEYE_CROSSHAIR_COLOR;
     ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.moveTo(LANDING_CENTER, BULLSEYE_CROSSHAIR_INSET);
-    ctx.lineTo(LANDING_CENTER, BULLSEYE_CROSSHAIR_END);
+    ctx.lineTo(LANDING_CENTER, BULLSEYE_CROSSHAIR_OUTER_COORD);
     ctx.moveTo(BULLSEYE_CROSSHAIR_INSET, LANDING_CENTER);
-    ctx.lineTo(BULLSEYE_CROSSHAIR_END, LANDING_CENTER);
+    ctx.lineTo(BULLSEYE_CROSSHAIR_OUTER_COORD, LANDING_CENTER);
     ctx.stroke();
   }
 
