@@ -10,7 +10,7 @@ const LANDING_MARKER_DIMENSION = 128;
 const LANDING_MARKER_SCALE = 2.5;
 const LANDING_MARKER_SURFACE_OFFSET = 0.04;
 const LANDING_CENTER = LANDING_MARKER_DIMENSION / 2;
-// Ring sizes are proportional to the 128px canvas so the bullseye stays readable when scaled down.
+// Three rings at roughly half, one-third, and center-dot radius keep the 128px bullseye readable when scaled down.
 const BULLSEYE_RADII = [34, 21, 8] as const;
 const BULLSEYE_CROSSHAIR_INSET = 22;
 const BULLSEYE_CROSSHAIR_END = LANDING_MARKER_DIMENSION - BULLSEYE_CROSSHAIR_INSET;
@@ -140,21 +140,8 @@ export class TrajectoryLine {
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    ctx.strokeStyle = 'rgba(10, 23, 38, 0.92)';
-    ctx.lineWidth = 8;
-    for (const r of BULLSEYE_RADII) {
-      ctx.beginPath();
-      ctx.arc(LANDING_CENTER, LANDING_CENTER, r, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 4;
-    for (const r of BULLSEYE_RADII) {
-      ctx.beginPath();
-      ctx.arc(LANDING_CENTER, LANDING_CENTER, r, 0, Math.PI * 2);
-      ctx.stroke();
-    }
+    this.strokeBullseyeRings(ctx, 'rgba(10, 23, 38, 0.92)', 8);
+    this.strokeBullseyeRings(ctx, '#ffffff', 4);
 
     ctx.strokeStyle = '#ff5577';
     ctx.lineWidth = 4;
@@ -164,6 +151,16 @@ export class TrajectoryLine {
     ctx.moveTo(BULLSEYE_CROSSHAIR_INSET, LANDING_CENTER);
     ctx.lineTo(BULLSEYE_CROSSHAIR_END, LANDING_CENTER);
     ctx.stroke();
+  }
+
+  private strokeBullseyeRings(ctx: CanvasRenderingContext2D, strokeStyle: string, lineWidth: number) {
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    for (const r of BULLSEYE_RADII) {
+      ctx.beginPath();
+      ctx.arc(LANDING_CENTER, LANDING_CENTER, r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   private updateMarkers(points: THREE.Vector3[], focus?: THREE.Vector3, radius = 0, showLandingSite = false) {
