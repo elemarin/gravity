@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { MILESTONES } from '@/lib/game/career/Milestones';
 import { PARTS_CATALOG } from '@/lib/game/career/Parts';
 import { loadCompletedMilestones, loadUnlockedParts, resetProgress } from '@/lib/storage';
+import NavDrawer from './NavDrawer';
 
 export default function CareerView() {
   const [completed, setCompleted] = useState<Set<string>>(new Set());
@@ -29,13 +30,13 @@ export default function CareerView() {
 
   return (
     <main className="fixed inset-0 overflow-y-auto bg-bg">
+      <NavDrawer title="Career Menu" />
       <div className="min-h-screen px-5 py-6
                       pt-[calc(1rem+env(safe-area-inset-top))]
                       pb-[calc(2rem+env(safe-area-inset-bottom))]
                       max-w-2xl mx-auto">
         <header className="flex items-center justify-between mb-6">
-          <Link href="/" className="w-10 h-10 rounded-full border border-white/15 bg-white/5
-                                    flex items-center justify-center text-ink hover:border-white/30 active:scale-95">←</Link>
+          <div className="w-10" />
           <h1 className="text-xl sm:text-2xl font-black tracking-widest">CAREER</h1>
           <button onClick={handleReset} aria-label="Reset progress"
                   className="w-10 h-10 rounded-full border border-white/15 bg-white/5 text-xs

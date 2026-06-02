@@ -52,6 +52,7 @@ export type SimState = {
   /** Index of the stage that just separated this step (-1 if none) — drives the mesh. */
   justStagedTo: number;
   justDeployedLander: boolean;
+  justDeployedParachute: boolean;
   justIgnited: boolean;
 };
 
@@ -96,6 +97,7 @@ export class Simulator {
       prevRadialVel: 0,
       justStagedTo: -1,
       justDeployedLander: false,
+      justDeployedParachute: false,
       justIgnited: false,
     };
   }
@@ -117,6 +119,7 @@ export class Simulator {
     const s = this.state;
     s.justStagedTo = -1;
     s.justDeployedLander = false;
+    s.justDeployedParachute = false;
     s.justIgnited = false;
     if (s.phase === 'landed' || s.phase === 'destroyed') return;
 
@@ -205,7 +208,7 @@ export class Simulator {
     if (a.throttle !== undefined) s.throttle = THREE.MathUtils.clamp(a.throttle, 0, 1);
     if (a.jettisonStage) this.doStage();
     if (a.deployLander)  this.doDeployLander();
-    if (a.deployParachute) s.deployedParachute = true;
+    if (a.deployParachute) this.doDeployParachute();
   }
 
   /** Real-time user-initiated stage separation. */
@@ -218,8 +221,7 @@ export class Simulator {
   manualParachute(): boolean {
     if (!this.cfg.hasParachute || this.state.deployedParachute) return false;
     if (this.state.phase === 'landed' || this.state.phase === 'destroyed') return false;
-    this.state.deployedParachute = true;
-    return true;
+    return this.doDeployParachute();
   }
 
   /** Real-time user-initiated lander deployment. */
@@ -246,6 +248,14 @@ export class Simulator {
     s.deployedLander = true;
     s.justDeployedLander = true;
     s.justStagedTo = this.cfg.landerIndex;
+  }
+
+  private doDeployParachute(): boolean {
+    const s = this.state;
+    if (!this.cfg.hasParachute || s.deployedParachute) return false;
+    s.deployedParachute = true;
+    s.justDeployedParachute = true;
+    return true;
   }
 
   // ---- forces ----

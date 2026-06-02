@@ -209,7 +209,8 @@ export class Game {
     else if (peri < KARMAN_LINE * 0.5) color = 0xffd54a;
     else if (peri >= 80) color = 0x2ee59d;
 
-    this.trajectory.update(points, color);
+    const body = this.launchBody();
+    this.trajectory.update(points, color, body.center, body.radius);
     this.trajectory.setVisible(true);
 
     this.flightState = { ...this.flightState, apoapsis: apo, periapsis: impact ? 0 : peri };
@@ -268,7 +269,7 @@ export class Game {
 
       this.simTrajectoryTimer -= realDt;
       if (this.simTrajectoryTimer <= 0) {
-        this.simTrajectoryTimer = 2.0;
+        this.simTrajectoryTimer = 0.45;
         this.updateSimTrajectory();
       }
     } else {
@@ -286,8 +287,15 @@ export class Game {
 
     if (fireEvents) {
       if (s.justIgnited) this.callbacks.onThrustStart?.();
-      if (s.justStagedTo >= 0 && !s.justDeployedLander) this.callbacks.onStageSeparation?.();
-      if (s.justDeployedLander) this.callbacks.onLanderDeploy?.();
+      if (s.justStagedTo >= 0 && !s.justDeployedLander) {
+        this.rocket.emitStageBurst();
+        this.callbacks.onStageSeparation?.();
+      }
+      if (s.justDeployedLander) {
+        this.rocket.emitStageBurst();
+        this.callbacks.onLanderDeploy?.();
+      }
+      if (s.justDeployedParachute) this.rocket.emitParachuteBurst();
     }
 
     this.flightState = this.buildFlightState();
@@ -370,18 +378,25 @@ export class Game {
   manualStage() {
     if (this.mode !== 'sim' || this.sim.finished) return;
     const staged = this.sim.manualStage();
-    if (staged) this.callbacks.onStageSeparation?.();
+    if (staged) {
+      this.rocket.emitStageBurst();
+      this.callbacks.onStageSeparation?.();
+    }
   }
 
   manualParachute() {
     if (this.mode !== 'sim' || this.sim.finished) return;
-    this.sim.manualParachute();
+    const deployed = this.sim.manualParachute();
+    if (deployed) this.rocket.emitParachuteBurst();
   }
 
   manualLander() {
     if (this.mode !== 'sim' || this.sim.finished) return;
     const deployed = this.sim.manualDeployLander();
-    if (deployed) this.callbacks.onLanderDeploy?.();
+    if (deployed) {
+      this.rocket.emitStageBurst();
+      this.callbacks.onLanderDeploy?.();
+    }
   }
 
   /** Forward-predict trajectory from current sim state and refresh the line. */
@@ -424,7 +439,8 @@ export class Game {
     else if (preview.state.periapsis > 0 && preview.state.periapsis < 80) color = 0xffd54a;
     else if (preview.state.periapsis >= 80) color = 0x2ee59d;
 
-    this.trajectory.update(points, color);
+    const body = this.dominant();
+    this.trajectory.update(points, color, body.center, body.radius);
   }
 
   getNextMilestone() { return this.milestones.getNextTarget(); }

@@ -29,6 +29,8 @@ export class Rocket {
   private scene: THREE.Scene;
   private exhaust: Exhaust;
   private upCenter = EARTH_CENTER.clone();
+  private parachute?: THREE.Group;
+  private droppedStages: { group: THREE.Group; velocity: THREE.Vector3; spin: THREE.Vector3; age: number }[] = [];
 
   constructor(scene: THREE.Scene, build: RocketBuild) {
     this.scene = scene;
@@ -60,6 +62,7 @@ export class Rocket {
     this.meshActiveStage = 0;
     this.mesh = this.buildMesh(this.build);
     this.scene.add(this.mesh);
+    this.clearDroppedStages();
     this.syncMesh();
   }
 
@@ -73,16 +76,28 @@ export class Rocket {
     while (this.meshActiveStage < s.activeStage) {
       const dropped = this.stageMeshes[this.meshActiveStage];
       if (dropped) {
+        this.detachStage(dropped, s.velocity, upCenter);
         this.mesh.remove(dropped);
-        this.disposeGroup(dropped);
       }
       this.meshActiveStage += 1;
     }
 
     this.syncMesh();
+    if (this.parachute) this.parachute.visible = s.deployedParachute;
+    this.updateDroppedStages(dt, upCenter);
     const fuel = s.stageFuel[s.activeStage] ?? 0;
     const { pos, dir } = this.getNozzleInfo();
     this.exhaust.update(dt, pos, dir, fuel > 0 ? s.throttle : 0);
+  }
+
+  emitStageBurst() {
+    const up = new THREE.Vector3().subVectors(this.position, this.upCenter).normalize();
+    this.exhaust.burst(this.position.clone().addScaledVector(up, -0.15), up.clone().negate(), 90, [1, 0.42, 0.1], 6);
+  }
+
+  emitParachuteBurst() {
+    const up = new THREE.Vector3().subVectors(this.position, this.upCenter).normalize();
+    this.exhaust.burst(this.position.clone().addScaledVector(up, 0.8), up, 70, [0.55, 1, 0.8], 3.5);
   }
 
   private buildMesh(build: RocketBuild): THREE.Group {
@@ -179,7 +194,42 @@ export class Rocket {
       group.add(m);
     }
 
+    if (build.utilityIds.includes('parachute')) {
+      this.parachute = this.buildParachute(y + 0.68);
+      this.parachute.visible = false;
+      group.add(this.parachute);
+    } else {
+      this.parachute = undefined;
+    }
+
     return group;
+  }
+
+  private buildParachute(y: number): THREE.Group {
+    const chute = new THREE.Group();
+    const canopyGeo = new THREE.SphereGeometry(0.58, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+    const canopyMat = new THREE.MeshPhongMaterial({
+      color: 0x7fffd4,
+      transparent: true,
+      opacity: 0.78,
+      flatShading: true,
+      side: THREE.DoubleSide,
+    });
+    const canopy = new THREE.Mesh(canopyGeo, canopyMat);
+    canopy.scale.y = 0.45;
+    canopy.position.y = y;
+    chute.add(canopy);
+
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xe8f4ff, transparent: true, opacity: 0.55 });
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const points = [
+        new THREE.Vector3(Math.cos(a) * 0.48, y - 0.05, Math.sin(a) * 0.48),
+        new THREE.Vector3(0, y - 0.75, 0),
+      ];
+      chute.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), lineMat.clone()));
+    }
+    return chute;
   }
 
   private getNozzleInfo(): { pos: THREE.Vector3; dir: THREE.Vector3 } {
@@ -204,6 +254,55 @@ export class Rocket {
     this.mesh.quaternion.copy(q).multiply(tilt);
   }
 
+  private detachStage(stage: THREE.Group, velocity: THREE.Vector3, upCenter: THREE.Vector3) {
+    stage.updateWorldMatrix(true, true);
+    const worldPos = new THREE.Vector3();
+    const worldQuat = new THREE.Quaternion();
+    const worldScale = new THREE.Vector3();
+    stage.matrixWorld.decompose(worldPos, worldQuat, worldScale);
+    stage.position.copy(worldPos);
+    stage.quaternion.copy(worldQuat);
+    stage.scale.copy(worldScale);
+    this.scene.add(stage);
+
+    const up = new THREE.Vector3().subVectors(worldPos, upCenter).normalize();
+    const side = new THREE.Vector3(-up.z, 0, up.x).normalize();
+    const drift = side.multiplyScalar((Math.random() - 0.5) * 1.8).addScaledVector(up, -0.45);
+    this.droppedStages.push({
+      group: stage,
+      velocity: velocity.clone().add(drift),
+      spin: new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5),
+      age: 0,
+    });
+    this.emitStageBurst();
+  }
+
+  private updateDroppedStages(dt: number, upCenter: THREE.Vector3) {
+    for (let i = this.droppedStages.length - 1; i >= 0; i--) {
+      const d = this.droppedStages[i];
+      d.age += dt;
+      const toCenter = new THREE.Vector3().subVectors(upCenter, d.group.position).normalize();
+      d.velocity.addScaledVector(toCenter, 0.35 * dt);
+      d.group.position.addScaledVector(d.velocity, dt);
+      d.group.rotation.x += d.spin.x * dt;
+      d.group.rotation.y += d.spin.y * dt;
+      d.group.rotation.z += d.spin.z * dt;
+      if (d.age > 12) {
+        this.scene.remove(d.group);
+        this.disposeGroup(d.group);
+        this.droppedStages.splice(i, 1);
+      }
+    }
+  }
+
+  private clearDroppedStages() {
+    this.droppedStages.forEach((d) => {
+      this.scene.remove(d.group);
+      this.disposeGroup(d.group);
+    });
+    this.droppedStages = [];
+  }
+
   private disposeGroup(group: THREE.Group) {
     group.traverse((obj) => {
       if (obj instanceof THREE.Mesh) {
@@ -219,6 +318,7 @@ export class Rocket {
 
   dispose() {
     this.exhaust.dispose();
+    this.clearDroppedStages();
     this.disposeMesh();
   }
 }

@@ -23,28 +23,28 @@ export class Renderer {
 
     this.renderer = new THREE.WebGLRenderer({ antialias: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-    this.renderer.setClearColor(0x06000d);
+    this.renderer.setClearColor(0x0a1726);
     this.renderer.domElement.style.display = 'block';
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x06000d);
-    this.scene.fog = new THREE.Fog(0x06000d, 350, 900);
+    this.scene.background = new THREE.Color(0x0a1726);
+    this.scene.fog = new THREE.Fog(0x0a1726, 420, 1000);
 
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.01, 2000);
     this.camera.position.set(0, EARTH_RADIUS + 2, 8);
     this.camera.lookAt(0, EARTH_RADIUS + 1, 0);
 
-    const ambient = new THREE.AmbientLight(0x221133, 0.9);
+    const ambient = new THREE.AmbientLight(0x6f85aa, 1.1);
     this.scene.add(ambient);
 
     const sun = new THREE.DirectionalLight(0xffddaa, 2.2);
     sun.position.set(80, 120, 60);
     this.scene.add(sun);
 
-    const fill = new THREE.DirectionalLight(0x2244aa, 0.4);
+    const fill = new THREE.DirectionalLight(0x86c6ff, 0.55);
     fill.position.set(-80, -40, -60);
     this.scene.add(fill);
 
@@ -133,16 +133,18 @@ export class Renderer {
   };
 
   followTarget(targetPos: THREE.Vector3, dt: number) {
-    this.cameraTarget.lerp(targetPos, 1 - Math.exp(-5 * dt));
+    if (this.cameraTarget.distanceTo(targetPos) > 24) this.cameraTarget.copy(targetPos);
+    else this.cameraTarget.lerp(targetPos, 1 - Math.exp(-9 * dt));
     const desired = this.cameraTarget.clone().add(this.cameraOffset);
-    this.camera.position.lerp(desired, 1 - Math.exp(-4 * dt));
+    this.camera.position.lerp(desired, 1 - Math.exp(-7 * dt));
     this.camera.lookAt(this.cameraTarget);
   }
 
   updateCameraOffset(altitude: number) {
     const t = THREE.MathUtils.clamp(altitude / 150, 0, 1);
-    const baseDist = THREE.MathUtils.lerp(6, 90, t);
-    const upOff    = THREE.MathUtils.lerp(2, 22, t);
+    const isDesktop = this.container.clientWidth >= 900;
+    const baseDist = THREE.MathUtils.lerp(isDesktop ? 8 : 6, isDesktop ? 120 : 90, t);
+    const upOff    = THREE.MathUtils.lerp(isDesktop ? 3 : 2, isDesktop ? 28 : 22, t);
     const dist     = baseDist * this.userZoom;
     this.cameraOffset.set(
       Math.sin(this.userAzimuth) * dist,

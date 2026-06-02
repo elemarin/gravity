@@ -7,6 +7,7 @@ import { PARTS_CATALOG, RocketPart, PartType } from '@/lib/game/career/Parts';
 import { RocketBuild, StageSpec, DEFAULT_BUILD } from '@/lib/game/types';
 import { computeStats, estimateBuildDeltaV, getStages } from '@/lib/game/BuildSpec';
 import { loadBuild, saveBuild, loadUnlockedParts } from '@/lib/storage';
+import NavDrawer from './NavDrawer';
 
 const CATEGORIES: { type: PartType; label: string; short: string }[] = [
   { type: 'engine',  label: 'Engines',  short: 'ENG'  },
@@ -107,12 +108,11 @@ export default function RocketBuilder() {
   return (
     <main className="fixed inset-0 flex flex-col bg-bg overflow-hidden"
           style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      <NavDrawer title="Build Menu" />
 
       {/* ── Header ── */}
-      <header className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-white/5">
-        <Link href="/"
-              className="w-9 h-9 rounded-full border border-white/15 bg-white/5
-                         flex items-center justify-center text-ink hover:border-white/30 active:scale-95">←</Link>
+      <header className="shrink-0 flex items-center justify-between px-4 py-2.5 pl-20 border-b border-white/10 bg-white/[0.03]">
+        <div className="w-9" />
         <h1 className="text-sm font-black tracking-widest text-ink">ROCKET BUILDER</h1>
         <button onClick={() => { setBuild(DEFAULT_BUILD); setSelectedStage(0); }}
                 className="w-9 h-9 rounded-full border border-white/15 bg-white/5
@@ -121,8 +121,9 @@ export default function RocketBuilder() {
       </header>
 
       {/* ── Rocket preview ── */}
-      <div className="shrink-0 flex items-start justify-center gap-6 px-4 py-3"
-           style={{ minHeight: '38vh', maxHeight: '42vh' }}>
+      <section className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-3 px-4 py-3 md:grid md:grid-cols-[minmax(24rem,1fr)_minmax(22rem,30rem)] md:items-stretch">
+      <div className="shrink-0 flex items-start justify-center gap-6 md:gap-10"
+           style={{ minHeight: '32vh', maxHeight: '42vh' }}>
         {/* Blueprint */}
         <div className="flex-1 flex flex-col items-center justify-end h-full overflow-hidden">
           <BlueprintRocket
@@ -149,7 +150,7 @@ export default function RocketBuilder() {
       </div>
 
       {/* ── Stage hint ── */}
-      <div className="shrink-0 px-4 pb-1">
+      <div className="shrink-0 px-0 pb-1 md:col-start-2 md:row-start-1">
         <div className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-1.5 text-[10px] text-dim text-center">
           Editing <span className="text-cyan font-bold">Stage {activeStage + 1}</span>
           {' '}— tap a part below to add it
@@ -157,7 +158,7 @@ export default function RocketBuilder() {
       </div>
 
       {/* ── Category tabs ── */}
-      <div className="shrink-0 flex gap-1.5 px-4 py-2 overflow-x-auto no-scrollbar">
+      <div className="shrink-0 flex gap-1.5 px-0 py-2 overflow-x-auto no-scrollbar md:col-start-2 md:row-start-1 md:mt-12">
         {CATEGORIES.map(({ type, short }) => (
           <button
             key={type}
@@ -172,8 +173,8 @@ export default function RocketBuilder() {
       </div>
 
       {/* ── Parts drawer ── */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-1">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <div className="flex-1 min-h-0 overflow-y-auto px-0 pb-1 md:col-start-2 md:row-start-1 md:mt-24 md:rounded-3xl md:border md:border-white/10 md:bg-white/[0.035] md:p-3">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-2">
           {categoryParts.map((p) => {
             const isUnlk = unlocked.has(p.id);
             const sel = isSelected(p);
@@ -212,6 +213,7 @@ export default function RocketBuilder() {
           })}
         </div>
       </div>
+      </section>
 
       {/* ── Launch button ── */}
       <div className="shrink-0 px-4 py-3 border-t border-white/5">
