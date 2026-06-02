@@ -123,7 +123,6 @@ export class TrajectoryLine {
     ctx.stroke();
     ctx.fill();
 
-    ctx.fillStyle = color;
     ctx.font = '700 24px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -192,7 +191,8 @@ export class TrajectoryLine {
     if (showLandingSite) {
       const site = points[points.length - 1];
       const radial = site.clone().sub(focus);
-      if (radial.lengthSq() > MIN_RADIAL_LENGTH_SQ) {
+      const radialLengthSq = radial.lengthSq();
+      if (radialLengthSq > MIN_RADIAL_LENGTH_SQ) {
         this.landingMarker.position.copy(focus).addScaledVector(radial.normalize(), radius + 0.04);
         this.landingMarker.visible = true;
       } else {
