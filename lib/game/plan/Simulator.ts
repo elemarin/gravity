@@ -154,7 +154,7 @@ export class Simulator {
 
     s.velocity.addScaledVector(total, dt);
     s.position.addScaledVector(s.velocity, dt);
-    if (s.deployedParachute) this.stabilizeParachute(dt);
+    if (s.deployedParachute) this.stabilizeParachute(s, dt);
 
     // --- Fuel burn ---
     this.burnFuel(dt);
@@ -301,8 +301,7 @@ export class Simulator {
     return s.velocity.clone().normalize().multiplyScalar(-mag);
   }
 
-  private stabilizeParachute(dt: number) {
-    const s = this.state;
+  private stabilizeParachute(s: SimState, dt: number) {
     const settle = 1 - Math.exp(-dt * CHUTE_STABILIZE_RATE);
     s.angle = THREE.MathUtils.lerp(s.angle, 0, settle);
   }

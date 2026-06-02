@@ -112,7 +112,7 @@ export default function HUDOverlay({
         {/* Orbit info */}
         {showOrbit && (
           <div
-            className="px-2.5 pb-2 flex flex-wrap gap-x-2 gap-y-1 text-[5px] sm:text-[6px] leading-tight"
+            className="px-2.5 pb-2 flex flex-wrap gap-x-2 gap-y-1 text-[6px] leading-tight"
             style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
           >
             <span>

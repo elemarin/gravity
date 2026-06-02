@@ -75,7 +75,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
           <span className="shrink-0 text-[7px] tracking-[0.2em] uppercase text-cyan" style={{ textShadow: '0 0 8px rgba(0,229,255,0.4)' }}>
             ▸ FLIGHT PLAN
           </span>
-          <span className="min-w-0 flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-[6px] sm:text-[7px] text-dim tabular-nums leading-tight">
+          <span className="min-w-0 flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-[7px] text-dim tabular-nums leading-tight">
             {preview && (
               <>
                 <span className="text-green">AP {fmtKm(preview.apoapsis)}</span>
