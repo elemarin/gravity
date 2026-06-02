@@ -11,13 +11,13 @@ const LANDING_MARKER_SCALE = 2.5;
 const LANDING_MARKER_SURFACE_OFFSET = 0.04;
 const LANDING_CENTER = LANDING_MARKER_DIMENSION / 2;
 // Three rings at roughly half, one-third, and center-dot radius keep the 128px bullseye readable when scaled down.
-const BULLSEYE_RADII = [34, 21, 8] as const;
+const BULLSEYE_RADII = [32, 21, 8] as const;
 const BULLSEYE_CROSSHAIR_INSET = 22;
 const BULLSEYE_CROSSHAIR_OUTER_COORD = LANDING_MARKER_DIMENSION - BULLSEYE_CROSSHAIR_INSET;
 const BULLSEYE_SHADOW_COLOR = 'rgba(10, 23, 38, 0.92)';
 const BULLSEYE_RING_COLOR = '#ffffff';
 const BULLSEYE_CROSSHAIR_COLOR = '#ff5577';
-// Squared distance threshold to avoid normalizing a nearly zero radial vector when the predicted site is invalid.
+// Positions are in km; 1e-8 km² skips invalid sub-meter radial vectors before normalization.
 const MIN_RADIAL_LENGTH_SQ = 1e-8;
 
 export class TrajectoryLine {
