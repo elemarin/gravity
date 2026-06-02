@@ -166,7 +166,10 @@ export class Simulator {
 
     // apo/peri running estimate (reset arc extremes loosely on big climbs)
     s.apoapsis = Math.max(s.apoapsis, this.altitude());
-    if (radialVel < 0) s.periapsis = Math.min(s.periapsis || this.altitude(), this.altitude());
+    if (radialVel < 0) {
+      const peri = Number.isFinite(s.periapsis) ? s.periapsis : this.altitude();
+      s.periapsis = Math.min(peri, this.altitude());
+    }
 
     s.prevRadialVel = up.dot(s.velocity);
     s.phase = this.determinePhase(body);
@@ -228,7 +231,7 @@ export class Simulator {
     const acc = new THREE.Vector3();
     for (const b of this.cfg.bodies) {
       const toC = new THREE.Vector3().subVectors(b.center, pos);
-      const dist = Math.max(toC.length(), b.radius);
+      const dist = Math.max(toC.length(), b.radius + 0.001);
       acc.addScaledVector(toC.normalize(), b.GM / (dist * dist));
     }
     return acc;

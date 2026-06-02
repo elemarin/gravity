@@ -199,6 +199,8 @@ export default function GameScreen() {
               <button
                 key={sc.id}
                 onClick={() => handleScenario(sc.id)}
+                aria-label={`Select ${sc.name} scenario`}
+                aria-current={sc.id === scenario.id ? 'true' : undefined}
                 className={`text-[9px] font-black tracking-[0.15em] uppercase rounded-full px-2.5 py-1 border
                   ${sc.id === scenario.id
                     ? 'border-cyan/60 bg-cyan/15 text-cyan'

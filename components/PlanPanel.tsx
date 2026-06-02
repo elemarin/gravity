@@ -99,21 +99,25 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
               return (
                 <div key={node.id}
                      className={`rounded-lg border ${isEditing ? 'border-cyan/50 bg-cyan/[0.05]' : 'border-white/10 bg-white/[0.03]'}`}>
-                  <button
-                    onClick={() => setEditing(isEditing ? null : node.id)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left"
-                  >
-                    <span className="w-5 h-5 shrink-0 rounded-full bg-cyan/15 text-cyan text-[10px] font-black
-                                     flex items-center justify-center tabular-nums">{i + 1}</span>
-                    <span className="text-xs font-bold text-ink">{describeTrigger(node.trigger)}</span>
-                    <span className="text-[10px] text-dim truncate">→ {describeActions(node.actions)}</span>
-                    <span
+                  <div className="flex items-center gap-2 pr-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditing(isEditing ? null : node.id)}
+                      className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-left"
+                    >
+                      <span className="w-5 h-5 shrink-0 rounded-full bg-cyan/15 text-cyan text-[10px] font-black
+                                       flex items-center justify-center tabular-nums">{i + 1}</span>
+                      <span className="text-xs font-bold text-ink">{describeTrigger(node.trigger)}</span>
+                      <span className="text-[10px] text-dim truncate">→ {describeActions(node.actions)}</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={(e) => { e.stopPropagation(); removeNode(node.id); }}
-                      className="ml-auto w-6 h-6 rounded-full bg-red/15 text-red text-xs
-                                 flex items-center justify-center hover:bg-red/30 cursor-pointer"
+                      className="shrink-0 w-6 h-6 rounded-full bg-red/15 text-red text-xs
+                                 flex items-center justify-center hover:bg-red/30 active:scale-90"
                       aria-label="Remove node"
-                    >✕</span>
-                  </button>
+                    >✕</button>
+                  </div>
 
                   {isEditing && (
                     <div className="px-3 pb-3 flex flex-col gap-3 border-t border-white/5 pt-3">

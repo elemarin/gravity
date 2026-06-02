@@ -18,6 +18,10 @@ export type FlightState = {
   activeStage: number;   // index of the currently firing stage
   stageCount: number;    // total stages in the rocket
   canStage: boolean;     // true when there is a lower stage to jettison
+  launchBodyId?: string;        // body the flight launched from
+  landedBodyId?: string | null; // body currently/last landed on
+  reachedBodyIds?: string[];    // bodies whose vicinity has been reached
+  landerDeployed?: boolean;     // a lander payload has separated
 };
 
 /** A single stage = one engine plus the fuel tanks feeding it. */

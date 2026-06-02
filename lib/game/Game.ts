@@ -152,7 +152,6 @@ export class Game {
   setPlan(plan: FlightPlan) {
     this.plan = clonePlan(plan);
     this.sim.setPlan(this.plan);
-    if (this.plan.scenarioId !== getScenario(this.plan.scenarioId).id) { /* no-op guard */ }
     this.sim.reset();
     this.rocket.reset(this.startPosition());
     if (this.mode === 'plan') this.updatePreview();
@@ -342,6 +341,10 @@ export class Game {
       activeStage: s.activeStage,
       stageCount,
       canStage: s.activeStage < stageCount - 1,
+      launchBodyId: this.launchBodyId,
+      landedBodyId: s.landedBodyId,
+      reachedBodyIds: Array.from(s.reachedBodyIds),
+      landerDeployed: s.deployedLander,
     };
   }
 
