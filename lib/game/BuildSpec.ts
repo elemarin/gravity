@@ -100,3 +100,49 @@ export function estimateBuildDeltaV(build: RocketBuild): number {
   }
   return total;
 }
+
+/** Stage stats for the separable lander, derived from its part. */
+export function landerStageStats(build: RocketBuild): StageStats | null {
+  if (!build.landerId) return null;
+  const part = partById(build.landerId);
+  if (!part) return null;
+  return {
+    dryMass:      part.mass,
+    fuelMass:     part.fuelCapacity * FUEL_MASS_PER_L,
+    fuelCapacity: part.fuelCapacity,
+    thrust:       part.thrust,
+    burnRate:     part.burnRate,
+  };
+}
+
+export type SimStages = {
+  stages: StageStats[];
+  /** Index of the lander stage in `stages`, or -1 when there is no lander. */
+  landerIndex: number;
+  /** Dry mass carried as non-stage payload (nose/capsule + utilities). */
+  payloadMass: number;
+  hasParachute: boolean;
+  hasLegs: boolean;
+};
+
+/**
+ * Flattens a build into the ordered stage list the deterministic Simulator
+ * runs. A lander, when present, becomes an extra top stage that the
+ * `deployLander` action separates onto.
+ */
+export function buildSimStages(build: RocketBuild): SimStages {
+  const stages = getStages(build).map(computeStageStats);
+  const lander = landerStageStats(build);
+  let landerIndex = -1;
+  if (lander) {
+    landerIndex = stages.length;
+    stages.push(lander);
+  }
+  return {
+    stages,
+    landerIndex,
+    payloadMass: payloadDryMass(build),
+    hasParachute: build.utilityIds.includes('parachute'),
+    hasLegs:      build.utilityIds.includes('landing-legs'),
+  };
+}

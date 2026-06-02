@@ -1,44 +1,53 @@
 import * as THREE from 'three';
 import { Renderer } from './Renderer';
-import { InputManager } from './InputManager';
-import { Earth } from './entities/Earth';
-import { Rocket } from './entities/Rocket';
-import { GravitySystem } from './physics/GravitySystem';
-import { Atmosphere } from './physics/Atmosphere';
-import { MilestoneManager } from './career/Milestones';
-import { TrajectoryPredictor } from './TrajectoryPredictor';
+import { Planet } from './entities/Planet';
+import { Rocket, ROCKET_START_ALTITUDE } from './entities/Rocket';
 import { TrajectoryLine } from './TrajectoryLine';
-import { FlightState, FlightPhase, GameCallbacks, MissionResult, RocketBuild, DEFAULT_BUILD } from './types';
-import { EARTH_CENTER, EARTH_RADIUS, KARMAN_LINE, GM } from './constants';
+import { MilestoneManager } from './career/Milestones';
+import { Simulator, SimConfig } from './plan/Simulator';
+import { FlightPlan, DEFAULT_PLAN, clonePlan } from './plan/FlightPlan';
+import { Body, dominantBody, getScenario } from './bodies';
+import { buildSimStages } from './BuildSpec';
+import {
+  FlightState, FlightPhase, GameCallbacks, MissionResult, RocketBuild, DEFAULT_BUILD,
+} from './types';
+import { EARTH_BODY } from './bodies';
+import { KARMAN_LINE } from './constants';
 
 const FIXED_DT = 1 / 60;
-const DRAG_COEFF = 0.008;
-
-// Crash model: impact speed (m/s) tolerated before the rocket is destroyed.
-const BASE_SAFE_LANDING_MS = 10;
-const PARACHUTE_BONUS_MS   = 45;
-const LEGS_BONUS_MS        = 10;
-
-// Fast-forward cap (~55 sim-minutes) so a skip never loops forever.
 const SKIP_MAX_STEPS = 200_000;
+
+// Preview: forward-run the plan to draw the predicted arc.
+const PREVIEW_DT = 0.25;
+const PREVIEW_STEPS = 4000;
+const PREVIEW_SAMPLE = 8;
+
+export type GameMode = 'plan' | 'sim';
 
 export type GameOptions = {
   container: HTMLElement;
   build?: RocketBuild;
+  plan?: FlightPlan;
   completedMilestoneIds?: string[];
   callbacks?: GameCallbacks;
 };
 
 export class Game {
   renderer: Renderer;
-  input: InputManager;
-  private earth: Earth;
+  private planets: Planet[] = [];
   rocket: Rocket;
-  private gravity: GravitySystem;
-  private atmosphere: Atmosphere;
-  private milestones: MilestoneManager;
-  private predictor: TrajectoryPredictor;
   private trajectory: TrajectoryLine;
+  private milestones: MilestoneManager;
+
+  private bodies: Body[];
+  private launchBodyId: string;
+  private cfg: SimConfig;
+  private sim: Simulator;
+  private plan: FlightPlan;
+  private build: RocketBuild;
+
+  mode: GameMode = 'plan';
+  timeScale = 1;
 
   private callbacks: GameCallbacks;
   private flightState!: FlightState;
@@ -46,34 +55,52 @@ export class Game {
   private lastTime = 0;
   private rafHandle = 0;
   private running = false;
-
-  timeScale = 1;
-  private predictTimer = 0;
-  private outOfFuelFired = false;
-  private maxSpeed = 0;
-  private everOrbit = false;
-  private crashed = false;
   private missionEnded = false;
-  private lastImpactSpeedMs = 0;
   private fastForwarding = false;
 
   constructor(opts: GameOptions) {
-    this.callbacks  = opts.callbacks ?? {};
-    this.renderer   = new Renderer(opts.container);
-    this.input      = new InputManager();
-    this.earth      = new Earth(this.renderer.scene);
-    this.gravity    = new GravitySystem();
-    this.atmosphere = new Atmosphere();
-    this.rocket     = new Rocket(this.renderer.scene, opts.build ?? DEFAULT_BUILD);
-    this.milestones = new MilestoneManager(opts.completedMilestoneIds ?? []);
-    this.predictor  = new TrajectoryPredictor(this.gravity, this.atmosphere);
+    this.callbacks = opts.callbacks ?? {};
+    this.build = opts.build ?? DEFAULT_BUILD;
+    this.plan = clonePlan(opts.plan ?? DEFAULT_PLAN);
+
+    const scenario = getScenario(this.plan.scenarioId);
+    this.bodies = scenario.bodies;
+    this.launchBodyId = this.bodies[0]?.id ?? EARTH_BODY.id;
+
+    this.renderer = new Renderer(opts.container);
+    this.planets = this.bodies.map((b) => new Planet(this.renderer.scene, b));
+    this.rocket = new Rocket(this.renderer.scene, this.build);
     this.trajectory = new TrajectoryLine(this.renderer.scene);
+    this.milestones = new MilestoneManager(opts.completedMilestoneIds ?? []);
+    this.milestones.onComplete = (m) => this.callbacks.onMilestoneComplete?.(m.id, m.unlocks);
 
-    this.milestones.onComplete = (m) => {
-      this.callbacks.onMilestoneComplete?.(m.id, m.unlocks);
+    this.cfg = this.buildConfig();
+    this.sim = new Simulator(this.cfg, this.plan);
+
+    this.flightState = this.buildFlightState();
+    this.updatePreview();
+  }
+
+  private launchBody(): Body {
+    return this.bodies.find((b) => b.id === this.launchBodyId) ?? this.bodies[0];
+  }
+
+  private startPosition(): THREE.Vector3 {
+    const b = this.launchBody();
+    return b.center.clone().add(new THREE.Vector3(0, b.radius + ROCKET_START_ALTITUDE, 0));
+  }
+
+  private buildConfig(): SimConfig {
+    const sim = buildSimStages(this.build);
+    return {
+      bodies: this.bodies,
+      stages: sim.stages,
+      payloadMass: sim.payloadMass,
+      landerIndex: sim.landerIndex,
+      hasParachute: sim.hasParachute,
+      hasLegs: sim.hasLegs,
+      startPosition: this.startPosition(),
     };
-
-    this.flightState = this.buildFlightState('prelaunch');
   }
 
   start() {
@@ -88,48 +115,125 @@ export class Game {
     cancelAnimationFrame(this.rafHandle);
   }
 
-  setBuild(build: RocketBuild) {
-    this.rocket.setBuild(build);
-    this.reset();
-  }
-
-  reset() {
-    this.rocket.reset();
-    this.outOfFuelFired = false;
-    this.maxSpeed = 0;
-    this.everOrbit = false;
-    this.crashed = false;
+  /** Begin executing the plan. */
+  play() {
+    this.mode = 'sim';
     this.missionEnded = false;
-    this.lastImpactSpeedMs = 0;
-    this.flightState = this.buildFlightState('prelaunch');
+    this.timeScale = 1;
+    this.sim.reset();
+    this.rocket.reset(this.startPosition());
     this.trajectory.setVisible(false);
-    this.callbacks.onPhaseChange?.('prelaunch');
+    this.flightState = this.buildFlightState();
+    this.callbacks.onModeChange?.('sim');
     this.callbacks.onState?.(this.flightState);
   }
 
-  /** Jettison the active stage (called from the UI or keyboard). */
-  triggerStage() { this.input.triggerStage(); }
+  /** Return to planning, rewinding the rocket to the pad. */
+  edit() {
+    this.mode = 'plan';
+    this.missionEnded = false;
+    this.timeScale = 1;
+    this.sim.reset();
+    this.rocket.reset(this.startPosition());
+    this.flightState = this.buildFlightState();
+    this.updatePreview();
+    this.callbacks.onModeChange?.('plan');
+    this.callbacks.onState?.(this.flightState);
+  }
 
-  /**
-   * Fast-forward the simulation to the next end-of-flight event (touchdown or
-   * crash) so the player never has to wait out a long ballistic coast.
-   */
+  setBuild(build: RocketBuild) {
+    this.build = build;
+    this.rocket.setBuild(build);
+    this.cfg = this.buildConfig();
+    this.sim.setConfig(this.cfg);
+    this.edit();
+  }
+
+  setPlan(plan: FlightPlan) {
+    this.plan = clonePlan(plan);
+    this.sim.setPlan(this.plan);
+    if (this.plan.scenarioId !== getScenario(this.plan.scenarioId).id) { /* no-op guard */ }
+    this.sim.reset();
+    this.rocket.reset(this.startPosition());
+    if (this.mode === 'plan') this.updatePreview();
+    this.flightState = this.buildFlightState();
+    this.callbacks.onState?.(this.flightState);
+  }
+
+  /** Live aim update from the Angry-Birds drag controller. */
+  setLaunch(heading: number, power: number) {
+    this.plan.launch.heading = THREE.MathUtils.clamp(heading, -90, 90);
+    this.plan.launch.power = THREE.MathUtils.clamp(power, 0, 1);
+    this.sim.setPlan(this.plan);
+    if (this.mode === 'plan') {
+      this.sim.reset();
+      this.rocket.reset(this.startPosition());
+      this.updatePreview();
+    }
+  }
+
+  getPlan(): FlightPlan { return clonePlan(this.plan); }
+
+  /** Forward-run a sandbox simulation to draw the predicted trajectory. */
+  private updatePreview() {
+    const preview = new Simulator(this.cfg, this.plan);
+    preview.reset();
+    const points: THREE.Vector3[] = [preview.state.position.clone()];
+    let apo = 0;
+    let peri = Number.POSITIVE_INFINITY;
+    let impact = false;
+    let passedApo = false;
+    let prevAlt = 0;
+
+    for (let i = 0; i < PREVIEW_STEPS; i++) {
+      preview.step(PREVIEW_DT);
+      const alt = preview.altitude();
+      apo = Math.max(apo, alt);
+      if (alt < prevAlt) passedApo = true;
+      if (passedApo) peri = Math.min(peri, alt);
+      prevAlt = alt;
+      if (i % PREVIEW_SAMPLE === 0) points.push(preview.state.position.clone());
+      if (preview.finished) {
+        impact = preview.state.phase === 'destroyed' ||
+                 (preview.state.landedBodyId !== null && alt < 0.2 && preview.state.maxAltitude > 0.2 &&
+                  preview.state.lastImpactSpeedMs > 30);
+        points.push(preview.state.position.clone());
+        break;
+      }
+    }
+
+    if (!Number.isFinite(peri)) peri = apo;
+
+    let color = 0x00e5ff;
+    if (impact) color = 0xff5577;
+    else if (peri < KARMAN_LINE * 0.5) color = 0xffd54a;
+    else if (peri >= 80) color = 0x2ee59d;
+
+    this.trajectory.update(points, color);
+    this.trajectory.setVisible(true);
+
+    this.flightState = { ...this.flightState, apoapsis: apo, periapsis: impact ? 0 : peri };
+    this.callbacks.onPreview?.({ apoapsis: apo, periapsis: impact ? 0 : peri, impact });
+    this.callbacks.onState?.(this.flightState);
+  }
+
+  /** Fast-forward the watched flight to its end. */
   skipToCompletion() {
-    const phase = this.flightState.phase;
-    if (phase === 'prelaunch' || phase === 'landed' || phase === 'destroyed') return;
-
+    if (this.mode !== 'sim' || this.sim.finished) return;
     this.fastForwarding = true;
     for (let i = 0; i < SKIP_MAX_STEPS; i++) {
-      this.update(FIXED_DT);
-      const p = this.flightState.phase;
-      if (p === 'landed' || p === 'destroyed') break;
+      this.sim.step(FIXED_DT);
+      this.afterStep(FIXED_DT, false);
+      if (this.sim.finished) break;
     }
     this.fastForwarding = false;
-
-    this.updateTrajectory(this.flightState.altitude, this.flightState.phase);
+    this.rocket.applyState(this.sim.state, this.dominant().center, FIXED_DT);
+    this.flightState = this.buildFlightState();
     this.callbacks.onState?.(this.flightState);
     this.renderer.render();
   }
+
+  private dominant(): Body { return dominantBody(this.bodies, this.sim.state.position); }
 
   private loop = (time: number) => {
     if (!this.running) return;
@@ -137,245 +241,107 @@ export class Game {
 
     let rawDt = Math.min((time - this.lastTime) / 1000, 0.1);
     this.lastTime = time;
-    rawDt *= this.timeScale;
 
-    this.accumulator += rawDt;
-    while (this.accumulator >= FIXED_DT) {
-      this.update(FIXED_DT);
-      this.accumulator -= FIXED_DT;
+    if (this.mode === 'sim' && !this.sim.finished) {
+      rawDt *= this.timeScale;
+      this.accumulator += rawDt;
+      while (this.accumulator >= FIXED_DT) {
+        this.sim.step(FIXED_DT);
+        this.afterStep(FIXED_DT, true);
+        this.accumulator -= FIXED_DT;
+        if (this.sim.finished) break;
+      }
+      const center = this.dominant().center;
+      this.rocket.applyState(this.sim.state, center, FIXED_DT);
+      this.renderer.updateCameraOffset(this.sim.altitude());
+      this.renderer.followTarget(this.rocket.position, FIXED_DT);
+      this.flightState = this.buildFlightState();
+      this.callbacks.onState?.(this.flightState);
+    } else {
+      const center = this.dominant().center;
+      this.rocket.applyState(this.sim.state, center, FIXED_DT);
+      this.renderer.followTarget(this.rocket.position, FIXED_DT);
     }
+
     this.renderer.render();
   };
 
-  private update(dt: number) {
-    if (!this.fastForwarding && this.input.consumeReset()) {
-      this.reset();
-      return;
-    }
-    if (!this.fastForwarding && this.input.consumeStage()) {
-      this.rocket.stage();
-    }
+  /** Per-step side effects: thrust haptics, milestones, mission end. */
+  private afterStep(_dt: number, fireEvents: boolean) {
+    const s = this.sim.state;
 
-    const throttleDelta = this.input.getThrottleDelta();
-    const rotation      = this.input.getRotation();
-
-    if (throttleDelta !== 0) this.rocket.applyThrustDelta(throttleDelta * dt);
-    if (rotation !== 0)      this.rocket.rotate(rotation, dt);
-
-    const altitude = this.gravity.getAltitude(this.rocket.position);
-    const onGround = altitude < 0.001;
-
-    if (!onGround || this.rocket.velocity.lengthSq() > 0 || this.rocket.throttle > 0) {
-      const grav   = this.gravity.getAcceleration(this.rocket.position);
-      const thrust = this.rocket.getThrustAcceleration();
-      const drag   = this.atmosphere.getDragAcceleration(altitude, this.rocket.velocity, DRAG_COEFF);
-
-      const totalAccel = new THREE.Vector3().add(grav).add(thrust).add(drag);
-      this.rocket.velocity.addScaledVector(totalAccel, dt);
-      this.rocket.position.addScaledVector(this.rocket.velocity, dt);
-
-      const newAlt = this.gravity.getAltitude(this.rocket.position);
-      if (newAlt <= 0) this.clampToSurface();
+    if (fireEvents) {
+      if (s.justIgnited) this.callbacks.onThrustStart?.();
+      if (s.justStagedTo >= 0 && !s.justDeployedLander) this.callbacks.onStageSeparation?.();
+      if (s.justDeployedLander) this.callbacks.onLanderDeploy?.();
     }
 
-    this.rocket.update(dt);
-    this.earth.update(dt);
-
-    this.maxSpeed = Math.max(this.maxSpeed, this.rocket.velocity.length());
-
-    const newPhase = this.determinePhase(altitude);
-    if (newPhase === 'orbit') this.everOrbit = true;
-    const phaseChanged = newPhase !== this.flightState.phase;
-    this.flightState = this.buildFlightState(newPhase);
-
-    // Detect a truly spent rocket (no fuel and no stage left to fire).
-    if (
-      !this.outOfFuelFired &&
-      this.rocket.isSpent &&
-      (newPhase === 'flight' || newPhase === 'reentry') &&
-      this.flightState.maxAltitude * 1000 > 100 // launched past 100 m
-    ) {
-      this.outOfFuelFired = true;
-      this.callbacks.onOutOfFuel?.();
-    }
-
-    // Trajectory prediction (throttled, skipped while fast-forwarding).
-    if (!this.fastForwarding) {
-      this.predictTimer -= dt;
-      if (this.predictTimer <= 0) {
-        this.predictTimer = 0.2;
-        this.updateTrajectory(altitude, newPhase);
-      }
-    }
-
+    this.flightState = this.buildFlightState();
     this.milestones.check(this.flightState);
 
-    if (phaseChanged) {
-      this.callbacks.onPhaseChange?.(newPhase);
-      if (newPhase === 'landed')    this.endMission('landed');
-      if (newPhase === 'destroyed') this.endMission('crashed');
-    }
-
-    if (!this.fastForwarding) {
-      this.renderer.updateCameraOffset(altitude);
-      this.renderer.followTarget(this.rocket.position, dt);
-      this.callbacks.onState?.(this.flightState);
+    if (this.sim.finished && !this.missionEnded) {
+      this.missionEnded = true;
+      const outcome = s.phase === 'landed' ? 'landed' : 'crashed';
+      if (fireEvents) this.callbacks.onTouchdown?.(outcome, s.lastImpactSpeedMs);
+      this.callbacks.onMissionEnd?.(this.buildMissionResult(outcome));
     }
   }
 
-  private endMission(outcome: 'landed' | 'crashed') {
-    if (this.missionEnded) return;
-    this.missionEnded = true;
-
-    const landingSpeed = this.lastImpactSpeedMs;
-    if (outcome === 'landed') this.callbacks.onLanded?.(landingSpeed);
-    else                      this.callbacks.onCrashed?.();
-
-    this.callbacks.onMissionEnd?.(this.buildMissionResult(outcome, landingSpeed));
-  }
-
-  private buildMissionResult(outcome: 'landed' | 'crashed', landingSpeed: number): MissionResult {
-    const maxAltitude = this.flightState.maxAltitude;
+  private buildMissionResult(outcome: 'landed' | 'crashed'): MissionResult {
+    const s = this.sim.state;
+    const maxAltitude = s.maxAltitude;
     const reachedSpace = maxAltitude >= KARMAN_LINE;
-    const reachedOrbit = this.everOrbit;
+    const reachedBodies = Array.from(s.reachedBodyIds);
+    const transferCompleted = reachedBodies.some((id) => id !== this.launchBodyId);
 
     let score = Math.round(maxAltitude * 10);
-    if (reachedSpace)        score += 500;
-    if (reachedOrbit)        score += 1500;
+    if (reachedSpace)         score += 500;
+    if (s.everOrbit)          score += 1500;
     if (outcome === 'landed') score += 1000;
+    if (transferCompleted)    score += 2500;
 
     let rating = 'D';
-    if (score >= 3000)      rating = 'S';
-    else if (score >= 2000) rating = 'A';
-    else if (score >= 1000) rating = 'B';
-    else if (score >= 300)  rating = 'C';
+    if (score >= 4000)      rating = 'S';
+    else if (score >= 2500) rating = 'A';
+    else if (score >= 1200) rating = 'B';
+    else if (score >= 400)  rating = 'C';
 
     return {
       outcome,
       maxAltitude,
-      maxSpeed: this.maxSpeed,
-      landingSpeed,
+      maxSpeed: s.maxSpeed,
+      landingSpeed: s.lastImpactSpeedMs,
       reachedSpace,
-      reachedOrbit,
+      reachedOrbit: s.everOrbit,
       rating,
       score,
+      reachedBodies,
+      landedBody: s.landedBodyId,
+      transferCompleted,
     };
   }
 
-  private safeLandingSpeedMs(): number {
-    const utils = this.rocket.build.utilityIds;
-    let safe = BASE_SAFE_LANDING_MS;
-    if (utils.includes('parachute'))     safe += PARACHUTE_BONUS_MS;
-    if (utils.includes('landing-legs'))  safe += LEGS_BONUS_MS;
-    return safe;
-  }
-
-  private updateTrajectory(altitude: number, phase: FlightPhase) {
-    if (phase === 'prelaunch' || phase === 'landed' || phase === 'destroyed' || altitude < 0.2) {
-      this.trajectory.setVisible(false);
-      return;
-    }
-    const dt = altitude > 50 ? 2.0 : 0.8;
-    const steps = altitude > 100 ? 800 : 500;
-    const pred = this.predictor.predict(
-      this.rocket.position,
-      this.rocket.velocity,
-      DRAG_COEFF,
-      dt,
-      steps,
-    );
-    let color = 0x00e5ff;
-    if (pred.impact) color = 0xff5577;
-    else if (pred.periapsis < KARMAN_LINE * 0.5) color = 0xffd54a;
-    else if (pred.periapsis >= 80) color = 0x2ee59d;
-
-    this.trajectory.update(pred.points, color);
-
-    this.flightState.apoapsis = pred.apoapsis;
-    this.flightState.periapsis = pred.impact ? 0 : pred.periapsis;
-  }
-
-  private clampToSurface() {
-    const radial = new THREE.Vector3()
-      .subVectors(this.rocket.position, EARTH_CENTER)
-      .normalize();
-    const vRadial = radial.dot(this.rocket.velocity);
-    const impactMs = Math.max(0, -vRadial) * 1000;
-    this.lastImpactSpeedMs = impactMs;
-
-    const toSurface = radial.clone().multiplyScalar(EARTH_RADIUS + 0.001);
-    this.rocket.position.copy(EARTH_CENTER).add(toSurface);
-
-    // Hard impact after a real flight destroys the rocket.
-    if (
-      !this.missionEnded &&
-      !this.crashed &&
-      this.flightState.maxAltitude >= 0.2 &&
-      impactMs > this.safeLandingSpeedMs()
-    ) {
-      this.crashed = true;
-      this.rocket.velocity.set(0, 0, 0);
-      return;
-    }
-
-    if (vRadial < 0) {
-      this.rocket.velocity.addScaledVector(radial, -vRadial);
-      this.rocket.velocity.multiplyScalar(0.5);
-      if (this.rocket.velocity.length() * 1000 < 0.5) {
-        this.rocket.velocity.set(0, 0, 0);
-      }
-    }
-  }
-
-  private determinePhase(altitude: number): FlightPhase {
-    if (this.crashed) return 'destroyed';
-
-    const onGround = altitude < 0.01;
-    const inSpace  = altitude >= KARMAN_LINE;
-    const speedKm  = this.rocket.velocity.length();
-    const speedMs  = speedKm * 1000;
-
-    if (onGround && speedMs < 1 && this.rocket.throttle < 0.01) {
-      return (this.flightState?.maxAltitude ?? 0) > 0.1 ? 'landed' : 'prelaunch';
-    }
-    if (inSpace) {
-      const r = this.rocket.position.distanceTo(EARTH_CENTER);
-      const vCirc = Math.sqrt(GM / r);
-      const radial = new THREE.Vector3().subVectors(this.rocket.position, EARTH_CENTER).normalize();
-      const vHoriz = this.rocket.velocity.clone().addScaledVector(radial, -radial.dot(this.rocket.velocity));
-      if (vHoriz.length() > vCirc * 0.85) return 'orbit';
-      return 'flight';
-    }
-    if (altitude > 0.01) {
-      const radial = new THREE.Vector3().subVectors(this.rocket.position, EARTH_CENTER).normalize();
-      if (radial.dot(this.rocket.velocity) < -0.05 && (this.flightState?.maxAltitude ?? 0) >= KARMAN_LINE * 0.5) {
-        return 'reentry';
-      }
-      return 'flight';
-    }
-    return 'flight';
-  }
-
-  private buildFlightState(phase: FlightPhase): FlightState {
-    const altitude = this.gravity.getAltitude(this.rocket.position);
-    const speed = this.rocket.velocity.length();
-    const maxAltitude = Math.max(this.flightState?.maxAltitude ?? 0, altitude);
+  private buildFlightState(): FlightState {
+    const s = this.sim.state;
+    const altitude = this.sim.altitude();
+    const speed = s.velocity.length();
+    const stageCount = this.cfg.stages.length;
     return {
-      position:    this.rocket.position.clone(),
-      velocity:    this.rocket.velocity.clone(),
+      position: s.position.clone(),
+      velocity: s.velocity.clone(),
       altitude,
       speed,
-      fuel:        this.rocket.fuel,
-      throttle:    this.rocket.throttle,
-      angle:       this.rocket.angle,
-      phase,
-      maxAltitude,
-      maxSpeed:    Math.max(this.maxSpeed, speed),
-      apoapsis:    this.flightState?.apoapsis,
-      periapsis:   this.flightState?.periapsis,
-      activeStage: this.rocket.activeStage,
-      stageCount:  this.rocket.stageCount,
-      canStage:    this.rocket.canStage,
+      fuel: s.stageFuel[s.activeStage] ?? 0,
+      throttle: s.throttle,
+      angle: s.angle,
+      phase: s.phase as FlightPhase,
+      maxAltitude: s.maxAltitude,
+      maxSpeed: s.maxSpeed,
+      apoapsis: this.flightState?.apoapsis,
+      periapsis: this.flightState?.periapsis,
+      activeStage: s.activeStage,
+      stageCount,
+      canStage: s.activeStage < stageCount - 1,
     };
   }
 
@@ -383,10 +349,9 @@ export class Game {
 
   destroy() {
     this.stop();
-    this.input.dispose();
     this.trajectory.dispose();
     this.rocket.dispose();
-    this.earth.dispose();
+    this.planets.forEach((p) => p.dispose());
     this.renderer.dispose();
   }
 }
