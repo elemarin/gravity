@@ -341,11 +341,25 @@ export class Game {
       activeStage: s.activeStage,
       stageCount,
       canStage: s.activeStage < stageCount - 1,
+      parachuteDeployed: s.deployedParachute,
       launchBodyId: this.launchBodyId,
       landedBodyId: s.landedBodyId,
       reachedBodyIds: Array.from(s.reachedBodyIds),
       landerDeployed: s.deployedLander,
     };
+  }
+
+  get hasParachute(): boolean { return this.cfg.hasParachute; }
+
+  manualStage() {
+    if (this.mode !== 'sim' || this.sim.finished) return;
+    const staged = this.sim.manualStage();
+    if (staged) this.callbacks.onStageSeparation?.();
+  }
+
+  manualParachute() {
+    if (this.mode !== 'sim' || this.sim.finished) return;
+    this.sim.manualParachute();
   }
 
   getNextMilestone() { return this.milestones.getNextTarget(); }

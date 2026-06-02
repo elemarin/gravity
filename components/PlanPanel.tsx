@@ -62,7 +62,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
   const otherBodies = bodies.slice(1);
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-30
+    <div className="absolute inset-x-0 bottom-0 z-30 font-pixel
                     pb-[calc(0.75rem+env(safe-area-inset-bottom))]
                     px-[calc(0.75rem+env(safe-area-inset-left))]
                     pr-[calc(0.75rem+env(safe-area-inset-right))]">
@@ -70,15 +70,17 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
         {/* Header row */}
         <button
           onClick={() => setOpen((o) => !o)}
-          className="flex items-center justify-between px-4 py-2.5 border-b border-white/5"
+          className="flex items-center justify-between px-3 py-2.5 border-b border-white/5"
         >
-          <span className="stat-label">Flight Plan</span>
-          <span className="flex items-center gap-2 text-[10px] text-dim tabular-nums">
+          <span className="text-[7px] tracking-[0.2em] uppercase text-cyan" style={{ textShadow: '0 0 8px rgba(0,229,255,0.4)' }}>
+            ▸ FLIGHT PLAN
+          </span>
+          <span className="flex items-center gap-2 text-[7px] text-dim tabular-nums">
             {preview && (
               <>
-                <span className="text-green">Ap {fmtKm(preview.apoapsis)}</span>
+                <span className="text-green">AP {fmtKm(preview.apoapsis)}</span>
                 <span className={preview.impact ? 'text-red' : 'text-cyan'}>
-                  {preview.impact ? 'Impact' : `Pe ${fmtKm(preview.periapsis)}`}
+                  {preview.impact ? 'IMPACT' : `PE ${fmtKm(preview.periapsis)}`}
                 </span>
               </>
             )}
@@ -212,7 +214,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
 
         {/* Play */}
         <div className="px-3 pb-3 pt-1">
-          <button onClick={onPlay} className="btn btn-primary w-full text-base py-3">▶ Play flight</button>
+          <button onClick={onPlay} className="btn btn-primary w-full py-3" style={{ fontSize: 10 }}>▶ LAUNCH</button>
         </div>
       </div>
     </div>

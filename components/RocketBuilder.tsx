@@ -8,16 +8,14 @@ import { RocketBuild, StageSpec, DEFAULT_BUILD } from '@/lib/game/types';
 import { computeStats, estimateBuildDeltaV, getStages } from '@/lib/game/BuildSpec';
 import { loadBuild, saveBuild, loadUnlockedParts } from '@/lib/storage';
 
-const CATEGORY_ORDER: { type: PartType; label: string }[] = [
-  { type: 'engine',  label: 'Engines' },
-  { type: 'tank',    label: 'Tanks'   },
-  { type: 'nose',    label: 'Noses'   },
-  { type: 'capsule', label: 'Capsules'},
-  { type: 'lander',  label: 'Landers' },
-  { type: 'utility', label: 'Utility' },
+const CATEGORIES: { type: PartType; label: string; short: string }[] = [
+  { type: 'engine',  label: 'Engines',  short: 'ENG'  },
+  { type: 'tank',    label: 'Tanks',    short: 'TANK' },
+  { type: 'nose',    label: 'Nose',     short: 'NOSE' },
+  { type: 'lander',  label: 'Landers',  short: 'LAND' },
+  { type: 'utility', label: 'Utility',  short: 'UTIL' },
 ];
 
-/** Keep the legacy engineId/tankIds mirrored to stage 0 for save compatibility. */
 function withStages(build: RocketBuild, stages: StageSpec[]): RocketBuild {
   const safe = stages.length > 0 ? stages : [{ engineId: 'engine-basic', tankIds: ['tank-basic'] }];
   return {
@@ -33,49 +31,33 @@ export default function RocketBuilder() {
   const [build, setBuild] = useState<RocketBuild>(DEFAULT_BUILD);
   const [unlocked, setUnlocked] = useState<Set<string>>(new Set());
   const [selectedStage, setSelectedStage] = useState(0);
+  const [activeCategory, setActiveCategory] = useState<PartType>('engine');
 
   useEffect(() => {
     setBuild(loadBuild());
-    const unlockedIds = new Set(loadUnlockedParts());
-    PARTS_CATALOG.forEach((p) => { if (p.unlockedByDefault) unlockedIds.add(p.id); });
-    setUnlocked(unlockedIds);
+    const ids = new Set(loadUnlockedParts());
+    PARTS_CATALOG.forEach((p) => { if (p.unlockedByDefault) ids.add(p.id); });
+    setUnlocked(ids);
   }, []);
 
-  const stages = useMemo(() => getStages(build), [build]);
-  const stats  = useMemo(() => computeStats(build), [build]);
-  const deltaV = useMemo(() => estimateBuildDeltaV(build), [build]);
-
-  const partsByCategory = useMemo(() => {
-    const map = new Map<PartType, RocketPart[]>();
-    PARTS_CATALOG.forEach((p) => {
-      const list = map.get(p.type) ?? [];
-      list.push(p);
-      map.set(p.type, list);
-    });
-    return map;
-  }, []);
-
+  const stages  = useMemo(() => getStages(build), [build]);
+  const stats   = useMemo(() => computeStats(build), [build]);
+  const deltaV  = useMemo(() => estimateBuildDeltaV(build), [build]);
   const activeStage = Math.min(selectedStage, stages.length - 1);
 
+  const categoryParts = useMemo(
+    () => PARTS_CATALOG.filter((p) => p.type === activeCategory),
+    [activeCategory],
+  );
+
   const setStageEngine = (id: string) =>
-    setBuild((b) => {
-      const s = getStages(b).map((st, i) => (i === activeStage ? { ...st, engineId: id } : st));
-      return withStages(b, s);
-    });
+    setBuild((b) => withStages(b, getStages(b).map((st, i) => i === activeStage ? { ...st, engineId: id } : st)));
 
   const addTankToStage = (id: string) =>
-    setBuild((b) => {
-      const s = getStages(b).map((st, i) =>
-        i === activeStage ? { ...st, tankIds: [...st.tankIds, id] } : st);
-      return withStages(b, s);
-    });
+    setBuild((b) => withStages(b, getStages(b).map((st, i) => i === activeStage ? { ...st, tankIds: [...st.tankIds, id] } : st)));
 
-  const removeTankFromStage = (si: number, index: number) =>
-    setBuild((b) => {
-      const s = getStages(b).map((st, i) =>
-        i === si ? { ...st, tankIds: st.tankIds.filter((_, k) => k !== index) } : st);
-      return withStages(b, s);
-    });
+  const removeTankFromStage = (si: number, ti: number) =>
+    setBuild((b) => withStages(b, getStages(b).map((st, i) => i === si ? { ...st, tankIds: st.tankIds.filter((_, k) => k !== ti) } : st)));
 
   const addStage = () =>
     setBuild((b) => {
@@ -94,45 +76,56 @@ export default function RocketBuilder() {
     });
 
   const setNose = (id: string) => setBuild((b) => ({ ...b, noseId: id }));
-  const toggleLander = (id: string) =>
-    setBuild((b) => ({ ...b, landerId: b.landerId === id ? undefined : id }));
+  const toggleLander = (id: string) => setBuild((b) => ({ ...b, landerId: b.landerId === id ? undefined : id }));
   const toggleUtility = (id: string) =>
     setBuild((b) => ({
       ...b,
-      utilityIds: b.utilityIds.includes(id)
-        ? b.utilityIds.filter((x) => x !== id)
-        : [...b.utilityIds, id],
+      utilityIds: b.utilityIds.includes(id) ? b.utilityIds.filter((x) => x !== id) : [...b.utilityIds, id],
     }));
 
-  const saveAndLaunch = () => {
-    saveBuild(build);
-    router.push('/play');
+  const handlePartTap = (p: RocketPart) => {
+    if (!unlocked.has(p.id)) return;
+    if (p.type === 'engine')  setStageEngine(p.id);
+    else if (p.type === 'tank') addTankToStage(p.id);
+    else if (p.type === 'nose' || p.type === 'capsule') setNose(p.id);
+    else if (p.type === 'lander') toggleLander(p.id);
+    else if (p.type === 'utility') toggleUtility(p.id);
   };
 
-  const reset = () => { setBuild(DEFAULT_BUILD); setSelectedStage(0); };
+  const isSelected = (p: RocketPart): boolean => {
+    const stage = stages[activeStage];
+    if (p.type === 'engine')  return stage?.engineId === p.id;
+    if (p.type === 'tank')    return !!stage?.tankIds.includes(p.id);
+    if (p.type === 'nose' || p.type === 'capsule') return build.noseId === p.id;
+    if (p.type === 'lander')  return build.landerId === p.id;
+    if (p.type === 'utility') return build.utilityIds.includes(p.id);
+    return false;
+  };
+
+  const twr = stats.wetMass > 0 ? (stats.thrust / (stats.wetMass * 9.81)) : 0;
 
   return (
-    <main className="fixed inset-0 overflow-hidden flex flex-col bg-bg">
-      {/* Header */}
-      <header className="shrink-0 flex items-center justify-between gap-2 px-4 py-3
-                         pt-[calc(0.75rem+env(safe-area-inset-top))] border-b border-white/5">
-        <Link href="/" className="w-10 h-10 rounded-full border border-white/15 bg-white/5
-                                  flex items-center justify-center text-ink hover:border-white/30 active:scale-95">←</Link>
-        <h1 className="text-base sm:text-xl font-black tracking-widest text-ink">ROCKET BUILDER</h1>
-        <button onClick={reset} aria-label="Reset"
-                className="w-10 h-10 rounded-full border border-white/15 bg-white/5
-                           flex items-center justify-center text-dim hover:text-ink hover:border-white/30 active:scale-95">↻</button>
+    <main className="fixed inset-0 flex flex-col bg-bg overflow-hidden"
+          style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+
+      {/* ── Header ── */}
+      <header className="shrink-0 flex items-center justify-between px-4 py-2.5 border-b border-white/5">
+        <Link href="/"
+              className="w-9 h-9 rounded-full border border-white/15 bg-white/5
+                         flex items-center justify-center text-ink hover:border-white/30 active:scale-95">←</Link>
+        <h1 className="text-sm font-black tracking-widest text-ink">ROCKET BUILDER</h1>
+        <button onClick={() => { setBuild(DEFAULT_BUILD); setSelectedStage(0); }}
+                className="w-9 h-9 rounded-full border border-white/15 bg-white/5
+                           flex items-center justify-center text-dim hover:text-ink hover:border-white/30 active:scale-95"
+                aria-label="Reset">↻</button>
       </header>
 
-      {/* Body — split layout */}
-      <div className="flex-1 overflow-hidden grid grid-cols-1 sm:grid-cols-[260px_1fr] gap-3 p-3">
-        {/* Visual stack */}
-        <aside className="panel p-4 overflow-y-auto flex flex-col">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="stat-label">Your Rocket</h2>
-            <span className="text-[10px] text-dim tabular-nums">{stages.length} stage{stages.length > 1 ? 's' : ''}</span>
-          </div>
-          <RocketStack
+      {/* ── Rocket preview ── */}
+      <div className="shrink-0 flex items-start justify-center gap-6 px-4 py-3"
+           style={{ minHeight: '38vh', maxHeight: '42vh' }}>
+        {/* Blueprint */}
+        <div className="flex-1 flex flex-col items-center justify-end h-full overflow-hidden">
+          <BlueprintRocket
             stages={stages}
             noseId={build.noseId}
             landerId={build.landerId}
@@ -141,128 +134,140 @@ export default function RocketBuilder() {
             onSelectStage={setSelectedStage}
             onRemoveTank={removeTankFromStage}
             onRemoveStage={removeStage}
+            onAddStage={addStage}
           />
-          <button onClick={addStage}
-                  className="mt-3 w-full rounded-lg border border-dashed border-cyan/40 bg-cyan/[0.06]
-                             text-cyan text-xs font-bold py-2 hover:bg-cyan/15 active:scale-[0.98]">
-            ＋ Add Stage
-          </button>
-          <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-            <Stat label="Dry mass" value={`${stats.dryMass.toFixed(2)} t`} />
-            <Stat label="Wet mass" value={`${stats.wetMass.toFixed(2)} t`} />
-            <Stat label="Thrust"   value={`${stats.thrust.toFixed(0)} kN`} />
-            <Stat label="Fuel"     value={`${stats.fuelCapacity.toFixed(0)} L`} />
-            <Stat label="Δv (est)" value={`${deltaV.toFixed(0)} m/s`} highlight />
-            <Stat label="TWR"      value={
-              stats.wetMass > 0
-                ? (stats.thrust / (stats.wetMass * 9.81)).toFixed(2)
-                : '—'
-            } />
-          </div>
-          <button onClick={saveAndLaunch} className="btn btn-primary mt-4 w-full text-base py-3">
-            🚀 Save &amp; Launch
-          </button>
-        </aside>
+        </div>
 
-        {/* Palette */}
-        <section className="panel p-4 overflow-y-auto">
-          <div className="mb-4 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-[11px] text-dim">
-            Editing <span className="text-cyan font-bold">Stage {activeStage + 1}</span>
-            {' '}· engines &amp; tanks apply to this stage. Lower stages fire and drop first.
-          </div>
-          {CATEGORY_ORDER.map(({ type, label }) => {
-            const items = partsByCategory.get(type) ?? [];
-            if (items.length === 0) return null;
+        {/* Stats column */}
+        <div className="shrink-0 flex flex-col gap-2 justify-center h-full py-2" style={{ minWidth: 110 }}>
+          <StatCard label="MASS" value={`${stats.wetMass.toFixed(1)} t`} />
+          <StatCard label="THRUST" value={`${stats.thrust.toFixed(0)} kN`} />
+          <StatCard label="TWR" value={twr.toFixed(2)} highlight={twr > 1} />
+          <StatCard label="Δv EST" value={`${deltaV.toFixed(0)} m/s`} highlight />
+          <StatCard label="FUEL" value={`${stats.fuelCapacity.toFixed(0)} L`} />
+        </div>
+      </div>
+
+      {/* ── Stage hint ── */}
+      <div className="shrink-0 px-4 pb-1">
+        <div className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-1.5 text-[10px] text-dim text-center">
+          Editing <span className="text-cyan font-bold">Stage {activeStage + 1}</span>
+          {' '}— tap a part below to add it
+        </div>
+      </div>
+
+      {/* ── Category tabs ── */}
+      <div className="shrink-0 flex gap-1.5 px-4 py-2 overflow-x-auto no-scrollbar">
+        {CATEGORIES.map(({ type, short }) => (
+          <button
+            key={type}
+            onClick={() => setActiveCategory(type)}
+            className={`shrink-0 h-8 px-3 rounded-full border text-[10px] font-black tracking-widest uppercase
+              transition-all active:scale-95
+              ${activeCategory === type
+                ? 'border-cyan/60 bg-cyan/15 text-cyan shadow-[0_0_10px_rgba(0,229,255,0.2)]'
+                : 'border-white/10 bg-white/[0.04] text-dim'}`}
+          >{short}</button>
+        ))}
+      </div>
+
+      {/* ── Parts drawer ── */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 pb-1">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {categoryParts.map((p) => {
+            const isUnlk = unlocked.has(p.id);
+            const sel = isSelected(p);
             return (
-              <div key={type} className="mb-5">
-                <h3 className="stat-label mb-2">{label}</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {items.map((p) => {
-                    const isUnlocked = unlocked.has(p.id);
-                    const selected = isSelected(build, stages[activeStage], p);
-                    return (
-                      <button
-                        key={p.id}
-                        disabled={!isUnlocked}
-                        onClick={() => {
-                          if (!isUnlocked) return;
-                          if (p.type === 'engine')  setStageEngine(p.id);
-                          else if (p.type === 'tank') addTankToStage(p.id);
-                          else if (p.type === 'nose' || p.type === 'capsule') setNose(p.id);
-                          else if (p.type === 'lander') toggleLander(p.id);
-                          else if (p.type === 'utility') toggleUtility(p.id);
-                        }}
-                        className={`text-left rounded-xl border p-3 transition-all active:scale-[0.98]
-                                    ${selected ? 'border-cyan/70 bg-cyan/10 shadow-[0_0_14px_rgba(0,229,255,0.25)]' :
-                                                isUnlocked ? 'border-white/10 bg-white/[0.04] hover:border-white/30' :
-                                                            'border-white/5 bg-white/[0.02] opacity-40 cursor-not-allowed'}`}
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xl" style={{ color: `#${p.color.toString(16).padStart(6, '0')}` }}>
-                            {p.icon}
-                          </span>
-                          <span className="text-xs font-bold text-ink truncate">{p.name}</span>
-                          {!isUnlocked && <span className="ml-auto text-[10px]">🔒</span>}
-                        </div>
-                        <div className="text-[10px] text-dim line-clamp-2">{p.description}</div>
-                        <PartStats part={p} />
-                      </button>
-                    );
-                  })}
+              <button
+                key={p.id}
+                disabled={!isUnlk}
+                onClick={() => handlePartTap(p)}
+                className={`relative flex flex-col items-start gap-1 rounded-2xl border p-3
+                            text-left transition-all active:scale-[0.97]
+                            ${sel
+                              ? 'border-cyan/70 bg-cyan/[0.08] shadow-[0_0_16px_rgba(0,229,255,0.2)]'
+                              : isUnlk
+                                ? 'border-white/10 bg-white/[0.04] hover:border-white/25'
+                                : 'border-white/5 bg-white/[0.02] opacity-35 cursor-not-allowed'}`}
+              >
+                {/* Part icon + lock */}
+                <div className="flex items-center w-full gap-2">
+                  <span className="text-2xl leading-none"
+                        style={{ color: `#${p.color.toString(16).padStart(6, '0')}` }}>
+                    {p.icon}
+                  </span>
+                  {!isUnlk && (
+                    <span className="ml-auto text-[11px] text-dim/50">🔒</span>
+                  )}
+                  {sel && (
+                    <span className="ml-auto text-[10px] font-black text-cyan">✓</span>
+                  )}
                 </div>
-              </div>
+                {/* Name */}
+                <span className="text-xs font-bold text-ink leading-tight">{p.name}</span>
+                {/* Key stat */}
+                <PartStat part={p} />
+              </button>
             );
           })}
-        </section>
+        </div>
+      </div>
+
+      {/* ── Launch button ── */}
+      <div className="shrink-0 px-4 py-3 border-t border-white/5">
+        <button
+          onClick={() => { saveBuild(build); router.push('/play'); }}
+          className="btn btn-primary w-full text-base py-3.5"
+        >
+          🚀 Save &amp; Launch
+        </button>
       </div>
     </main>
   );
 }
 
-function isSelected(build: RocketBuild, stage: StageSpec | undefined, p: RocketPart): boolean {
-  if (p.type === 'engine')  return stage?.engineId === p.id;
-  if (p.type === 'tank')    return !!stage?.tankIds.includes(p.id);
-  if (p.type === 'nose' || p.type === 'capsule') return build.noseId === p.id;
-  if (p.type === 'lander')  return build.landerId === p.id;
-  if (p.type === 'utility') return build.utilityIds.includes(p.id);
-  return false;
-}
-
-function PartStats({ part }: { part: RocketPart }) {
-  if (part.type === 'engine') {
-    return (
-      <div className="mt-2 flex gap-2 text-[9px] tabular-nums text-dim">
-        <span className="text-orange">⚡ {part.thrust} kN</span>
-        <span>· {part.burnRate} L/s</span>
-      </div>
-    );
-  }
-  if (part.type === 'tank') {
-    return <div className="mt-2 text-[9px] tabular-nums text-cyan">⛽ {part.fuelCapacity} L</div>;
-  }
-  if (part.type === 'lander') {
-    return (
-      <div className="mt-2 flex gap-2 text-[9px] tabular-nums text-dim">
-        <span className="text-orange">⚡ {part.thrust} kN</span>
-        <span className="text-cyan">⛽ {part.fuelCapacity} L</span>
-      </div>
-    );
-  }
-  return <div className="mt-2 text-[9px] tabular-nums text-dim">{part.mass} t</div>;
-}
-
-function Stat({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+function StatCard({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   return (
-    <div className="flex flex-col">
-      <span className="stat-label">{label}</span>
-      <span className={`tabular-nums font-bold ${highlight ? 'text-cyan' : 'text-ink'}`}>{value}</span>
+    <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1.5">
+      <div className="text-[8px] font-bold tracking-[0.15em] uppercase text-dim">{label}</div>
+      <div className={`text-[13px] font-bold tabular-nums leading-tight ${highlight ? 'text-cyan' : 'text-ink'}`}>
+        {value}
+      </div>
     </div>
   );
 }
 
-function RocketStack({
-  stages, noseId, landerId, utilityIds, selectedStage,
-  onSelectStage, onRemoveTank, onRemoveStage,
+function PartStat({ part }: { part: RocketPart }) {
+  if (part.type === 'engine') return (
+    <div className="text-[9px] tabular-nums text-dim">
+      <span className="text-orange">⚡{part.thrust}kN</span>
+      <span className="mx-1">·</span>
+      <span>{part.burnRate}L/s</span>
+    </div>
+  );
+  if (part.type === 'tank') return (
+    <div className="text-[9px] tabular-nums text-cyan">⛽ {part.fuelCapacity} L</div>
+  );
+  if (part.type === 'lander') return (
+    <div className="text-[9px] tabular-nums text-dim">
+      <span className="text-orange">⚡{part.thrust}kN</span>
+      <span className="mx-1">·</span>
+      <span className="text-cyan">{part.fuelCapacity}L</span>
+    </div>
+  );
+  return <div className="text-[9px] tabular-nums text-dim">{part.mass} t</div>;
+}
+
+// ─── Blueprint rocket diagram ────────────────────────────────────────────────
+
+function colorFor(id: string): string {
+  const p = PARTS_CATALOG.find((x) => x.id === id);
+  return p ? `#${p.color.toString(16).padStart(6, '0')}` : '#888';
+}
+
+function BlueprintRocket({
+  stages, noseId, landerId, utilityIds,
+  selectedStage, onSelectStage, onRemoveTank, onRemoveStage, onAddStage,
 }: {
   stages: StageSpec[];
   noseId: string;
@@ -270,31 +275,35 @@ function RocketStack({
   utilityIds: string[];
   selectedStage: number;
   onSelectStage: (i: number) => void;
-  onRemoveTank: (stageIndex: number, tankIndex: number) => void;
-  onRemoveStage: (stageIndex: number) => void;
+  onRemoveTank: (si: number, ti: number) => void;
+  onRemoveStage: (si: number) => void;
+  onAddStage: () => void;
 }) {
   const noseColor = colorFor(noseId);
   const lander = landerId ? PARTS_CATALOG.find((x) => x.id === landerId) : undefined;
+  const TANK_H = 44;
+  const TANK_W = 52;
 
   return (
-    <div className="relative flex flex-col items-center mx-auto" style={{ width: 132 }}>
+    <div className="flex flex-col items-center select-none w-full" style={{ maxWidth: 140 }}>
       {/* Nose */}
-      <div className="w-0 h-0"
+      <div className="w-0 h-0 mb-0"
            style={{
-             borderLeft: '24px solid transparent',
-             borderRight: '24px solid transparent',
-             borderBottom: `48px solid ${noseColor}`,
+             borderLeft: '22px solid transparent',
+             borderRight: '22px solid transparent',
+             borderBottom: `44px solid ${noseColor}`,
+             filter: 'drop-shadow(0 -2px 6px rgba(255,255,255,0.15))',
            }} />
 
+      {/* Lander label if present */}
       {lander && (
-        <div className="mb-0.5 flex items-center gap-1 rounded-full border border-cyan/40 bg-cyan/[0.08]
-                        px-2 py-0.5 text-[9px] font-bold text-cyan">
-          <span>{lander.icon}</span>
-          <span className="truncate max-w-[80px]">{lander.name}</span>
+        <div className="mb-1 flex items-center gap-1 rounded-full border border-cyan/35
+                        bg-cyan/[0.07] px-2 py-0.5 text-[8px] font-bold text-cyan">
+          {lander.icon} {lander.name}
         </div>
       )}
 
-      {/* Stages, top-most stage first in DOM */}
+      {/* Stages — rendered top to bottom, but stage ordering is bottom-first */}
       {stages.map((_, idx) => stages.length - 1 - idx).map((si) => {
         const stage = stages[si];
         const selected = si === selectedStage;
@@ -303,59 +312,72 @@ function RocketStack({
             key={si}
             type="button"
             onClick={() => onSelectStage(si)}
-            className={`relative w-full flex flex-col items-center rounded-md py-1.5 my-0.5 transition
-                        border ${selected ? 'border-cyan/70 bg-cyan/[0.08]' : 'border-transparent hover:border-white/15'}`}
+            className={`relative flex flex-col items-center rounded-md transition w-full
+                        border-x-2 ${selected ? 'border-cyan/70 bg-cyan/[0.06]' : 'border-transparent'}`}
           >
-            <span className={`absolute -left-0.5 top-1 text-[8px] font-black tracking-wider
-                              ${selected ? 'text-cyan' : 'text-dim'}`}>S{si + 1}</span>
+            {/* Stage label */}
+            <span className={`absolute -left-5 top-1 text-[8px] font-black
+                              ${selected ? 'text-cyan' : 'text-dim/50'}`}>S{si + 1}</span>
 
-            {/* Tanks (top to bottom) */}
+            {/* Tanks */}
             {stage.tankIds.map((id, ti) => (
-              <div key={ti} className="relative w-12 h-12 border-x-2 border-black/30"
-                   style={{ background: colorFor(id) }}>
-                <span
+              <div key={ti}
+                   className="relative flex items-center justify-center border-x border-black/20"
+                   style={{ width: TANK_W, height: TANK_H, background: colorFor(id) }}>
+                <button
+                  type="button"
                   onClick={(e) => { e.stopPropagation(); onRemoveTank(si, ti); }}
-                  className="absolute -right-6 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full
-                             bg-red/20 text-red text-[10px] leading-5 text-center border border-red/40
-                             hover:bg-red/40 active:scale-90 cursor-pointer"
-                  aria-label="Remove tank">✕</span>
+                  className="absolute right-0.5 top-0.5 w-4 h-4 rounded-full
+                             bg-black/40 text-white/70 text-[9px] leading-4 text-center
+                             hover:bg-red/60 hover:text-white active:scale-90 z-10"
+                  aria-label="Remove tank">✕</button>
               </div>
             ))}
 
-            {/* Engine */}
-            <div className="w-14 h-5"
+            {/* Engine nozzle shape */}
+            <div className="mt-0"
                  style={{
+                   width: TANK_W + 8,
+                   height: 18,
                    background: colorFor(stage.engineId),
-                   clipPath: 'polygon(8% 0, 92% 0, 100% 100%, 0 100%)',
+                   clipPath: 'polygon(6% 0, 94% 0, 100% 100%, 0 100%)',
                  }} />
 
+            {/* Remove stage */}
             {stages.length > 1 && (
-              <span
+              <button
+                type="button"
                 onClick={(e) => { e.stopPropagation(); onRemoveStage(si); }}
-                className="absolute -right-6 top-1 w-5 h-5 rounded-full bg-white/10 text-dim text-[9px]
-                           leading-5 text-center border border-white/20 hover:text-red hover:border-red/40
-                           active:scale-90 cursor-pointer"
-                aria-label="Remove stage">🗑</span>
+                className="absolute -right-5 top-1 w-4 h-4 rounded-full bg-white/5 text-dim
+                           text-[8px] leading-4 text-center border border-white/15
+                           hover:text-red hover:border-red/40 active:scale-90 z-10"
+                aria-label="Remove stage">🗑</button>
             )}
           </button>
         );
       })}
 
+      {/* Add stage */}
+      <button
+        onClick={onAddStage}
+        className="mt-2 w-full rounded-md border border-dashed border-cyan/30
+                   text-cyan text-[9px] font-bold py-1.5 hover:bg-cyan/10 active:scale-95"
+        style={{ maxWidth: TANK_W + 20 }}
+      >＋</button>
+
+      {/* Utility badges */}
       {utilityIds.length > 0 && (
-        <div className="mt-2 flex flex-wrap justify-center gap-1 text-[10px]">
+        <div className="mt-1.5 flex flex-wrap justify-center gap-1">
           {utilityIds.map((id) => {
             const p = PARTS_CATALOG.find((x) => x.id === id);
-            if (!p) return null;
-            return <span key={id} className="pill px-2 py-0.5 text-dim">{p.icon}</span>;
+            return p ? (
+              <span key={id} className="rounded-full border border-white/15 bg-white/5 px-1.5 py-0.5 text-[9px] text-dim">
+                {p.icon}
+              </span>
+            ) : null;
           })}
         </div>
       )}
     </div>
   );
-}
-
-function colorFor(id: string): string {
-  const p = PARTS_CATALOG.find((x) => x.id === id);
-  if (!p) return '#888';
-  return `#${p.color.toString(16).padStart(6, '0')}`;
 }

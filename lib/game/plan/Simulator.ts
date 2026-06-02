@@ -207,6 +207,20 @@ export class Simulator {
     if (a.deployParachute) s.deployedParachute = true;
   }
 
+  /** Real-time user-initiated stage separation. */
+  manualStage(): boolean {
+    if (this.state.phase === 'landed' || this.state.phase === 'destroyed') return false;
+    return this.doStage();
+  }
+
+  /** Real-time user-initiated parachute deployment. */
+  manualParachute(): boolean {
+    if (!this.cfg.hasParachute || this.state.deployedParachute) return false;
+    if (this.state.phase === 'landed' || this.state.phase === 'destroyed') return false;
+    this.state.deployedParachute = true;
+    return true;
+  }
+
   private doStage(): boolean {
     const s = this.state;
     if (s.activeStage >= this.cfg.stages.length - 1) return false;
