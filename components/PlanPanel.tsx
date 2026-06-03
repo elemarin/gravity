@@ -114,12 +114,15 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
     <div className="absolute inset-x-0 bottom-0 z-30 font-pixel
                     pb-[calc(0.75rem+env(safe-area-inset-bottom))]
                     px-[calc(0.75rem+env(safe-area-inset-left))]
-                    pr-[calc(0.75rem+env(safe-area-inset-right))]">
-      <div className="panel mx-auto max-w-md flex flex-col overflow-hidden">
+                    pr-[calc(0.75rem+env(safe-area-inset-right))]
+                    md:inset-y-0 md:right-auto md:bottom-auto md:w-[380px] md:max-w-[38vw]
+                    md:p-3 md:flex md:items-stretch">
+      <div className="panel mx-auto max-w-md flex flex-col overflow-hidden
+                      md:mx-0 md:max-w-none md:w-full md:h-full">
         {/* Header row */}
         <button
           onClick={() => setOpen((o) => !o)}
-          className="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-white/10"
+          className="shrink-0 flex items-center justify-between gap-2 px-3 py-2.5 border-b border-white/10"
         >
           <span className="shrink-0 text-[10px] tracking-[0.2em] uppercase text-cyan font-black">
             ▸ FLIGHT PLAN
@@ -138,7 +141,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
         </button>
 
         {open && (
-          <div className="max-h-[46vh] overflow-y-auto px-3 py-3 flex flex-col gap-2">
+          <div className="max-h-[46vh] md:max-h-none md:flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2">
             {/* Destination */}
             <div>
               <div className="flex items-center justify-between">
@@ -182,7 +185,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                 <div className="mt-2 rounded-lg border border-white/10 bg-white/[0.04] p-2">
                   <Slider
                     label="Orbit" enabled value={Math.round(mission.orbitKm)}
-                    min={Math.round(orbitMin)} max={Math.round(orbitMax)} step={5} suffix="km"
+                    min={Math.round(orbitMin)} max={Math.round(orbitMax)} step={1} suffix="km"
                     onToggle={() => {}}
                     onChange={setOrbitKm}
                   />
@@ -205,13 +208,13 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
               <span className="stat-label">Launch</span>
               <Slider
                 label="Aim" enabled value={plan.launch.heading}
-                min={-90} max={90} step={5} suffix="°"
+                min={-90} max={90} step={1} suffix="°"
                 onToggle={() => {}}
                 onChange={(v) => setLaunch({ heading: v })}
               />
               <Slider
                 label="Power" enabled value={Math.round(plan.launch.power * 100)}
-                min={0} max={100} step={5} suffix="%"
+                min={0} max={100} step={1} suffix="%"
                 onToggle={() => {}}
                 onChange={(v) => setLaunch({ power: v / 100 })}
               />
@@ -303,7 +306,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                           enabled={node.actions.heading !== undefined}
                           onToggle={(on) => updateActions(node.id, { heading: on ? (node.actions.heading ?? 45) : undefined })}
                           value={node.actions.heading ?? 0}
-                          min={-90} max={90} step={5} suffix="°"
+                          min={-90} max={90} step={1} suffix="°"
                           onChange={(v) => updateActions(node.id, { heading: v })}
                         />
                         <Slider
@@ -311,7 +314,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                           enabled={node.actions.throttle !== undefined}
                           onToggle={(on) => updateActions(node.id, { throttle: on ? (node.actions.throttle ?? 1) : undefined })}
                           value={Math.round((node.actions.throttle ?? 0) * 100)}
-                          min={0} max={100} step={5} suffix="%"
+                          min={0} max={100} step={1} suffix="%"
                           onChange={(v) => updateActions(node.id, { throttle: v / 100 })}
                         />
 
@@ -359,7 +362,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
         )}
 
         {/* Play */}
-        <div className="px-3 pb-3 pt-1">
+        <div className="shrink-0 px-3 pb-3 pt-1 border-t border-white/10">
           <button onClick={onPlay} className="btn btn-primary w-full py-3.5" style={{ fontSize: 13 }}>▶ LAUNCH</button>
         </div>
       </div>
@@ -384,7 +387,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
           type="range" min={min} max={max} step={step} value={value}
           disabled={!enabled}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="flex-1 accent-cyan disabled:opacity-30"
+          className="range-fluid flex-1"
         />
         <span className="w-10 text-right text-[10px] tabular-nums text-ink">{value}{suffix}</span>
       </div>

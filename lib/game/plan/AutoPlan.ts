@@ -113,13 +113,14 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
 
 /**
  * Append the trip home: when the craft sits opposite the launch body (only true
- * once the *destination* dominates, so it never fires outbound), burn prograde
- * to fling back toward it. The descent home is handled automatically — a fitted
- * parachute auto-opens in the launch world's atmosphere, and the powered-descent
- * autopilot is armed as a backup once the craft is falling back toward it.
+ * once the *destination* dominates, so it never fires outbound), engage the
+ * departure autopilot. It burns prograde just until the craft escapes the body
+ * it is leaving — so it heads home instead of running away into deep space — and
+ * the descent is then automatic (a fitted parachute auto-opens in the launch
+ * world's atmosphere).
  */
 function addReturnLeg(nodes: Maneuver[], launchId: string) {
-  nodes.push(node('at-transfer-window', undefined, launchId, { attitude: 'prograde', throttle: 1 }));
+  nodes.push(node('at-transfer-window', undefined, launchId, { depart: true }));
 }
 
 function finish(launchBodyId: string, destinationId: string, kind: MissionKind, orbitKm: number, nodes: Maneuver[]): FlightPlan {

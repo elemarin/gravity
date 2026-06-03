@@ -44,6 +44,10 @@ export type SimState = {
   landingAssist: boolean;   // powered-descent autopilot engaged
   ascentAssist: boolean;    // powered-ascent autopilot engaged (relaunch)
   captureAssist: boolean;   // orbital-capture autopilot engaged (brake to circular)
+  captureTargetId: string | null; // body the capture autopilot brakes relative to
+  deorbitAssist: boolean;   // de-orbit autopilot engaged (lower periapsis then land)
+  departAssist: boolean;    // departure autopilot engaged (burn until escaping home-ward)
+  departFromId: string | null; // body being escaped during a departure burn
   landedTime: number | null;   // sim seconds of first soft touchdown
   relaunchStart: number | null;// sim seconds a relaunch was commanded
   elapsed: number;          // sim seconds
@@ -96,6 +100,10 @@ export class Simulator {
       landingAssist: false,
       ascentAssist: false,
       captureAssist: false,
+      captureTargetId: null,
+      deorbitAssist: false,
+      departAssist: false,
+      departFromId: null,
       landedTime: null,
       relaunchStart: null,
       elapsed: 0,
@@ -179,6 +187,21 @@ export class Simulator {
       }
     }
 
+    // --- De-orbit autopilot (the LAND button) ---
+    // Burns retrograde to drop periapsis below the surface, then hands off to the
+    // powered-descent autopilot for a soft touchdown from any orbit.
+    if (s.deorbitAssist) {
+      s.attitude = 'retrograde';
+      const lowTarget = body.atmosphereHeight > 0 ? body.atmosphereHeight * 0.2 : body.radius * 0.04;
+      if (s.periapsis > lowTarget) {
+        s.throttle = 1;
+      } else {
+        s.throttle = 0;
+        s.deorbitAssist = false;
+        s.landingAssist = true;
+      }
+    }
+
     // --- Powered-descent autopilot ---
     // Holds retrograde and throttles bang-bang to keep speed under a safe
     // altitude-scaled limit, producing a soft touchdown on the target world.
@@ -219,18 +242,41 @@ export class Simulator {
     // circular speed, settling an arrival hyperbola/ellipse into a near-circular
     // orbit around whichever body now dominates (the destination on arrival).
     if (s.captureAssist) {
-      const rNow = Math.max(s.position.distanceTo(body.center), body.radius);
-      const vCirc = Math.sqrt(body.GM / rNow);
+      // Brake relative to the *target* body (not whichever body momentarily
+      // dominates), so the burn starts on approach — at the SOI edge the target
+      // may still be gravitationally out-ranked by the launch world.
+      const tgt = this.cfg.bodies.find((b) => b.id === s.captureTargetId) ?? body;
+      const rNow = Math.max(s.position.distanceTo(tgt.center), tgt.radius);
+      const altT = rNow - tgt.radius;
+      const vCirc = Math.sqrt(tgt.GM / rNow);
       const speed = s.velocity.length();
       s.attitude = 'retrograde';
-      if (altitude < body.radius * 0.5) {
-        // Low and committed — brake to a safe descent so a marginal capture
-        // sets down softly instead of slamming into the surface.
-        const safeMs = LAND_FLOOR_MS + altitude * LAND_RATE;
+      // Brake to a safe descent whenever we're low OR the approach is steep
+      // (closing fast on the target's surface), so a near-radial airless arrival
+      // is arrested in time instead of slamming in.
+      const tgtRadialVel = s.position.clone().sub(tgt.center).normalize().dot(s.velocity);
+      const safeMs = LAND_FLOOR_MS + altT * LAND_RATE;
+      const closingFast = tgtRadialVel < 0 && (-tgtRadialVel * 1000) > safeMs;
+      if (altT < tgt.radius * 1.5 || closingFast) {
         s.throttle = speed * 1000 > safeMs ? 1 : 0;
       } else {
-        // Higher up — shed excess speed toward a near-circular orbit.
+        // Higher up and not plunging — shed excess speed toward a circular orbit.
         s.throttle = speed > vCirc * 1.06 ? 1 : 0;
+      }
+    }
+
+    // --- Departure autopilot (the return-home burn) ---
+    // Burns prograde to climb out of the body it is leaving and cuts the instant
+    // a different body takes over gravity — i.e. once it has escaped back toward
+    // home — so the return burn can never run away into deep space.
+    if (s.departAssist) {
+      s.attitude = 'prograde';
+      if (s.departFromId !== null && body.id !== s.departFromId) {
+        s.throttle = 0;
+        s.departAssist = false;
+        s.departFromId = null;
+      } else {
+        s.throttle = 1;
       }
     }
 
@@ -387,10 +433,13 @@ export class Simulator {
     const a = node.actions;
     if (a.descend) { s.landingAssist = true; s.ascentAssist = false; s.captureAssist = false; s.attitude = 'retrograde'; }
     if (a.ascend)  { s.ascentAssist = true; s.landingAssist = false; s.captureAssist = false; s.relaunchStart = s.elapsed; }
-    if (a.capture) { s.captureAssist = true; s.landingAssist = false; s.ascentAssist = false; }
-    // An explicit throttle command (e.g. the return burn) takes manual control
-    // back from the capture autopilot so the craft can leave orbit.
-    if (a.throttle !== undefined && !a.descend && !a.ascend && !a.capture) s.captureAssist = false;
+    if (a.capture) { s.captureAssist = true; s.captureTargetId = node.trigger.targetBodyId ?? null; s.landingAssist = false; s.ascentAssist = false; }
+    if (a.depart)  { s.departAssist = true; s.departFromId = this.body().id; s.captureAssist = false; s.landingAssist = false; s.ascentAssist = false; }
+    // An explicit throttle command (e.g. a manual burn) takes manual control
+    // back from the autopilots so the craft can leave orbit.
+    if (a.throttle !== undefined && !a.descend && !a.ascend && !a.capture && !a.depart) {
+      s.captureAssist = false; s.departAssist = false;
+    }
     if (a.attitude !== undefined) s.attitude = a.attitude;
     if (a.heading !== undefined) { s.angle = THREE.MathUtils.clamp(a.heading, -90, 90); s.attitude = 'manual'; }
     if (a.throttle !== undefined && !a.descend) s.throttle = THREE.MathUtils.clamp(a.throttle, 0, 1);
@@ -410,6 +459,17 @@ export class Simulator {
     if (!this.cfg.hasParachute || this.state.deployedParachute) return false;
     if (this.state.phase === 'landed' || this.state.phase === 'destroyed') return false;
     return this.doDeployParachute();
+  }
+
+  /** Real-time user-initiated de-orbit + landing (the LAND button). */
+  manualDeorbit(): boolean {
+    if (this.state.phase === 'landed' || this.state.phase === 'destroyed') return false;
+    const s = this.state;
+    s.deorbitAssist = true;
+    s.captureAssist = false;
+    s.ascentAssist = false;
+    s.departAssist = false;
+    return true;
   }
 
   /** Real-time user-initiated lander deployment. */

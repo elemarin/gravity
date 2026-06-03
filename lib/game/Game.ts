@@ -63,6 +63,7 @@ export class Game {
   private missionEnded = false;
   private fastForwarding = false;
   private simTrajectoryTimer = 0;
+  private previewHandle = 0;
 
   constructor(opts: GameOptions) {
     this.callbacks = opts.callbacks ?? {};
@@ -184,10 +185,25 @@ export class Game {
     this.plan = clonePlan(plan);
     this.sim.setPlan(this.plan);
     this.sim.reset();
-    this.rocket.reset(this.startPosition());
-    if (this.mode === 'plan') this.updatePreview();
+    // The rocket mesh doesn't depend on the plan, so don't rebuild it here —
+    // the render loop repositions it from the reset sim state next frame. This
+    // keeps plan edits (slider drags) cheap and fluid.
+    if (this.mode === 'plan') this.schedulePreview();
     this.flightState = this.buildFlightState();
     this.callbacks.onState?.(this.flightState);
+  }
+
+  /**
+   * Coalesce trajectory-preview recomputes so a rapid stream of plan edits
+   * (dragging a slider) only forward-runs the sandbox sim once per frame instead
+   * of on every input event — otherwise the heavy preview blocks the drag.
+   */
+  private schedulePreview() {
+    if (this.previewHandle) return;
+    this.previewHandle = requestAnimationFrame(() => {
+      this.previewHandle = 0;
+      if (this.mode === 'plan') this.updatePreview();
+    });
   }
 
   /** Live aim update from the Angry-Birds drag controller. */
@@ -197,8 +213,7 @@ export class Game {
     this.sim.setPlan(this.plan);
     if (this.mode === 'plan') {
       this.sim.reset();
-      this.rocket.reset(this.startPosition());
-      this.updatePreview();
+      this.schedulePreview();
     }
   }
 
@@ -452,6 +467,12 @@ export class Game {
     }
   }
 
+  /** De-orbit + land from the current orbit (the LAND button). */
+  manualLand() {
+    if (this.mode !== 'sim' || this.sim.finished) return;
+    this.sim.manualDeorbit();
+  }
+
   /** Forward-predict trajectory from current sim state and refresh the line. */
   private updateSimTrajectory() {
     const cur = this.sim.state;
@@ -483,6 +504,10 @@ export class Game {
     s.landingAssist     = cur.landingAssist;
     s.ascentAssist      = cur.ascentAssist;
     s.captureAssist     = cur.captureAssist;
+    s.captureTargetId   = cur.captureTargetId;
+    s.deorbitAssist     = cur.deorbitAssist;
+    s.departAssist      = cur.departAssist;
+    s.departFromId      = cur.departFromId;
     s.landedTime        = cur.landedTime;
     s.relaunchStart     = cur.relaunchStart;
     s.elapsed        = cur.elapsed;
@@ -523,6 +548,7 @@ export class Game {
 
   destroy() {
     this.stop();
+    if (this.previewHandle) cancelAnimationFrame(this.previewHandle);
     this.trajectory.dispose();
     this.rocket.dispose();
     this.launchpad?.dispose();

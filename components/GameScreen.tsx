@@ -185,6 +185,7 @@ export default function GameScreen() {
 
   const handleStage = useCallback(() => gameRef.current?.manualStage(), []);
   const handleLander = useCallback(() => gameRef.current?.manualLander(), []);
+  const handleLand = useCallback(() => gameRef.current?.manualLand(), []);
 
   const handleLaunchSite = useCallback((id: string) => {
     const cur = planRef.current;
@@ -197,6 +198,8 @@ export default function GameScreen() {
   const canSkip = mode === 'sim' && !finished && phase !== 'prelaunch';
   const canStage = flightState?.canStage ?? false;
   const landerDeployed = flightState?.landerDeployed ?? false;
+  // Offer the de-orbit/land button once the craft is actually in a stable orbit.
+  const canLand = mode === 'sim' && !finished && phase === 'orbit';
 
   const dest = plan ? getDestination(plan.destinationId) : null;
   const bodies = plan ? buildFlightBodies(plan.launchBodyId, dest?.targetId ?? null) : [];
@@ -260,6 +263,7 @@ export default function GameScreen() {
           hasLander={hasLander}
           hasParachute={hasParachute}
           landerDeployed={landerDeployed}
+          canLand={canLand}
           parachuteDeployed={flightState?.parachuteDeployed ?? false}
           onEdit={handleEdit}
           onReplay={handleReplay}
@@ -267,6 +271,7 @@ export default function GameScreen() {
           onSkip={handleSkip}
           onStage={handleStage}
           onLander={handleLander}
+          onLand={handleLand}
         />
       )}
 

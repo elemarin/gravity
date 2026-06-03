@@ -108,7 +108,15 @@ export class Renderer {
     el.addEventListener('pointermove',   this.onCamPointerMove);
     el.addEventListener('pointerup',     this.onCamPointerUp);
     el.addEventListener('pointercancel', this.onCamPointerUp);
+    el.addEventListener('wheel',         this.onCamWheel, { passive: false });
   }
+
+  // Desktop mouse-wheel / trackpad zoom.
+  private onCamWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    const factor = Math.exp(e.deltaY * 0.0015);
+    this.userZoom = Math.max(0.12, Math.min(18, this.userZoom * factor));
+  };
 
   private onCamPointerDown = (e: PointerEvent) => {
     try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* ok */ }
@@ -230,6 +238,7 @@ export class Renderer {
     el.removeEventListener('pointermove',   this.onCamPointerMove);
     el.removeEventListener('pointerup',     this.onCamPointerUp);
     el.removeEventListener('pointercancel', this.onCamPointerUp);
+    el.removeEventListener('wheel',         this.onCamWheel);
 
     window.removeEventListener('resize', this.handleResize);
     this.resizeObserver?.disconnect();
