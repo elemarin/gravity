@@ -5,9 +5,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PARTS_CATALOG, RocketPart, PartType } from '@/lib/game/career/Parts';
 import { RocketBuild, StageSpec, DEFAULT_BUILD } from '@/lib/game/types';
-import { computeStats, estimateBuildDeltaV, getStages } from '@/lib/game/BuildSpec';
+import { computeStats, estimateBuildDeltaV, getStages, buildPartIds } from '@/lib/game/BuildSpec';
 import { loadBuild, saveBuild, loadUnlockedParts, loadFacilityLevel } from '@/lib/storage';
 import { facilityTier } from '@/lib/game/career/Progress';
+import { ROCKET_PRESETS, RocketPreset } from '@/lib/game/career/Presets';
 import NavDrawer from './NavDrawer';
 
 const CATEGORIES: { type: PartType; label: string; short: string }[] = [
@@ -93,6 +94,13 @@ export default function RocketBuilder() {
       return withStages(b, s);
     });
 
+  const loadPreset = (p: RocketPreset) => {
+    setBuild({ ...p.build, stages: p.build.stages?.map((s) => ({ ...s, tankIds: [...s.tankIds] })) });
+    setSelectedStage(0);
+    setActiveCategory('engine');
+  };
+  const presetLocked = (p: RocketPreset) => buildPartIds(p.build).some((id) => !unlocked.has(id));
+
   const setNose = (id: string) => setBuild((b) => ({ ...b, noseId: id }));
   const toggleLander = (id: string) => setBuild((b) => ({ ...b, landerId: b.landerId === id ? undefined : id }));
   const toggleUtility = (id: string) =>
@@ -138,6 +146,31 @@ export default function RocketBuilder() {
                            flex items-center justify-center text-dim hover:text-ink hover:border-white/30 active:scale-95"
                 aria-label="Reset">↻</button>
       </header>
+
+      {/* ── Preset quick-select ── */}
+      <div className="shrink-0 flex items-center gap-1.5 px-4 pt-2 overflow-x-auto no-scrollbar">
+        <span className="shrink-0 text-[9px] font-black tracking-widest uppercase text-dim pr-1">Presets</span>
+        {ROCKET_PRESETS.map((p) => {
+          const locked = presetLocked(p);
+          return (
+            <button
+              key={p.id}
+              disabled={locked}
+              onClick={() => loadPreset(p)}
+              title={locked ? 'Unlock its parts in Career to use this preset' : p.description}
+              className={`shrink-0 h-8 px-3 rounded-full border text-[10px] font-black tracking-wide
+                          flex items-center gap-1 transition-all active:scale-95
+                ${locked
+                  ? 'border-white/5 bg-white/[0.02] text-dim/40 cursor-not-allowed'
+                  : 'border-cyan/40 bg-cyan/[0.07] text-cyan hover:bg-cyan/15'}`}
+            >
+              <span className="text-sm leading-none">{p.icon}</span>
+              {p.name}
+              {locked && <span className="text-[10px]">🔒</span>}
+            </button>
+          );
+        })}
+      </div>
 
       {/* ── Rocket preview ── */}
       <section className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-3 px-4 py-3 md:grid md:grid-cols-[minmax(24rem,1fr)_minmax(22rem,30rem)] md:items-stretch">

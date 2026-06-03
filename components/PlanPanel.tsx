@@ -3,10 +3,11 @@
 import { useState } from 'react';
 import {
   FlightPlan, Maneuver, TriggerType, TRIGGER_LABELS,
+  MissionKind, MissionSpec, MISSION_LABELS,
   describeTrigger, describeActions, newNodeId,
 } from '@/lib/game/plan/FlightPlan';
 import { Body, DESTINATIONS, getDestination } from '@/lib/game/bodies';
-import { autoPlan } from '@/lib/game/plan/AutoPlan';
+import { autoPlan, defaultOrbitKm } from '@/lib/game/plan/AutoPlan';
 
 type Props = {
   plan: FlightPlan;
@@ -21,18 +22,21 @@ const TRIGGER_TYPES: TriggerType[] = [
   'at-altitude', 'at-apoapsis', 'at-periapsis',
   'at-apoapsis-altitude', 'at-periapsis-altitude',
   'at-time', 'on-fuel-empty', 'at-transfer-window', 'at-soi-entry',
+  'after-touchdown',
 ];
 
 const TARGET_TRIGGERS: TriggerType[] = ['at-soi-entry', 'at-transfer-window'];
 
 const VALUE_TRIGGERS: TriggerType[] = [
   'at-altitude', 'at-time', 'at-apoapsis-altitude', 'at-periapsis-altitude',
+  'after-touchdown',
 ];
 
 function valueLabel(t: TriggerType): string {
   if (t === 'at-time') return 'Time (s)';
   if (t === 'at-apoapsis-altitude') return 'Apoapsis (km)';
   if (t === 'at-periapsis-altitude') return 'Periapsis (km)';
+  if (t === 'after-touchdown') return 'Delay (s)';
   return 'Altitude (km)';
 }
 
@@ -78,9 +82,31 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
   const otherBodies = bodies.slice(1);
   const dest = getDestination(plan.destinationId);
 
-  // Switching destination loads a fresh guided plan for it.
-  const setDestination = (id: string) => onChange(autoPlan(plan.launchBodyId, id));
-  const regenerate = () => onChange(autoPlan(plan.launchBodyId, plan.destinationId));
+  // Mission objective + target orbit drive the auto-planner.
+  const mission: MissionSpec = plan.mission ?? { kind: 'orbit', orbitKm: defaultOrbitKm(plan.launchBodyId) };
+  // Which objectives make sense for the chosen destination.
+  const missionKinds: MissionKind[] = dest.targetId
+    ? ['orbit', 'orbit-return', 'land', 'land-return']
+    : ['orbit', 'land'];
+  const showOrbitKm = mission.kind === 'orbit' || mission.kind === 'orbit-return';
+  // Orbit slider range scales to the body being orbited (the target, if any).
+  const orbitBody = (dest.targetId ? bodies[1] : bodies[0]) ?? bodies[0];
+  const orbitMin = orbitBody ? Math.max(20, orbitBody.atmosphereHeight || orbitBody.radius * 0.3) : 20;
+  const orbitMax = orbitBody ? orbitBody.radius * 6 + 200 : 600;
+
+  const regen = (destId: string, m: MissionSpec) =>
+    onChange(autoPlan(plan.launchBodyId, destId, m));
+
+  // Switching destination keeps the objective if still valid, else falls back.
+  const setDestination = (id: string) => {
+    const valid = getDestination(id).targetId
+      ? mission.kind
+      : (mission.kind === 'land' || mission.kind === 'land-return' ? 'land' : 'orbit');
+    regen(id, { ...mission, kind: valid });
+  };
+  const setMissionKind = (kind: MissionKind) => regen(plan.destinationId, { ...mission, kind });
+  const setOrbitKm = (orbitKm: number) => regen(plan.destinationId, { ...mission, orbitKm });
+  const regenerate = () => regen(plan.destinationId, mission);
   const setLaunch = (patch: Partial<FlightPlan['launch']>) =>
     onChange({ ...plan, launch: { ...plan.launch, ...patch } });
 
@@ -116,7 +142,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
             {/* Destination */}
             <div>
               <div className="flex items-center justify-between">
-                <span className="stat-label">Destination</span>
+                <span className="stat-label">1 · Destination</span>
                 <button onClick={regenerate}
                   className="text-[10px] rounded-md px-2 py-0.5 border border-green/50 bg-green/15 text-green font-bold active:scale-95">
                   ✨ Auto-plan
@@ -134,10 +160,42 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                   </button>
                 ))}
               </div>
-              <div className="mt-1 text-[10px] text-dim/90 leading-snug">{dest.objective}</div>
+            </div>
+
+            {/* Objective */}
+            <div>
+              <span className="stat-label">2 · Objective</span>
+              <div className="mt-1 grid grid-cols-2 gap-1">
+                {missionKinds.map((k) => (
+                  <button key={k}
+                    onClick={() => setMissionKind(k)}
+                    className={`text-[11px] rounded-md py-1.5 px-2 border tracking-wide font-bold
+                      ${mission.kind === k
+                        ? 'border-cyan/70 bg-cyan/20 text-cyan'
+                        : 'border-white/12 bg-white/[0.05] text-dim'}`}>
+                    {MISSION_LABELS[k]}
+                  </button>
+                ))}
+              </div>
+              {/* Target orbit altitude */}
+              {showOrbitKm && (
+                <div className="mt-2 rounded-lg border border-white/10 bg-white/[0.04] p-2">
+                  <Slider
+                    label="Orbit" enabled value={Math.round(mission.orbitKm)}
+                    min={Math.round(orbitMin)} max={Math.round(orbitMax)} step={5} suffix="km"
+                    onToggle={() => {}}
+                    onChange={setOrbitKm}
+                  />
+                </div>
+              )}
+              {(mission.kind === 'land-return' || mission.kind === 'orbit-return') && (
+                <div className="mt-1 text-[10px] text-orange/90 leading-snug">
+                  ↩ Return trips are ambitious — pack extra fuel{mission.kind === 'land-return' ? ' and a lander that can fly back up' : ''}. Launch, then warp.
+                </div>
+              )}
               {dest.targetId && (
                 <div className="mt-1 text-[10px] text-cyan/90 leading-snug">
-                  ✨ Auto-plan flies the whole transfer — just build a capable rocket (add a lander), then launch &amp; warp.
+                  ✨ Auto-plan flies the whole route. Build a capable rocket{(mission.kind === 'land' || mission.kind === 'land-return') ? ' with a lander' : ''}, then launch &amp; warp.
                 </div>
               )}
             </div>
@@ -282,6 +340,8 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                                   onClick={() => updateActions(node.id, { deployParachute: !node.actions.deployParachute })} />
                           <Toggle label="Descend" on={!!node.actions.descend}
                                   onClick={() => updateActions(node.id, { descend: !node.actions.descend })} />
+                          <Toggle label="Ascend" on={!!node.actions.ascend}
+                                  onClick={() => updateActions(node.id, { ascend: !node.actions.ascend })} />
                         </div>
                       </div>
                     </div>

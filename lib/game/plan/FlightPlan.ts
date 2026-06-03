@@ -17,7 +17,8 @@ export type TriggerType =
   | 'at-periapsis-altitude' // when projected periapsis ≥ value km
   | 'at-transfer-window'  // aligned to burn toward targetBodyId
   | 'on-fuel-empty'       // active stage runs dry
-  | 'at-soi-entry';       // enters targetBodyId's sphere of influence
+  | 'at-soi-entry'        // enters targetBodyId's sphere of influence
+  | 'after-touchdown';    // value = seconds after a soft landing (for relaunch)
 
 export type Trigger = {
   type: TriggerType;
@@ -36,6 +37,10 @@ export type ManeuverActions = {
   attitude?: Attitude;
   /** Engage the powered-descent autopilot for a guided soft landing. */
   descend?: boolean;
+  /** Engage the powered-ascent autopilot to climb from a surface into orbit. */
+  ascend?: boolean;
+  /** Engage the capture autopilot — brake toward a circular orbit at arrival. */
+  capture?: boolean;
   jettisonStage?: boolean;  // drop the spent stage, ignite the next
   deployLander?: boolean;   // separate the lander payload
   deployParachute?: boolean;// pop the parachute for a soft landing
@@ -53,11 +58,29 @@ export type LaunchVector = {
   power: number;   // 0..1 initial throttle held until the first node fires
 };
 
+/** What the player wants to do at the destination. Drives the auto-planner. */
+export type MissionKind = 'orbit' | 'orbit-return' | 'land' | 'land-return';
+
+export type MissionSpec = {
+  kind: MissionKind;
+  /** Target orbit altitude (km above surface) for orbit objectives. */
+  orbitKm: number;
+};
+
+export const MISSION_LABELS: Record<MissionKind, string> = {
+  'orbit':        'Orbit',
+  'orbit-return': 'Orbit & return',
+  'land':         'Land',
+  'land-return':  'Land & return',
+};
+
 export type FlightPlan = {
   /** Body the flight launches from (an unlocked base). */
   launchBodyId: string;
   /** Destination id (see DESTINATIONS), e.g. 'orbit' | 'moon' | 'mars'. */
   destinationId: string;
+  /** High-level objective used by the plan wizard (optional for legacy saves). */
+  mission?: MissionSpec;
   launch: LaunchVector;
   nodes: Maneuver[];
 };
@@ -65,6 +88,7 @@ export type FlightPlan = {
 export const DEFAULT_PLAN: FlightPlan = {
   launchBodyId: 'earth',
   destinationId: 'orbit',
+  mission: { kind: 'orbit', orbitKm: 120 },
   launch: { heading: 0, power: 1 },
   // A forgiving "gravity turn → coast → circularize" profile that reaches a
   // stable low orbit on the default rocket. Tunable in the plan panel.
@@ -96,6 +120,7 @@ export const TRIGGER_LABELS: Record<TriggerType, string> = {
   'at-transfer-window': 'Transfer window',
   'on-fuel-empty': 'On fuel empty',
   'at-soi-entry':  'At SOI entry',
+  'after-touchdown': 'After landing',
 };
 
 /** Human-readable summary of a node for the plan list UI. */
@@ -110,11 +135,15 @@ export function describeTrigger(t: Trigger): string {
     case 'at-transfer-window': return 'Transfer window';
     case 'on-fuel-empty':return 'Fuel empty';
     case 'at-soi-entry': return `Enter ${t.targetBodyId ?? 'SOI'}`;
+    case 'after-touchdown': return `T+${Math.round(t.value ?? 0)}s after landing`;
   }
 }
 
 export function describeActions(a: ManeuverActions): string {
   const parts: string[] = [];
+  if (a.descend)                parts.push('descend');
+  if (a.ascend)                 parts.push('ascend');
+  if (a.capture)                parts.push('capture');
   if (a.attitude && a.attitude !== 'manual') parts.push(a.attitude);
   else if (a.heading !== undefined) parts.push(`aim ${Math.round(a.heading)}°`);
   if (a.throttle !== undefined) parts.push(`thr ${Math.round(a.throttle * 100)}%`);
@@ -129,6 +158,7 @@ export function clonePlan(plan: FlightPlan): FlightPlan {
   return {
     launchBodyId: plan.launchBodyId,
     destinationId: plan.destinationId,
+    mission: plan.mission ? { ...plan.mission } : undefined,
     launch: { ...plan.launch },
     nodes: plan.nodes.map((n) => ({
       id: n.id,

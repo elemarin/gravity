@@ -1,0 +1,85 @@
+import { RocketBuild } from '../types';
+
+/**
+ * Pre-crafted rockets the player can quick-select in the builder, then tweak or
+ * launch as-is. Presets that reference not-yet-unlocked parts are shown locked
+ * until career progress unlocks the parts they need.
+ */
+export type RocketPreset = {
+  id: string;
+  name: string;
+  icon: string;
+  description: string;
+  build: RocketBuild;
+};
+
+export const ROCKET_PRESETS: RocketPreset[] = [
+  {
+    id: 'sounding',
+    name: 'Sounding Rocket',
+    icon: '🎆',
+    description: 'Single stage hop — perfect for first flights and suborbital tests.',
+    build: {
+      engineId: 'engine-basic',
+      tankIds: ['tank-basic'],
+      noseId: 'nose-cone',
+      utilityIds: [],
+      boosterIds: [],
+      stages: [{ engineId: 'engine-basic', tankIds: ['tank-basic'] }],
+    },
+  },
+  {
+    id: 'orbiter',
+    name: 'Orbiter',
+    icon: '🛰',
+    description: 'Booster-assisted two-stage lifter that reaches a stable low orbit.',
+    build: {
+      engineId: 'engine-basic',
+      tankIds: ['tank-basic', 'tank-basic'],
+      noseId: 'nose-cone',
+      utilityIds: [],
+      boosterIds: ['booster-solid', 'booster-solid'],
+      stages: [
+        { engineId: 'engine-basic', tankIds: ['tank-basic', 'tank-basic'] },
+        { engineId: 'engine-basic', tankIds: ['tank-basic'] },
+      ],
+    },
+  },
+  {
+    id: 'moon-lander',
+    name: 'Moon Lander',
+    icon: '🌙',
+    description: 'Two-stage stack with a scout lander to touch down on another world.',
+    build: {
+      engineId: 'engine-heavy',
+      tankIds: ['tank-medium', 'tank-medium'],
+      noseId: 'capsule-crew',
+      utilityIds: ['landing-legs'],
+      boosterIds: ['booster-solid', 'booster-solid'],
+      landerId: 'lander-light',
+      stages: [
+        { engineId: 'engine-heavy', tankIds: ['tank-medium', 'tank-medium'] },
+        { engineId: 'engine-vacuum', tankIds: ['tank-medium'] },
+      ],
+    },
+  },
+  {
+    id: 'interplanetary',
+    name: 'Interplanetary',
+    icon: '🚀',
+    description: 'Heavy three-stage cruiser with a big lander, chute and shield for return trips.',
+    build: {
+      engineId: 'engine-heavy',
+      tankIds: ['tank-xl', 'tank-xl'],
+      noseId: 'capsule-crew',
+      utilityIds: ['parachute', 'landing-legs', 'heat-shield'],
+      boosterIds: ['booster-liquid', 'booster-liquid'],
+      landerId: 'lander-heavy',
+      stages: [
+        { engineId: 'engine-heavy', tankIds: ['tank-xl', 'tank-xl'] },
+        { engineId: 'engine-heavy', tankIds: ['tank-large'] },
+        { engineId: 'engine-vacuum', tankIds: ['tank-large'] },
+      ],
+    },
+  },
+];

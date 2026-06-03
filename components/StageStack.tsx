@@ -19,16 +19,16 @@ export default function StageStack({ state }: { state: FlightState | null }) {
 
   return (
     <div className="pointer-events-none absolute z-20 font-pixel flex flex-col gap-1 items-stretch
-                    right-[calc(0.6rem+env(safe-area-inset-right))]
-                    bottom-[calc(5.5rem+env(safe-area-inset-bottom))]"
-         style={{ width: 46 }}>
+                    right-[calc(0.5rem+env(safe-area-inset-right))]
+                    top-1/2 -translate-y-1/2"
+         style={{ width: 30 }}>
       {order.map((i) => {
         const isActive = i === active;
         const spent = i < active;
         return (
           <div
             key={i}
-            className="relative h-7 rounded-md border overflow-hidden flex items-center justify-center"
+            className="relative h-6 rounded-md border overflow-hidden flex items-center justify-center"
             style={{
               borderColor: isActive ? 'rgba(31,217,255,0.9)' : spent ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.28)',
               background: spent ? 'rgba(255,255,255,0.04)' : 'rgba(8,24,56,0.5)',

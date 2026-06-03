@@ -28,10 +28,10 @@ function PixelBtn({
   return (
     <button
       onClick={onClick}
-      className={`${large ? 'px-4 py-3.5' : 'px-3.5 py-3'} font-pixel uppercase tracking-wider
-                  rounded-lg border-2 active:scale-95 transition-transform`}
+      className={`${large ? 'px-3.5 py-3' : 'px-2.5 py-2.5'} font-pixel uppercase tracking-wide
+                  rounded-lg border-2 active:scale-95 transition-transform whitespace-nowrap`}
       style={{
-        fontSize: large ? 13 : 11,
+        fontSize: large ? 12 : 10,
         borderColor: color,
         background: `rgba(${hexToRgb(color)},0.14)`,
         color,
@@ -62,13 +62,13 @@ export default function SimControls({
 
   return (
     <div
-      className="absolute inset-x-0 bottom-0 z-30 flex items-end justify-between gap-2
+      className="absolute inset-x-0 bottom-0 z-30 flex items-end justify-between gap-1.5
                  pb-[calc(0.75rem+env(safe-area-inset-bottom))]
-                 px-[calc(0.75rem+env(safe-area-inset-left))]
-                 pr-[calc(0.75rem+env(safe-area-inset-right))]"
+                 px-[calc(0.6rem+env(safe-area-inset-left))]
+                 pr-[calc(0.6rem+env(safe-area-inset-right))]"
     >
       {/* Left: action buttons */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         {active && canStage && (
           <PixelBtn label="STAGE" color="#ff9a45" onClick={onStage} glow large />
         )}
@@ -77,15 +77,16 @@ export default function SimControls({
         )}
         {active && hasParachute && (
           <div
-            className="rounded-lg border-2 px-3 py-2.5 font-pixel uppercase tracking-wider"
+            className="rounded-lg border-2 px-2.5 py-2.5 font-pixel uppercase tracking-wide"
             style={{
-              fontSize: 10,
+              fontSize: 13,
               borderColor: parachuteDeployed ? '#39e9a6' : 'rgba(255,255,255,0.25)',
               color: parachuteDeployed ? '#39e9a6' : '#c4d6f0',
               background: parachuteDeployed ? 'rgba(57,233,166,0.12)' : 'rgba(255,255,255,0.04)',
             }}
+            title={parachuteDeployed ? 'Parachute deployed' : 'Parachute armed'}
           >
-            {parachuteDeployed ? 'CHUTE ▼' : 'CHUTE ◇'}
+            {parachuteDeployed ? '☂▼' : '☂'}
           </div>
         )}
         {finished && (
@@ -94,19 +95,19 @@ export default function SimControls({
       </div>
 
       {/* Right: time/nav controls */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         {!finished && (
           <>
             {canSkip && <PixelBtn label="SKIP" color="#c4d6f0" onClick={onSkip} />}
             <PixelBtn
-              label={timeScale > 1 ? `${timeScale}× ▶▶` : '▶▶'}
+              label={timeScale > 1 ? `${timeScale}×` : '▶▶'}
               color={timeScale > 1 ? '#ffd84d' : '#c4d6f0'}
               onClick={onWarp}
               glow={timeScale > 1}
             />
           </>
         )}
-        <PixelBtn label="↻ REPLAY" color="#1fd9ff" onClick={onReplay} glow />
+        <PixelBtn label={finished ? '↻ REPLAY' : '↻'} color="#1fd9ff" onClick={onReplay} glow />
       </div>
     </div>
   );

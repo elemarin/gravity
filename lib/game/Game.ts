@@ -8,6 +8,7 @@ import { MilestoneManager } from './career/Milestones';
 import { Simulator, SimConfig } from './plan/Simulator';
 import { FlightPlan, DEFAULT_PLAN, clonePlan } from './plan/FlightPlan';
 import { Body, dominantBody, buildFlightBodies, getDestination, bodyDef } from './bodies';
+import { orbitEllipse } from './orbit';
 import { buildSimStages } from './BuildSpec';
 import {
   FlightState, FlightPhase, GameCallbacks, MissionResult, RocketBuild, DEFAULT_BUILD,
@@ -94,6 +95,18 @@ export class Game {
 
     this.flightState = this.buildFlightState();
     this.updatePreview();
+    this.frameRocket(true);
+  }
+
+  /** Frame the camera so the whole rocket is visible on the pad. */
+  private frameRocket(snap = false) {
+    this.renderer.setRocketHeight(this.rocket.getHeight());
+    this.renderer.updateCameraOffset(0);
+    if (snap) {
+      const center = this.dominant().center;
+      const up = this.rocket.position.clone().sub(center).normalize();
+      this.renderer.snapTo(this.rocket.position, up);
+    }
   }
 
   private launchBody(): Body {
@@ -139,6 +152,7 @@ export class Game {
     this.rocket.reset(this.startPosition());
     this.simTrajectoryTimer = 0; // update trajectory immediately
     this.flightState = this.buildFlightState();
+    this.frameRocket(true);
     this.callbacks.onModeChange?.('sim');
     this.callbacks.onState?.(this.flightState);
   }
@@ -152,6 +166,7 @@ export class Game {
     this.rocket.reset(this.startPosition());
     this.flightState = this.buildFlightState();
     this.updatePreview();
+    this.frameRocket(true);
     this.callbacks.onModeChange?.('plan');
     this.callbacks.onState?.(this.flightState);
   }
@@ -162,6 +177,7 @@ export class Game {
     this.cfg = this.buildConfig();
     this.sim.setConfig(this.cfg);
     this.edit();
+    this.frameRocket(true);
   }
 
   setPlan(plan: FlightPlan) {
@@ -226,7 +242,17 @@ export class Game {
     else if (peri >= 80) color = 0x2ee59d;
 
     const body = this.launchBody();
-    this.trajectory.update(points, color, body.center, body.radius, touchdown);
+    // If the plan settles into a stable orbit, preview the whole orbit loop
+    // rather than the partial ascent arc the integration stopped at.
+    const finalBody = dominantBody(this.bodies, preview.state.position);
+    const ellipse = !impact && !touchdown
+      ? orbitEllipse(finalBody, preview.state.position, preview.state.velocity)
+      : null;
+    if (ellipse) {
+      this.trajectory.update(ellipse.points, color, finalBody.center, finalBody.radius, false);
+    } else {
+      this.trajectory.update(points, color, body.center, body.radius, touchdown);
+    }
     this.trajectory.setVisible(true);
 
     this.flightState = { ...this.flightState, apoapsis: apo, periapsis: impact ? 0 : peri };
@@ -280,7 +306,8 @@ export class Game {
       this.rocket.applyState(this.sim.state, center, FIXED_DT);
       this.renderer.updateCameraOffset(this.sim.altitude());
       this.renderer.updateSky(this.sim.altitude());
-      this.renderer.followTarget(this.rocket.position, FIXED_DT);
+      const up = this.rocket.position.clone().sub(center).normalize();
+      this.renderer.followTarget(this.rocket.position, FIXED_DT, up);
       this.flightState = this.buildFlightState();
       this.callbacks.onState?.(this.flightState);
 
@@ -292,7 +319,9 @@ export class Game {
     } else {
       const center = this.dominant().center;
       this.rocket.applyState(this.sim.state, center, FIXED_DT);
-      this.renderer.followTarget(this.rocket.position, FIXED_DT);
+      this.renderer.updateCameraOffset(this.sim.altitude());
+      const up = this.rocket.position.clone().sub(center).normalize();
+      this.renderer.followTarget(this.rocket.position, FIXED_DT, up);
     }
 
     this.renderer.render();
@@ -426,6 +455,19 @@ export class Game {
   /** Forward-predict trajectory from current sim state and refresh the line. */
   private updateSimTrajectory() {
     const cur = this.sim.state;
+
+    // A stable, surface-clearing orbit is drawn as its full analytic ellipse so
+    // the path is a complete, steady loop rather than a half-arc that keeps
+    // getting recomputed as the craft moves.
+    const body = this.dominant();
+    const ellipse = orbitEllipse(body, cur.position, cur.velocity);
+    if (ellipse && cur.phase !== 'prelaunch') {
+      let color = 0x2ee59d;
+      if (ellipse.periAlt < 80) color = 0xffd54a;
+      this.trajectory.update(ellipse.points, color, body.center, body.radius, false);
+      return;
+    }
+
     const preview = new Simulator(this.cfg, this.plan);
     preview.reset();
     const s = preview.state;
@@ -439,6 +481,10 @@ export class Game {
     s.deployedLander    = cur.deployedLander;
     s.deployedParachute = cur.deployedParachute;
     s.landingAssist     = cur.landingAssist;
+    s.ascentAssist      = cur.ascentAssist;
+    s.captureAssist     = cur.captureAssist;
+    s.landedTime        = cur.landedTime;
+    s.relaunchStart     = cur.relaunchStart;
     s.elapsed        = cur.elapsed;
     s.phase          = cur.phase;
     s.maxAltitude    = cur.maxAltitude;
@@ -470,7 +516,6 @@ export class Game {
     else if (preview.state.periapsis > 0 && preview.state.periapsis < 80) color = 0xffd54a;
     else if (preview.state.periapsis >= 80) color = 0x2ee59d;
 
-    const body = this.dominant();
     this.trajectory.update(points, color, body.center, body.radius, touchdown);
   }
 

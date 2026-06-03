@@ -19,6 +19,9 @@ const BULLSEYE_RING_COLOR = '#ffffff';
 const BULLSEYE_CROSSHAIR_COLOR = '#ff5577';
 // Positions are in km; 1e-8 km² skips invalid sub-meter radial vectors before normalization.
 const MIN_RADIAL_LENGTH_SQ = 1e-8;
+// Hide apsis markers whose altitude is essentially at the surface (km), so the
+// pad/ascent view doesn't show a stray "PE" pinned to the launch site.
+const MIN_APSIS_ALT = 2;
 
 export class TrajectoryLine {
   line: THREE.Line;
@@ -188,8 +191,11 @@ export class TrajectoryLine {
 
     this.apoMarker.position.copy(apo);
     this.periMarker.position.copy(peri);
-    this.apoMarker.visible = Number.isFinite(apoAlt);
-    this.periMarker.visible = Number.isFinite(periAlt) && peri.distanceTo(apo) > 0.5;
+    // Suppress apsis labels that sit on the surface — on the pad and during early
+    // ascent the "periapsis" is just the launch point, which looks broken.
+    this.apoMarker.visible = Number.isFinite(apoAlt) && apoAlt > MIN_APSIS_ALT;
+    this.periMarker.visible = Number.isFinite(periAlt) && periAlt > MIN_APSIS_ALT
+      && peri.distanceTo(apo) > 0.5;
     this.drawLabel(this.apoCanvas, 'AP', '#2ee59d');
     this.drawLabel(this.periCanvas, 'PE', '#00e5ff');
     (this.apoMarker.material as THREE.SpriteMaterial).map!.needsUpdate = true;
