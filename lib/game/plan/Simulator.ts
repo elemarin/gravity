@@ -7,7 +7,7 @@ export type SimPhase =
   | 'prelaunch' | 'flight' | 'orbit' | 'reentry' | 'landed' | 'destroyed';
 
 const KARMAN_LINE  = 100.0;        // km above surface
-const DRAG_COEFF   = 0.04;
+const DRAG_COEFF   = 0.018;
 const CHUTE_CROSS  = 320;          // cross-section for deployed chute (~10 m/s terminal)
 const CHUTE_STABILIZE_RATE = 2.5;  // how quickly an open chute pulls the craft upright
 const BASE_SAFE_MS = 10;
@@ -146,6 +146,18 @@ export class Simulator {
       }
     }
 
+    // --- Auto-deploying parachute ---
+    // A fitted chute opens itself the moment the craft is falling back down
+    // through the atmosphere; no manual trigger or plan node required.
+    if (
+      this.cfg.hasParachute && !s.deployedParachute &&
+      body.atmosphereHeight > 0 &&
+      altitude < body.atmosphereHeight * 0.6 &&
+      radialVel < 0 && s.maxAltitude > 2 && altitude > 0.02
+    ) {
+      this.doDeployParachute();
+    }
+
     // --- Forces ---
     const grav   = this.gravityAccel(s.position);
     const thrust = this.thrustAccel(up, body);
@@ -159,6 +171,16 @@ export class Simulator {
     // --- Fuel burn ---
     this.burnFuel(dt);
 
+    // --- Automatic staging ---
+    // A spent lower stage drops itself and lights the next one with no manual
+    // input. The separable lander is never auto-staged — that stays deliberate.
+    const lastNonLander = this.cfg.landerIndex >= 0
+      ? this.cfg.landerIndex - 1
+      : this.cfg.stages.length - 1;
+    if ((s.stageFuel[s.activeStage] ?? 0) <= 0.001 && s.activeStage < lastNonLander) {
+      this.doStage();
+    }
+
     // --- Surface contact ---
     const newAlt = Math.max(0, s.position.distanceTo(body.center) - body.radius);
     if (newAlt <= 0) this.clampToSurface(body);
@@ -170,16 +192,41 @@ export class Simulator {
     s.maxAltitude = Math.max(s.maxAltitude, this.altitude());
     if (this.altitude() > body.radius * 0.02) s.reachedBodyIds.add(body.id);
 
-    // apo/peri running estimate (reset arc extremes loosely on big climbs)
-    s.apoapsis = Math.max(s.apoapsis, this.altitude());
-    if (radialVel < 0) {
-      const peri = Number.isFinite(s.periapsis) ? s.periapsis : this.altitude();
-      s.periapsis = Math.min(peri, this.altitude());
-    }
+    // True instantaneous apoapsis/periapsis from the two-body orbital elements
+    // relative to the dominant body.
+    const ap = this.apsides(body);
+    s.apoapsis = ap.apo;
+    s.periapsis = ap.peri;
 
-    s.prevRadialVel = up.dot(s.velocity);
+    // Store THIS step's start-of-step radial velocity so the next step's
+    // apoapsis/periapsis triggers can detect the sign change bracketing the
+    // turning point. (Using the post-integration velocity here would equal the
+    // next step's start value, so the crossing could never be detected.)
+    s.prevRadialVel = radialVel;
     s.phase = this.determinePhase(body);
     if (s.phase === 'orbit') s.everOrbit = true;
+  }
+
+  /**
+   * Apoapsis / periapsis altitude (km above surface) from the current
+   * two-body orbital elements. Apoapsis is Infinity on an escape trajectory;
+   * a negative periapsis means the orbit intersects the surface (will impact).
+   */
+  private apsides(body: Body): { apo: number; peri: number } {
+    const s = this.state;
+    const rel = new THREE.Vector3().subVectors(s.position, body.center);
+    const r = rel.length();
+    const v = s.velocity.length();
+    if (r < 1e-6) return { apo: 0, peri: 0 };
+    const eps = (v * v) / 2 - body.GM / r;             // specific orbital energy
+    const h = new THREE.Vector3().crossVectors(rel, s.velocity).length();
+    const e = Math.sqrt(Math.max(0, 1 + (2 * eps * h * h) / (body.GM * body.GM)));
+    const rp = (h * h / body.GM) / (1 + e);            // periapsis radius
+    const peri = rp - body.radius;
+    if (eps >= -1e-12) return { apo: Infinity, peri };  // parabolic / hyperbolic
+    const a = -body.GM / (2 * eps);
+    const apo = a * (1 + e) - body.radius;
+    return { apo, peri };
   }
 
   private triggerFired(node: Maneuver, altitude: number, radialVel: number): boolean {
@@ -193,6 +240,12 @@ export class Simulator {
         return this.state.prevRadialVel > 0 && radialVel <= 0 && altitude > 1;
       case 'at-periapsis':
         return this.state.prevRadialVel < 0 && radialVel >= 0 && altitude > 1;
+      case 'at-apoapsis-altitude':
+        // Projected apoapsis has reached the target while still climbing
+        // (Infinity counts — that means we're at/over escape energy).
+        return radialVel >= 0 && this.state.apoapsis >= (t.value ?? 0);
+      case 'at-periapsis-altitude':
+        return this.state.periapsis >= (t.value ?? 0);
       case 'on-fuel-empty':
         return (this.state.stageFuel[this.state.activeStage] ?? 0) <= 0.01;
       case 'at-soi-entry': {
@@ -371,12 +424,12 @@ export class Simulator {
     if (onGround && speedMs < 1 && s.throttle < 0.01) {
       return s.maxAltitude > 0.1 ? 'landed' : 'prelaunch';
     }
-    if (altitude >= KARMAN_LINE) {
-      const r = s.position.distanceTo(body.center);
-      const vCirc = Math.sqrt(body.GM / r);
-      const radial = new THREE.Vector3().subVectors(s.position, body.center).normalize();
-      const vHoriz = s.velocity.clone().addScaledVector(radial, -radial.dot(s.velocity));
-      return vHoriz.length() > vCirc * 0.85 ? 'orbit' : 'flight';
+
+    // A real orbit: periapsis sits safely above the atmosphere (so it won't
+    // decay) and we're well above the surface.
+    const orbitFloor = Math.max(2, body.atmosphereHeight * 0.5);
+    if (altitude >= KARMAN_LINE * 0.5 && Number.isFinite(s.apoapsis) && s.periapsis >= orbitFloor) {
+      return 'orbit';
     }
     if (altitude > 0.01) {
       const radial = new THREE.Vector3().subVectors(s.position, body.center).normalize();

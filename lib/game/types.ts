@@ -44,6 +44,11 @@ export type RocketBuild = {
    */
   stages?: StageSpec[];
   /**
+   * Optional side-mounted boosters strapped to the first stage. They add
+   * thrust + fuel to the launch stage and are jettisoned with it.
+   */
+  boosterIds?: string[];
+  /**
    * Optional separable lander payload. When present it forms an extra top
    * "stage" with its own descent engine + fuel that the `deployLander`
    * maneuver action separates near a target body.
@@ -53,10 +58,11 @@ export type RocketBuild = {
 
 export const DEFAULT_BUILD: RocketBuild = {
   engineId: 'engine-basic',
-  tankIds:  ['tank-basic'],
+  tankIds:  ['tank-basic', 'tank-basic'],
   noseId:   'nose-cone',
   utilityIds: [],
-  stages: [{ engineId: 'engine-basic', tankIds: ['tank-basic'] }],
+  boosterIds: [],
+  stages: [{ engineId: 'engine-basic', tankIds: ['tank-basic', 'tank-basic'] }],
 };
 
 /** Summary of a completed flight, used to drive the mission-summary screen. */

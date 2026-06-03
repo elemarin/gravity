@@ -9,12 +9,14 @@
 
 /** What makes a maneuver node fire. */
 export type TriggerType =
-  | 'at-time'        // value = sim seconds since launch
-  | 'at-altitude'    // value = km above the dominant body surface (ascending)
-  | 'at-apoapsis'    // highest point of the current arc
-  | 'at-periapsis'   // lowest point of the current arc
-  | 'on-fuel-empty'  // active stage runs dry
-  | 'at-soi-entry';  // enters targetBodyId's sphere of influence
+  | 'at-time'             // value = sim seconds since launch
+  | 'at-altitude'         // value = km above the dominant body surface (ascending)
+  | 'at-apoapsis'         // highest point of the current arc
+  | 'at-periapsis'        // lowest point of the current arc
+  | 'at-apoapsis-altitude'  // when projected apoapsis ≥ value km (ascending)
+  | 'at-periapsis-altitude' // when projected periapsis ≥ value km
+  | 'on-fuel-empty'       // active stage runs dry
+  | 'at-soi-entry';       // enters targetBodyId's sphere of influence
 
 export type Trigger = {
   type: TriggerType;
@@ -44,25 +46,28 @@ export type LaunchVector = {
 };
 
 export type FlightPlan = {
-  scenarioId: string;
+  /** Body the flight launches from (an unlocked base). */
+  launchBodyId: string;
+  /** Destination id (see DESTINATIONS), e.g. 'orbit' | 'moon' | 'mars'. */
+  destinationId: string;
   launch: LaunchVector;
   nodes: Maneuver[];
 };
 
 export const DEFAULT_PLAN: FlightPlan = {
-  scenarioId: 'earth-orbit',
+  launchBodyId: 'earth',
+  destinationId: 'orbit',
   launch: { heading: 0, power: 1 },
+  // A forgiving "gravity turn → coast → circularize" profile that reaches a
+  // stable low orbit on the default rocket. Tunable in the plan panel.
   nodes: [
-    {
-      id: 'turn',
-      trigger: { type: 'at-altitude', value: 12 },
-      actions: { heading: 45 },
-    },
-    {
-      id: 'circularize',
-      trigger: { type: 'at-apoapsis' },
-      actions: { heading: 80, throttle: 1 },
-    },
+    { id: 'turn-1', trigger: { type: 'at-altitude', value: 4 },  actions: { heading: 22 } },
+    { id: 'turn-2', trigger: { type: 'at-altitude', value: 12 }, actions: { heading: 45 } },
+    { id: 'turn-3', trigger: { type: 'at-altitude', value: 28 }, actions: { heading: 66 } },
+    { id: 'turn-4', trigger: { type: 'at-altitude', value: 55 }, actions: { heading: 82 } },
+    { id: 'meco',        trigger: { type: 'at-apoapsis-altitude', value: 130 }, actions: { heading: 90, throttle: 0 } },
+    { id: 'circularize', trigger: { type: 'at-apoapsis' }, actions: { heading: 90, throttle: 0.5 } },
+    { id: 'insert',      trigger: { type: 'at-periapsis-altitude', value: 105 }, actions: { throttle: 0 } },
   ],
 };
 
@@ -78,6 +83,8 @@ export const TRIGGER_LABELS: Record<TriggerType, string> = {
   'at-altitude':   'At altitude',
   'at-apoapsis':   'At apoapsis',
   'at-periapsis':  'At periapsis',
+  'at-apoapsis-altitude':  'Apoapsis ≥',
+  'at-periapsis-altitude': 'Periapsis ≥',
   'on-fuel-empty': 'On fuel empty',
   'at-soi-entry':  'At SOI entry',
 };
@@ -89,6 +96,8 @@ export function describeTrigger(t: Trigger): string {
     case 'at-altitude':  return `${Math.round(t.value ?? 0)} km up`;
     case 'at-apoapsis':  return 'Apoapsis';
     case 'at-periapsis': return 'Periapsis';
+    case 'at-apoapsis-altitude':  return `AP ≥ ${Math.round(t.value ?? 0)} km`;
+    case 'at-periapsis-altitude': return `PE ≥ ${Math.round(t.value ?? 0)} km`;
     case 'on-fuel-empty':return 'Fuel empty';
     case 'at-soi-entry': return `Enter ${t.targetBodyId ?? 'SOI'}`;
   }
@@ -107,7 +116,8 @@ export function describeActions(a: ManeuverActions): string {
 /** Defensive clone so UI edits never mutate a running plan. */
 export function clonePlan(plan: FlightPlan): FlightPlan {
   return {
-    scenarioId: plan.scenarioId,
+    launchBodyId: plan.launchBodyId,
+    destinationId: plan.destinationId,
     launch: { ...plan.launch },
     nodes: plan.nodes.map((n) => ({
       id: n.id,

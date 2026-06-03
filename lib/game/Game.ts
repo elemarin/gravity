@@ -7,7 +7,7 @@ import { TrajectoryLine } from './TrajectoryLine';
 import { MilestoneManager } from './career/Milestones';
 import { Simulator, SimConfig } from './plan/Simulator';
 import { FlightPlan, DEFAULT_PLAN, clonePlan } from './plan/FlightPlan';
-import { Body, dominantBody, getScenario } from './bodies';
+import { Body, dominantBody, buildFlightBodies, getDestination, bodyDef } from './bodies';
 import { buildSimStages } from './BuildSpec';
 import {
   FlightState, FlightPhase, GameCallbacks, MissionResult, RocketBuild, DEFAULT_BUILD,
@@ -66,8 +66,8 @@ export class Game {
     this.build = opts.build ?? DEFAULT_BUILD;
     this.plan = clonePlan(opts.plan ?? DEFAULT_PLAN);
 
-    const scenario = getScenario(this.plan.scenarioId);
-    this.bodies = scenario.bodies;
+    const dest = getDestination(this.plan.destinationId);
+    this.bodies = buildFlightBodies(this.plan.launchBodyId, dest.targetId);
     this.launchBodyId = this.bodies[0]?.id ?? EARTH_BODY.id;
 
     this.renderer = new Renderer(opts.container);
@@ -81,6 +81,11 @@ export class Game {
     const lb = this.launchBody();
     const surfacePos = lb.center.clone().add(new THREE.Vector3(0, lb.radius, 0));
     this.launchpad = new Launchpad(this.renderer.scene, surfacePos, lb.center);
+
+    // Sky tint follows the launch world's atmosphere (bright day at the
+    // surface, fading to space with altitude).
+    const ld = bodyDef(this.launchBodyId);
+    this.renderer.setSky(ld.skyDay, ld.atmosphereHeight);
 
     this.cfg = this.buildConfig();
     this.sim = new Simulator(this.cfg, this.plan);
@@ -272,6 +277,7 @@ export class Game {
       const center = this.dominant().center;
       this.rocket.applyState(this.sim.state, center, FIXED_DT);
       this.renderer.updateCameraOffset(this.sim.altitude());
+      this.renderer.updateSky(this.sim.altitude());
       this.renderer.followTarget(this.rocket.position, FIXED_DT);
       this.flightState = this.buildFlightState();
       this.callbacks.onState?.(this.flightState);

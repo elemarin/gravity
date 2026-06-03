@@ -1,129 +1,191 @@
-export type PartType = 'engine' | 'tank' | 'nose' | 'capsule' | 'utility' | 'lander';
+export type PartType =
+  | 'engine' | 'booster' | 'tank' | 'nose' | 'capsule' | 'utility' | 'lander';
 
 export type RocketPart = {
   id: string;
   name: string;
   type: PartType;
-  mass: number;          // tonnes
-  thrust: number;        // kN (engines)
-  burnRate: number;      // L/s at full throttle (engines)
-  fuelCapacity: number;  // L (tanks)
+  mass: number;          // tonnes (dry)
+  thrust: number;        // kN (engines / boosters)
+  burnRate: number;      // L/s at full throttle (engines / boosters)
+  fuelCapacity: number;  // L (tanks / boosters / landers)
   unlockedByDefault: boolean;
   description: string;
   icon: string;          // single emoji or short symbol for UI
   color: number;         // hex color for 3D mesh
 };
 
+/**
+ * Balance notes (Gravity "casual arcade KSP"):
+ * Surface orbital velocity in this scaled world is ~0.79 km/s, so a single
+ * basic stack should comfortably reach orbit. Engines are deliberately light
+ * relative to their thrust so staging and side-boosters always help rather
+ * than hurt.
+ */
 export const PARTS_CATALOG: RocketPart[] = [
-  // ENGINES
+  // ── ENGINES ────────────────────────────────────────────────────────────
   {
     id: 'engine-basic',
-    name: 'Sparrow Engine',
+    name: 'Sparrow',
     type: 'engine',
-    mass: 1.0,
-    thrust: 65,
-    burnRate: 8,
+    mass: 0.5,
+    thrust: 95,
+    burnRate: 9,
     fuelCapacity: 0,
     unlockedByDefault: true,
-    description: 'Reliable first-stage engine. Balanced thrust and efficiency.',
+    description: 'Reliable first-stage engine. Punchy and forgiving.',
     icon: '🜂',
-    color: 0x888899,
+    color: 0x9aa3b8,
   },
   {
     id: 'engine-vacuum',
-    name: 'Vacuum Engine',
+    name: 'Comet Vac',
     type: 'engine',
-    mass: 0.8,
-    thrust: 45,
+    mass: 0.4,
+    thrust: 70,
     burnRate: 6,
     fuelCapacity: 0,
     unlockedByDefault: false,
-    description: 'High-efficiency engine optimized for upper stages.',
+    description: 'High-efficiency upper-stage engine. Loves the vacuum.',
     icon: '◉',
-    color: 0xb0b0c8,
+    color: 0xc2c8de,
+  },
+  {
+    id: 'engine-heavy',
+    name: 'Titan Heavy',
+    type: 'engine',
+    mass: 1.3,
+    thrust: 260,
+    burnRate: 20,
+    fuelCapacity: 0,
+    unlockedByDefault: false,
+    description: 'Brute-force core engine for heavy lifters.',
+    icon: '🜨',
+    color: 0x7d8496,
   },
   {
     id: 'engine-nuclear',
-    name: 'NERV Engine',
+    name: 'NERV',
     type: 'engine',
-    mass: 1.5,
-    thrust: 25,
-    burnRate: 2,
+    mass: 1.1,
+    thrust: 70,
+    burnRate: 3,
     fuelCapacity: 0,
     unlockedByDefault: false,
     description: 'Nuclear thermal — extreme efficiency for long burns.',
     icon: '☢',
-    color: 0x55ff88,
+    color: 0x6effa6,
   },
   {
     id: 'engine-ion',
     name: 'Ion Drive',
     type: 'engine',
     mass: 0.1,
-    thrust: 6,
+    thrust: 12,
     burnRate: 0.4,
     fuelCapacity: 0,
     unlockedByDefault: false,
     description: 'Tiny thrust, enormous efficiency. Deep space only.',
     icon: '✦',
-    color: 0x66ccff,
+    color: 0x6cd0ff,
   },
 
-  // TANKS
+  // ── SIDE BOOSTERS ──────────────────────────────────────────────────────
+  {
+    id: 'booster-solid',
+    name: 'Kicker SRB',
+    type: 'booster',
+    mass: 0.45,
+    thrust: 150,
+    burnRate: 17,
+    fuelCapacity: 220,
+    unlockedByDefault: true,
+    description: 'Strap-on solid booster. Big shove off the pad, drops with stage 1.',
+    icon: '🚀',
+    color: 0xf2f2f5,
+  },
+  {
+    id: 'booster-liquid',
+    name: 'Twin Liquid',
+    type: 'booster',
+    mass: 0.7,
+    thrust: 230,
+    burnRate: 19,
+    fuelCapacity: 360,
+    unlockedByDefault: false,
+    description: 'Liquid-fuel strap-on. Heavy lift for big payloads.',
+    icon: '🛢',
+    color: 0xffd27a,
+  },
+
+  // ── TANKS ──────────────────────────────────────────────────────────────
+  {
+    id: 'tank-small',
+    name: 'Pony Tank',
+    type: 'tank',
+    mass: 0.1,
+    thrust: 0,
+    burnRate: 0,
+    fuelCapacity: 80,
+    unlockedByDefault: true,
+    description: 'Tiny tank for trims and upper stages.',
+    icon: '▫',
+    color: 0xffc04d,
+  },
   {
     id: 'tank-basic',
     name: 'Basic Tank',
     type: 'tank',
-    mass: 0.2,
+    mass: 0.18,
     thrust: 0,
     burnRate: 0,
-    fuelCapacity: 100,
+    fuelCapacity: 160,
     unlockedByDefault: true,
-    description: 'Small fuel tank. 100 L capacity.',
+    description: 'Dependable workhorse tank.',
     icon: '▭',
-    color: 0xff7700,
+    color: 0xff9a3c,
   },
   {
     id: 'tank-medium',
     name: 'Medium Tank',
     type: 'tank',
-    mass: 0.35,
+    mass: 0.3,
     thrust: 0,
     burnRate: 0,
-    fuelCapacity: 200,
+    fuelCapacity: 320,
     unlockedByDefault: false,
-    description: 'Doubled capacity. Good for sub-orbital hops.',
+    description: 'Doubled capacity for orbital insertions.',
     icon: '▮',
-    color: 0xff8833,
+    color: 0xffab52,
   },
   {
     id: 'tank-large',
     name: 'Large Tank',
     type: 'tank',
-    mass: 0.6,
+    mass: 0.5,
     thrust: 0,
     burnRate: 0,
-    fuelCapacity: 380,
+    fuelCapacity: 560,
     unlockedByDefault: false,
     description: 'Heavy but holds a lot of fuel.',
-    icon: '▮',
-    color: 0xff9944,
+    icon: '▯',
+    color: 0xffbd6b,
   },
   {
     id: 'tank-xl',
     name: 'XL Tank',
     type: 'tank',
-    mass: 1.0,
+    mass: 0.9,
     thrust: 0,
     burnRate: 0,
-    fuelCapacity: 650,
+    fuelCapacity: 1000,
     unlockedByDefault: false,
     description: 'For interplanetary missions.',
     icon: '⬛',
-    color: 0xffaa55,
+    color: 0xffce85,
   },
 
-  // NOSES / CAPSULES
+  // ── NOSES / PAYLOADS ───────────────────────────────────────────────────
   {
     id: 'nose-cone',
     name: 'Nose Cone',
@@ -135,7 +197,7 @@ export const PARTS_CATALOG: RocketPart[] = [
     unlockedByDefault: true,
     description: 'Aerodynamic nose. Cheap and light.',
     icon: '▲',
-    color: 0xeeeeff,
+    color: 0xf3f6ff,
   },
   {
     id: 'capsule-crew',
@@ -148,7 +210,7 @@ export const PARTS_CATALOG: RocketPart[] = [
     unlockedByDefault: false,
     description: 'Carries astronauts. Required for crewed missions.',
     icon: '◐',
-    color: 0xddddff,
+    color: 0xe6ecff,
   },
   {
     id: 'satellite-bus',
@@ -161,10 +223,23 @@ export const PARTS_CATALOG: RocketPart[] = [
     unlockedByDefault: false,
     description: 'Deployable satellite payload.',
     icon: '🛰',
-    color: 0xffcc55,
+    color: 0xffd866,
+  },
+  {
+    id: 'station-module',
+    name: 'Station Module',
+    type: 'capsule',
+    mass: 1.2,
+    thrust: 0,
+    burnRate: 0,
+    fuelCapacity: 0,
+    unlockedByDefault: false,
+    description: 'Heavy outpost module. Deliver it to build a base or station.',
+    icon: '🏗',
+    color: 0x9ad0ff,
   },
 
-  // UTILITY
+  // ── UTILITY ────────────────────────────────────────────────────────────
   {
     id: 'parachute',
     name: 'Parachute',
@@ -174,7 +249,7 @@ export const PARTS_CATALOG: RocketPart[] = [
     burnRate: 0,
     fuelCapacity: 0,
     unlockedByDefault: false,
-    description: 'Slows descent in atmosphere.',
+    description: 'Auto-opens on descent in atmosphere for a soft landing.',
     icon: '☂',
     color: 0xffffff,
   },
@@ -182,14 +257,14 @@ export const PARTS_CATALOG: RocketPart[] = [
     id: 'heat-shield',
     name: 'Heat Shield',
     type: 'utility',
-    mass: 0.5,
+    mass: 0.4,
     thrust: 0,
     burnRate: 0,
     fuelCapacity: 0,
     unlockedByDefault: false,
     description: 'Protects from reentry heating.',
     icon: '⛨',
-    color: 0x884422,
+    color: 0xb5703a,
   },
   {
     id: 'landing-legs',
@@ -202,35 +277,35 @@ export const PARTS_CATALOG: RocketPart[] = [
     unlockedByDefault: false,
     description: 'Stable touchdown on flat ground.',
     icon: '⎍',
-    color: 0xaaaaaa,
+    color: 0xc8ccd6,
   },
 
-  // LANDERS — separable descent payload with their own engine + fuel.
+  // ── LANDERS — separable descent payload with their own engine + fuel ────
   {
     id: 'lander-light',
     name: 'Scout Lander',
     type: 'lander',
-    mass: 0.6,
-    thrust: 28,
+    mass: 0.5,
+    thrust: 40,
     burnRate: 5,
-    fuelCapacity: 60,
+    fuelCapacity: 90,
     unlockedByDefault: true,
     description: 'Light descent stage. Separates to touch down softly.',
     icon: '🛬',
-    color: 0xc9d4e0,
+    color: 0xd6e0ee,
   },
   {
     id: 'lander-heavy',
     name: 'Pioneer Lander',
     type: 'lander',
-    mass: 1.1,
-    thrust: 55,
+    mass: 1.0,
+    thrust: 80,
     burnRate: 9,
-    fuelCapacity: 140,
+    fuelCapacity: 200,
     unlockedByDefault: false,
-    description: 'Heavy lander with plenty of descent fuel for low-gravity worlds.',
+    description: 'Heavy lander with plenty of descent fuel for any world.',
     icon: '🛸',
-    color: 0xe0c97a,
+    color: 0xf0d98a,
   },
 ];
 

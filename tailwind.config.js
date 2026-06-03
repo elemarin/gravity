@@ -4,16 +4,19 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        bg:       '#0a1726',
-        panel:    'rgba(25, 45, 70, 0.72)',
-        ink:      '#e8f4ff',
-        dim:      '#8aa0b5',
-        cyan:     '#00e5ff',
-        orange:   '#ff8a3d',
-        green:    '#2ee59d',
-        yellow:   '#ffd54a',
-        red:      '#ff5577',
-        purple:   '#b070ff',
+        // Bright, vibrant space-arcade palette.
+        bg:       '#1b4a8f',
+        panel:    'rgba(60, 104, 168, 0.78)',
+        ink:      '#f3f9ff',
+        dim:      '#c4d6f0',
+        cyan:     '#1fd9ff',
+        sky:      '#5cc2ff',
+        orange:   '#ff9a45',
+        green:    '#39e9a6',
+        yellow:   '#ffd84d',
+        red:      '#ff6b86',
+        purple:   '#bb8bff',
+        pink:     '#ff8ad0',
       },
       fontFamily: {
         pixel:   ['var(--font-pixel)', '"Press Start 2P"', 'monospace'],

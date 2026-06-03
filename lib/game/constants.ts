@@ -14,5 +14,6 @@ export const KARMAN_ALTITUDE = 10.0; // 10 THREE units = 100 km but we use 1 uni
 // Recalibrate: 1 THREE unit = 1 km → Kármán = 100 THREE units above surface
 export const KARMAN_LINE = 100.0;
 
-// Atmosphere thickness (units above surface where drag fades to 0)
-export const ATMOSPHERE_HEIGHT = 120.0;
+// Atmosphere thickness (units above surface where drag fades to 0).
+// Kept below the Kármán line so orbits at 100 km+ are drag-free and stable.
+export const ATMOSPHERE_HEIGHT = 70.0;

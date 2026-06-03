@@ -11,6 +11,12 @@ export class Renderer {
   private cameraOffset = new THREE.Vector3(0, 2, 8);
   private resizeObserver?: ResizeObserver;
 
+  // Sky gradient: bright day at the surface → deep space with altitude.
+  private skyDay = new THREE.Color(0x8ec9ff);
+  private skySpace = new THREE.Color(0x05070f);
+  private skyFade = 120; // altitude (units) over which day fades to space
+  private skyScratch = new THREE.Color();
+
   // User camera control state
   private userZoom    = 1.0;
   private userAzimuth = 0.0;
@@ -21,30 +27,34 @@ export class Renderer {
   constructor(container: HTMLElement) {
     this.container = container;
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: false });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-    this.renderer.setClearColor(0x0a1726);
+    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setClearColor(this.skyDay);
     this.renderer.domElement.style.display = 'block';
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0a1726);
-    this.scene.fog = new THREE.Fog(0x0a1726, 420, 1000);
+    this.scene.background = this.skyDay.clone();
+    this.scene.fog = new THREE.Fog(this.skyDay.clone(), 600, 3200);
 
-    this.camera = new THREE.PerspectiveCamera(60, 1, 0.01, 2000);
+    this.camera = new THREE.PerspectiveCamera(60, 1, 0.01, 6000);
     this.camera.position.set(0, EARTH_RADIUS + 2, 8);
     this.camera.lookAt(0, EARTH_RADIUS + 1, 0);
 
-    const ambient = new THREE.AmbientLight(0x6f85aa, 1.1);
+    // Bright, cheerful lighting for the "casual arcade" look.
+    const hemi = new THREE.HemisphereLight(0xdff0ff, 0x4a5b78, 1.15);
+    this.scene.add(hemi);
+
+    const ambient = new THREE.AmbientLight(0xa9c2e0, 0.6);
     this.scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xffddaa, 2.2);
+    const sun = new THREE.DirectionalLight(0xfff2d6, 2.4);
     sun.position.set(80, 120, 60);
     this.scene.add(sun);
 
-    const fill = new THREE.DirectionalLight(0x86c6ff, 0.55);
+    const fill = new THREE.DirectionalLight(0x9ed0ff, 0.6);
     fill.position.set(-80, -40, -60);
     this.scene.add(fill);
 
@@ -151,6 +161,25 @@ export class Renderer {
       upOff,
       Math.cos(this.userAzimuth) * dist,
     );
+  }
+
+  /** Configure the launch world's daytime sky and atmosphere depth. */
+  setSky(dayHex: number, atmosphereHeight: number) {
+    this.skyDay.setHex(dayHex);
+    // Airless worlds read almost like open space even at the surface.
+    this.skyFade = atmosphereHeight > 0 ? atmosphereHeight : 30;
+    this.updateSky(0);
+  }
+
+  /** Blend the sky from day → space as the craft climbs. */
+  updateSky(altitude: number) {
+    const t = THREE.MathUtils.clamp(altitude / this.skyFade, 0, 1);
+    // Ease so the surface stays bright and it darkens nearer to space.
+    const eased = t * t;
+    this.skyScratch.copy(this.skyDay).lerp(this.skySpace, eased);
+    (this.scene.background as THREE.Color).copy(this.skyScratch);
+    (this.scene.fog as THREE.Fog).color.copy(this.skyScratch);
+    this.renderer.setClearColor(this.skyScratch);
   }
 
   render() {

@@ -6,15 +6,17 @@ import { useRouter } from 'next/navigation';
 import { PARTS_CATALOG, RocketPart, PartType } from '@/lib/game/career/Parts';
 import { RocketBuild, StageSpec, DEFAULT_BUILD } from '@/lib/game/types';
 import { computeStats, estimateBuildDeltaV, getStages } from '@/lib/game/BuildSpec';
-import { loadBuild, saveBuild, loadUnlockedParts } from '@/lib/storage';
+import { loadBuild, saveBuild, loadUnlockedParts, loadFacilityLevel } from '@/lib/storage';
+import { facilityTier } from '@/lib/game/career/Progress';
 import NavDrawer from './NavDrawer';
 
 const CATEGORIES: { type: PartType; label: string; short: string }[] = [
-  { type: 'engine',  label: 'Engines',  short: 'ENG'  },
-  { type: 'tank',    label: 'Tanks',    short: 'TANK' },
-  { type: 'nose',    label: 'Nose',     short: 'NOSE' },
-  { type: 'lander',  label: 'Landers',  short: 'LAND' },
-  { type: 'utility', label: 'Utility',  short: 'UTIL' },
+  { type: 'engine',  label: 'Engines',  short: 'ENG'   },
+  { type: 'booster', label: 'Boosters', short: 'BOOST' },
+  { type: 'tank',    label: 'Tanks',    short: 'TANK'  },
+  { type: 'nose',    label: 'Nose',     short: 'NOSE'  },
+  { type: 'lander',  label: 'Landers',  short: 'LAND'  },
+  { type: 'utility', label: 'Utility',  short: 'UTIL'  },
 ];
 
 function withStages(build: RocketBuild, stages: StageSpec[]): RocketBuild {
@@ -33,18 +35,23 @@ export default function RocketBuilder() {
   const [unlocked, setUnlocked] = useState<Set<string>>(new Set());
   const [selectedStage, setSelectedStage] = useState(0);
   const [activeCategory, setActiveCategory] = useState<PartType>('engine');
+  const [facilityLevel, setFacilityLevel] = useState(0);
 
   useEffect(() => {
     setBuild(loadBuild());
     const ids = new Set(loadUnlockedParts());
     PARTS_CATALOG.forEach((p) => { if (p.unlockedByDefault) ids.add(p.id); });
     setUnlocked(ids);
+    setFacilityLevel(loadFacilityLevel());
   }, []);
 
+  const tier    = facilityTier(facilityLevel);
   const stages  = useMemo(() => getStages(build), [build]);
   const stats   = useMemo(() => computeStats(build), [build]);
   const deltaV  = useMemo(() => estimateBuildDeltaV(build), [build]);
   const activeStage = Math.min(selectedStage, stages.length - 1);
+  const overMass = stats.wetMass > tier.maxMass;
+  const atStageLimit = stages.length >= tier.maxStages;
 
   const categoryParts = useMemo(
     () => PARTS_CATALOG.filter((p) => p.type === activeCategory),
@@ -62,9 +69,19 @@ export default function RocketBuilder() {
 
   const addStage = () =>
     setBuild((b) => {
+      if (getStages(b).length >= tier.maxStages) return b;
       const s = [...getStages(b), { engineId: 'engine-basic', tankIds: ['tank-basic'] }];
       setSelectedStage(s.length - 1);
       return withStages(b, s);
+    });
+
+  const toggleBooster = (id: string) =>
+    setBuild((b) => {
+      const cur = b.boosterIds ?? [];
+      const has = cur.includes(id);
+      // Cap strap-ons at four for sane geometry.
+      const next = has ? cur.filter((x) => x !== id) : (cur.length >= 4 ? cur : [...cur, id]);
+      return { ...b, boosterIds: next };
     });
 
   const removeStage = (si: number) =>
@@ -87,6 +104,7 @@ export default function RocketBuilder() {
   const handlePartTap = (p: RocketPart) => {
     if (!unlocked.has(p.id)) return;
     if (p.type === 'engine')  setStageEngine(p.id);
+    else if (p.type === 'booster') toggleBooster(p.id);
     else if (p.type === 'tank') addTankToStage(p.id);
     else if (p.type === 'nose' || p.type === 'capsule') setNose(p.id);
     else if (p.type === 'lander') toggleLander(p.id);
@@ -96,6 +114,7 @@ export default function RocketBuilder() {
   const isSelected = (p: RocketPart): boolean => {
     const stage = stages[activeStage];
     if (p.type === 'engine')  return stage?.engineId === p.id;
+    if (p.type === 'booster') return !!build.boosterIds?.includes(p.id);
     if (p.type === 'tank')    return !!stage?.tankIds.includes(p.id);
     if (p.type === 'nose' || p.type === 'capsule') return build.noseId === p.id;
     if (p.type === 'lander')  return build.landerId === p.id;
@@ -131,7 +150,9 @@ export default function RocketBuilder() {
             noseId={build.noseId}
             landerId={build.landerId}
             utilityIds={build.utilityIds}
+            boosterIds={build.boosterIds ?? []}
             selectedStage={activeStage}
+            atStageLimit={atStageLimit}
             onSelectStage={setSelectedStage}
             onRemoveTank={removeTankFromStage}
             onRemoveStage={removeStage}
@@ -140,18 +161,22 @@ export default function RocketBuilder() {
         </div>
 
         {/* Stats column */}
-        <div className="shrink-0 flex flex-col gap-2 justify-center h-full py-2" style={{ minWidth: 110 }}>
-          <StatCard label="MASS" value={`${stats.wetMass.toFixed(1)} t`} />
+        <div className="shrink-0 flex flex-col gap-2 justify-center h-full py-2" style={{ minWidth: 116 }}>
+          <StatCard label={`MASS / ${tier.maxMass}t`} value={`${stats.wetMass.toFixed(1)} t`} warn={overMass} />
           <StatCard label="THRUST" value={`${stats.thrust.toFixed(0)} kN`} />
-          <StatCard label="TWR" value={twr.toFixed(2)} highlight={twr > 1} />
+          <StatCard label="TWR" value={twr.toFixed(2)} warn={twr < 1.1} highlight={twr >= 1.1} />
           <StatCard label="Δv EST" value={`${deltaV.toFixed(0)} m/s`} highlight />
           <StatCard label="FUEL" value={`${stats.fuelCapacity.toFixed(0)} L`} />
         </div>
       </div>
 
-      {/* ── Stage hint ── */}
-      <div className="shrink-0 px-0 pb-1 md:col-start-2 md:row-start-1">
-        <div className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-3 py-1.5 text-[10px] text-dim text-center">
+      {/* ── Facility + stage hint ── */}
+      <div className="shrink-0 px-0 pb-1 md:col-start-2 md:row-start-1 flex flex-col gap-1">
+        <div className="rounded-lg border border-cyan/25 bg-cyan/[0.06] px-3 py-1.5 text-[11px] text-center">
+          <span className="text-cyan font-black">🏭 {tier.name}</span>
+          <span className="text-dim"> · up to {tier.maxMass}t · {tier.maxStages} stages</span>
+        </div>
+        <div className="rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 py-1.5 text-[11px] text-dim text-center">
           Editing <span className="text-cyan font-bold">Stage {activeStage + 1}</span>
           {' '}— tap a part below to add it
         </div>
@@ -216,10 +241,16 @@ export default function RocketBuilder() {
       </section>
 
       {/* ── Launch button ── */}
-      <div className="shrink-0 px-4 py-3 border-t border-white/5">
+      <div className="shrink-0 px-4 py-3 border-t border-white/10">
+        {overMass && (
+          <div className="mb-2 text-center text-[11px] text-red font-bold">
+            Too heavy for the {tier.name} ({stats.wetMass.toFixed(1)}t &gt; {tier.maxMass}t) — upgrade your base in Career.
+          </div>
+        )}
         <button
-          onClick={() => { saveBuild(build); router.push('/play'); }}
-          className="btn btn-primary w-full text-base py-3.5"
+          disabled={overMass}
+          onClick={() => { if (overMass) return; saveBuild(build); router.push('/play'); }}
+          className={`btn w-full text-base py-3.5 ${overMass ? 'btn-secondary opacity-50 cursor-not-allowed' : 'btn-primary'}`}
         >
           🚀 Save &amp; Launch
         </button>
@@ -228,11 +259,11 @@ export default function RocketBuilder() {
   );
 }
 
-function StatCard({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
+function StatCard({ label, value, highlight, warn }: { label: string; value: string; highlight?: boolean; warn?: boolean }) {
   return (
-    <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-2.5 py-1.5">
-      <div className="text-[8px] font-bold tracking-[0.15em] uppercase text-dim">{label}</div>
-      <div className={`text-[13px] font-bold tabular-nums leading-tight ${highlight ? 'text-cyan' : 'text-ink'}`}>
+    <div className={`rounded-lg border px-2.5 py-1.5 ${warn ? 'border-red/40 bg-red/[0.08]' : 'border-white/[0.1] bg-white/[0.04]'}`}>
+      <div className="text-[9px] font-bold tracking-[0.12em] uppercase text-dim">{label}</div>
+      <div className={`text-[14px] font-bold tabular-nums leading-tight ${warn ? 'text-red' : highlight ? 'text-cyan' : 'text-ink'}`}>
         {value}
       </div>
     </div>
@@ -240,24 +271,25 @@ function StatCard({ label, value, highlight }: { label: string; value: string; h
 }
 
 function PartStat({ part }: { part: RocketPart }) {
-  if (part.type === 'engine') return (
-    <div className="text-[9px] tabular-nums text-dim">
+  if (part.type === 'engine' || part.type === 'booster') return (
+    <div className="text-[10px] tabular-nums text-dim">
       <span className="text-orange">⚡{part.thrust}kN</span>
-      <span className="mx-1">·</span>
-      <span>{part.burnRate}L/s</span>
+      {part.fuelCapacity > 0 && (
+        <><span className="mx-1">·</span><span className="text-cyan">{part.fuelCapacity}L</span></>
+      )}
     </div>
   );
   if (part.type === 'tank') return (
-    <div className="text-[9px] tabular-nums text-cyan">⛽ {part.fuelCapacity} L</div>
+    <div className="text-[10px] tabular-nums text-cyan">⛽ {part.fuelCapacity} L</div>
   );
   if (part.type === 'lander') return (
-    <div className="text-[9px] tabular-nums text-dim">
+    <div className="text-[10px] tabular-nums text-dim">
       <span className="text-orange">⚡{part.thrust}kN</span>
       <span className="mx-1">·</span>
       <span className="text-cyan">{part.fuelCapacity}L</span>
     </div>
   );
-  return <div className="text-[9px] tabular-nums text-dim">{part.mass} t</div>;
+  return <div className="text-[10px] tabular-nums text-dim">{part.mass} t</div>;
 }
 
 // ─── Blueprint rocket diagram ────────────────────────────────────────────────
@@ -268,14 +300,16 @@ function colorFor(id: string): string {
 }
 
 function BlueprintRocket({
-  stages, noseId, landerId, utilityIds,
-  selectedStage, onSelectStage, onRemoveTank, onRemoveStage, onAddStage,
+  stages, noseId, landerId, utilityIds, boosterIds,
+  selectedStage, atStageLimit, onSelectStage, onRemoveTank, onRemoveStage, onAddStage,
 }: {
   stages: StageSpec[];
   noseId: string;
   landerId?: string;
   utilityIds: string[];
+  boosterIds: string[];
   selectedStage: number;
+  atStageLimit: boolean;
   onSelectStage: (i: number) => void;
   onRemoveTank: (si: number, ti: number) => void;
   onRemoveStage: (si: number) => void;
@@ -359,13 +393,26 @@ function BlueprintRocket({
         );
       })}
 
+      {/* Boosters strapped to stage 1 */}
+      {boosterIds.length > 0 && (
+        <div className="mt-1.5 flex items-center justify-center gap-1 rounded-md border border-orange/35
+                        bg-orange/[0.08] px-2 py-0.5 text-[10px] text-orange font-bold">
+          ⟂ ×{boosterIds.length}
+          {boosterIds.map((id, i) => {
+            const p = PARTS_CATALOG.find((x) => x.id === id);
+            return <span key={i}>{p?.icon ?? '🚀'}</span>;
+          })}
+        </div>
+      )}
+
       {/* Add stage */}
       <button
         onClick={onAddStage}
-        className="mt-2 w-full rounded-md border border-dashed border-cyan/30
-                   text-cyan text-[9px] font-bold py-1.5 hover:bg-cyan/10 active:scale-95"
+        disabled={atStageLimit}
+        className={`mt-2 w-full rounded-md border border-dashed text-[11px] font-bold py-1.5 active:scale-95
+          ${atStageLimit ? 'border-white/15 text-dim/50 cursor-not-allowed' : 'border-cyan/40 text-cyan hover:bg-cyan/10'}`}
         style={{ maxWidth: TANK_W + 20 }}
-      >＋</button>
+      >{atStageLimit ? '🔒' : '＋ Stage'}</button>
 
       {/* Utility badges */}
       {utilityIds.length > 0 && (
@@ -373,7 +420,7 @@ function BlueprintRocket({
           {utilityIds.map((id) => {
             const p = PARTS_CATALOG.find((x) => x.id === id);
             return p ? (
-              <span key={id} className="rounded-full border border-white/15 bg-white/5 px-1.5 py-0.5 text-[9px] text-dim">
+              <span key={id} className="rounded-full border border-white/15 bg-white/5 px-1.5 py-0.5 text-[10px] text-dim">
                 {p.icon}
               </span>
             ) : null;

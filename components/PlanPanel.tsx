@@ -5,7 +5,7 @@ import {
   FlightPlan, Maneuver, TriggerType, TRIGGER_LABELS,
   describeTrigger, describeActions, newNodeId,
 } from '@/lib/game/plan/FlightPlan';
-import type { Body } from '@/lib/game/bodies';
+import { Body, DESTINATIONS, getDestination } from '@/lib/game/bodies';
 
 type Props = {
   plan: FlightPlan;
@@ -17,8 +17,21 @@ type Props = {
 };
 
 const TRIGGER_TYPES: TriggerType[] = [
-  'at-altitude', 'at-apoapsis', 'at-periapsis', 'at-time', 'on-fuel-empty', 'at-soi-entry',
+  'at-altitude', 'at-apoapsis', 'at-periapsis',
+  'at-apoapsis-altitude', 'at-periapsis-altitude',
+  'at-time', 'on-fuel-empty', 'at-soi-entry',
 ];
+
+const VALUE_TRIGGERS: TriggerType[] = [
+  'at-altitude', 'at-time', 'at-apoapsis-altitude', 'at-periapsis-altitude',
+];
+
+function valueLabel(t: TriggerType): string {
+  if (t === 'at-time') return 'Time (s)';
+  if (t === 'at-apoapsis-altitude') return 'Apoapsis (km)';
+  if (t === 'at-periapsis-altitude') return 'Periapsis (km)';
+  return 'Altitude (km)';
+}
 
 function fmtKm(km: number): string {
   if (km >= 1000) return `${(km / 1000).toFixed(1)} Mm`;
@@ -60,6 +73,11 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
   };
 
   const otherBodies = bodies.slice(1);
+  const dest = getDestination(plan.destinationId);
+
+  const setDestination = (id: string) => onChange({ ...plan, destinationId: id });
+  const setLaunch = (patch: Partial<FlightPlan['launch']>) =>
+    onChange({ ...plan, launch: { ...plan.launch, ...patch } });
 
   return (
     <div className="absolute inset-x-0 bottom-0 z-30 font-pixel
@@ -70,12 +88,12 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
         {/* Header row */}
         <button
           onClick={() => setOpen((o) => !o)}
-          className="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-white/5"
+          className="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-white/10"
         >
-          <span className="shrink-0 text-[7px] tracking-[0.2em] uppercase text-cyan" style={{ textShadow: '0 0 8px rgba(0,229,255,0.4)' }}>
+          <span className="shrink-0 text-[10px] tracking-[0.2em] uppercase text-cyan font-black">
             ▸ FLIGHT PLAN
           </span>
-          <span className="min-w-0 flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-[7px] text-dim tabular-nums leading-tight">
+          <span className="min-w-0 flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-[10px] text-dim tabular-nums leading-tight">
             {preview && (
               <>
                 <span className="text-green">AP {fmtKm(preview.apoapsis)}</span>
@@ -89,7 +107,43 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
         </button>
 
         {open && (
-          <div className="max-h-[42vh] overflow-y-auto px-3 py-3 flex flex-col gap-2">
+          <div className="max-h-[46vh] overflow-y-auto px-3 py-3 flex flex-col gap-2">
+            {/* Destination */}
+            <div>
+              <span className="stat-label">Destination</span>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {DESTINATIONS.map((d) => (
+                  <button key={d.id}
+                    onClick={() => setDestination(d.id)}
+                    className={`text-[11px] rounded-md py-1.5 px-2.5 border tracking-wide font-bold
+                      ${plan.destinationId === d.id
+                        ? 'border-cyan/70 bg-cyan/20 text-cyan'
+                        : 'border-white/12 bg-white/[0.05] text-dim'}`}>
+                    {d.name}
+                  </button>
+                ))}
+              </div>
+              <div className="mt-1 text-[10px] text-dim/90 leading-snug">{dest.objective}</div>
+            </div>
+
+            {/* Launch vector */}
+            <div className="rounded-lg border border-white/10 bg-white/[0.04] p-2 flex flex-col gap-2">
+              <span className="stat-label">Launch</span>
+              <Slider
+                label="Aim" enabled value={plan.launch.heading}
+                min={-90} max={90} step={5} suffix="°"
+                onToggle={() => {}}
+                onChange={(v) => setLaunch({ heading: v })}
+              />
+              <Slider
+                label="Power" enabled value={Math.round(plan.launch.power * 100)}
+                min={0} max={100} step={5} suffix="%"
+                onToggle={() => {}}
+                onChange={(v) => setLaunch({ power: v / 100 })}
+              />
+            </div>
+
+            <span className="stat-label mt-1">Maneuvers</span>
             {plan.nodes.length === 0 && (
               <p className="text-[11px] text-dim text-center py-2">
                 No maneuvers yet — add stage points to shape the flight.
@@ -142,9 +196,9 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                           ))}
                         </div>
 
-                        {(node.trigger.type === 'at-altitude' || node.trigger.type === 'at-time') && (
+                        {VALUE_TRIGGERS.includes(node.trigger.type) && (
                           <label className="mt-2 flex items-center gap-2 text-[10px] text-dim">
-                            {node.trigger.type === 'at-altitude' ? 'Altitude (km)' : 'Time (s)'}
+                            {valueLabel(node.trigger.type)}
                             <input
                               type="number"
                               value={node.trigger.value ?? 0}
@@ -214,7 +268,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
 
         {/* Play */}
         <div className="px-3 pb-3 pt-1">
-          <button onClick={onPlay} className="btn btn-primary w-full py-3" style={{ fontSize: 10 }}>▶ LAUNCH</button>
+          <button onClick={onPlay} className="btn btn-primary w-full py-3.5" style={{ fontSize: 13 }}>▶ LAUNCH</button>
         </div>
       </div>
     </div>

@@ -92,11 +92,12 @@ function BackgroundStars() {
   });
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none">
-      <div className="absolute inset-0 bg-gradient-to-b from-bg via-[#08021a] to-bg" />
+      <div className="absolute inset-0 bg-gradient-to-b from-[#2a6fd6] via-[#1b4a8f] to-[#0e2c5c]" />
       {stars}
-      {/* Pixel nebula glows */}
-      <div className="absolute -top-32 -right-32 w-80 h-80 bg-purple/8 blur-[80px]" />
-      <div className="absolute -bottom-32 -left-32 w-80 h-80 bg-cyan/8 blur-[80px]" />
+      {/* Vibrant nebula glows */}
+      <div className="absolute -top-32 -right-32 w-96 h-96 bg-pink/20 blur-[90px]" />
+      <div className="absolute top-1/3 -left-32 w-96 h-96 bg-cyan/20 blur-[90px]" />
+      <div className="absolute -bottom-32 right-1/4 w-80 h-80 bg-purple/20 blur-[80px]" />
     </div>
   );
 }
