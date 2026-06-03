@@ -16,6 +16,8 @@ type Props = {
   onEdit: () => void;
   onReplay: () => void;
   onWarp: () => void;
+  onWarpUp: () => void;
+  onWarpDown: () => void;
   onSkip: () => void;
   onStage: () => void;
   onLander: () => void;
@@ -57,7 +59,7 @@ export default function SimControls({
   finished, phase, timeScale, canSkip,
   canStage, hasParachute, parachuteDeployed,
   hasLander, landerDeployed, canLand,
-  onEdit, onReplay, onWarp, onSkip, onStage, onLander, onLand,
+  onEdit, onReplay, onWarp, onWarpUp, onWarpDown, onSkip, onStage, onLander, onLand,
 }: Props) {
   const active = !finished && phase !== 'prelaunch';
   const inFlight = phase !== 'prelaunch' && phase !== 'landed' && phase !== 'destroyed';
@@ -105,12 +107,16 @@ export default function SimControls({
         {!finished && (
           <>
             {canSkip && <PixelBtn label="SKIP" color="#c4d6f0" onClick={onSkip} />}
-            <PixelBtn
-              label={timeScale > 1 ? `${timeScale}×` : '▶▶'}
-              color={timeScale > 1 ? '#ffd84d' : '#c4d6f0'}
-              onClick={onWarp}
-              glow={timeScale > 1}
-            />
+            <div className="flex items-center gap-1">
+              <PixelBtn label="−" color="#c4d6f0" onClick={onWarpDown} />
+              <PixelBtn
+                label={timeScale > 1 ? `${timeScale}×` : '▶▶'}
+                color={timeScale > 1 ? '#ffd84d' : '#c4d6f0'}
+                onClick={onWarp}
+                glow={timeScale > 1}
+              />
+              <PixelBtn label="+" color="#c4d6f0" onClick={onWarpUp} />
+            </div>
           </>
         )}
         <PixelBtn label={finished ? '↻ REPLAY' : '↻'} color="#1fd9ff" onClick={onReplay} glow />

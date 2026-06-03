@@ -4,6 +4,7 @@ import { Planet } from './entities/Planet';
 import { Rocket } from './entities/Rocket';
 import { Launchpad } from './entities/Launchpad';
 import { TrajectoryLine } from './TrajectoryLine';
+import { TrailLine } from './TrailLine';
 import { MilestoneManager } from './career/Milestones';
 import { Simulator, SimConfig } from './plan/Simulator';
 import { FlightPlan, DEFAULT_PLAN, clonePlan, describeActions, describeTrigger } from './plan/FlightPlan';
@@ -42,6 +43,7 @@ export class Game {
   private planets: Planet[] = [];
   rocket: Rocket;
   private trajectory: TrajectoryLine;
+  private trail: TrailLine;
   private milestones: MilestoneManager;
   private launchpad?: Launchpad;
 
@@ -80,6 +82,7 @@ export class Game {
     this.planets = this.bodies.map((b) => new Planet(this.renderer.scene, b));
     this.rocket = new Rocket(this.renderer.scene, this.build);
     this.trajectory = new TrajectoryLine(this.renderer.scene);
+    this.trail = new TrailLine(this.renderer.scene);
     this.milestones = new MilestoneManager(opts.completedMilestoneIds ?? []);
     this.milestones.onComplete = (m) => this.callbacks.onMilestoneComplete?.(m.id, m.unlocks);
 
@@ -146,6 +149,7 @@ export class Game {
     this.sim.reset();
     this.rocket.reset(this.startPosition());
     this.simTrajectoryTimer = 0; // update trajectory immediately
+    this.trail.reset();
     this.flightState = this.buildFlightState();
     this.frameRocket(true);
     this.callbacks.onModeChange?.('sim');
@@ -159,6 +163,7 @@ export class Game {
     this.timeScale = 1;
     this.sim.reset();
     this.rocket.reset(this.startPosition());
+    this.trail.reset();
     this.flightState = this.buildFlightState();
     this.updatePreview();
     this.frameRocket(true);
@@ -302,6 +307,7 @@ export class Game {
       while (this.accumulator >= FIXED_DT) {
         this.sim.step(FIXED_DT);
         this.afterStep(FIXED_DT, true);
+        this.trail.push(this.sim.state.position);
         this.accumulator -= FIXED_DT;
         if (this.sim.finished) break;
       }
@@ -563,6 +569,7 @@ export class Game {
     this.stop();
     if (this.previewHandle) cancelAnimationFrame(this.previewHandle);
     this.trajectory.dispose();
+    this.trail.dispose();
     this.rocket.dispose();
     this.launchpad?.dispose();
     this.planets.forEach((p) => p.dispose());

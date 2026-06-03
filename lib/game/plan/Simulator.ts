@@ -44,6 +44,7 @@ export type SimState = {
   landingAssist: boolean;   // powered-descent autopilot engaged
   ascentAssist: boolean;    // powered-ascent autopilot engaged (relaunch)
   captureAssist: boolean;   // orbital-capture autopilot engaged (brake to circular)
+  circularizeAssist: boolean; // ascent circularization autopilot engaged
   captureTargetId: string | null; // body the capture autopilot brakes relative to
   captureOrbitSign: -1 | 0 | 1; // direction chosen for destination orbit insertion
   deorbitAssist: boolean;   // de-orbit autopilot engaged (lower periapsis then land)
@@ -102,6 +103,7 @@ export class Simulator {
       landingAssist: false,
       ascentAssist: false,
       captureAssist: false,
+      circularizeAssist: false,
       captureTargetId: null,
       captureOrbitSign: 0,
       deorbitAssist: false,
@@ -183,14 +185,12 @@ export class Simulator {
     }
 
     // --- Maneuver triggers ---
-    // Flight plans are ordered checklists: each node arms only after the
-    // previous one has fired. Without this, later burns can preempt ascent
-    // circularization and break the intended orbit → transfer → arrival route.
-    while (true) {
-      const node = this.plan.nodes.find((n) => !s.firedNodeIds.has(n.id));
-      if (!node || !this.triggerFired(node, altitude, radialVel)) break;
-      s.firedNodeIds.add(node.id);
-      this.applyActions(node);
+    for (const node of this.plan.nodes) {
+      if (s.firedNodeIds.has(node.id)) continue;
+      if (this.triggerFired(node, altitude, radialVel)) {
+        s.firedNodeIds.add(node.id);
+        this.applyActions(node);
+      }
     }
 
     // --- De-orbit autopilot (the LAND button) ---
@@ -256,55 +256,92 @@ export class Simulator {
       }
     }
 
+    // --- Ascent circularization autopilot ---
+    // Closes the current ascent arc into a circular orbit at whatever altitude
+    // the craft has coasted to. Unlike an open-loop fixed-throttle burn, it
+    // steers the velocity *correction* and only ever asks for circular speed —
+    // so a powerful engine brakes itself instead of accelerating past escape.
+    if (s.circularizeAssist) {
+      const east = this.eastDir(up);
+      const rNow = Math.max(s.position.distanceTo(body.center), body.radius + 0.001);
+      const vCirc = Math.sqrt(body.GM / rNow);
+      const tangential = s.velocity.dot(east);
+      const sign = tangential < 0 ? -1 : 1;
+      // Target a purely tangential, circular-speed velocity (zero radial) at the
+      // current radius. Holding altitude here keeps the apoapsis we coasted to.
+      const desiredVel = east.clone().multiplyScalar(vCirc * sign);
+      const correction = desiredVel.sub(s.velocity);
+      const tol = Math.max(0.004, vCirc * 0.02);
+      if (correction.length() <= tol) {
+        s.throttle = 0;
+        s.circularizeAssist = false;
+        s.attitude = 'prograde';
+      } else {
+        this.aimToward(correction, up);
+        s.throttle = 1;
+      }
+    }
+
     // --- Orbital-capture autopilot ---
-    // Steers toward a circular destination orbit instead of blindly braking.
-    // A pure retrograde burn can kill too much tangential speed on a steep
-    // lunar arrival, leaving the craft to fall into the surface.
+    // Inserts an arrival into a STABLE, bounded orbit around the destination.
+    // A small sphere of influence (SOI) only holds a circular orbit well inside
+    // it, and the arrival enters near the SOI edge on a hyperbola whose
+    // periapsis lies deep inside. Braking right at the edge leaves an apoapsis
+    // OUTSIDE the SOI — the craft drifts back out and falls home (the bug). So
+    // we coast down toward periapsis first, then circularize there into an orbit
+    // capped to a safe fraction of the SOI (the requested altitude can be higher
+    // than the SOI can actually hold).
     if (s.captureAssist) {
       const tgt = this.cfg.bodies.find((b) => b.id === s.captureTargetId) ?? body;
-      const relT = new THREE.Vector3().subVectors(s.position, tgt.center);
-      const rNow = Math.max(relT.length(), tgt.radius + 0.001);
-      const altT = rNow - tgt.radius;
-      const targetOrbit = this.captureOrbitKm(tgt);
-      const stableFloor = this.minStableOrbitKm(tgt);
-      const maxApo = Math.min(
-        tgt.soiRadius - tgt.radius * 1.05,
-        Math.max(targetOrbit * 1.4, targetOrbit + stableFloor),
-      );
-      const targetApsides = this.apsides(tgt);
+      const rel = new THREE.Vector3().subVectors(s.position, tgt.center);
+      const rNow = Math.max(rel.length(), tgt.radius + 0.001);
+      const tgtUp = rel.clone().normalize();
+      const tgtEast = this.eastDir(tgtUp);
+      const radialVel = s.velocity.dot(tgtUp);
+      const tangentialVel = s.velocity.dot(tgtEast);
+      const vCirc = Math.sqrt(tgt.GM / rNow);
+      if (s.captureOrbitSign === 0) {
+        s.captureOrbitSign = tangentialVel < 0 ? -1 : 1;
+      }
+      const sign = s.captureOrbitSign;
 
-      if (
-        body.id === tgt.id &&
-        Number.isFinite(targetApsides.apo) &&
-        targetApsides.apo <= maxApo &&
-        targetApsides.peri >= Math.max(stableFloor, targetOrbit * 0.55) &&
-        altT >= stableFloor * 0.5
-      ) {
+      const minR = tgt.radius + this.minStableOrbitKm(tgt);
+      const safeMaxR = Math.max(minR + 1, tgt.soiRadius * 0.22);
+      const targetR = THREE.MathUtils.clamp(tgt.radius + this.captureOrbitKm(tgt), minR, safeMaxR);
+
+      const ap = this.apsides(tgt);
+      const apoR = Number.isFinite(ap.apo) ? ap.apo + tgt.radius : Infinity;
+      const periR = ap.peri + tgt.radius;
+      const tol = Math.max(0.004, vCirc * 0.06);
+      const bounded = apoR <= safeMaxR * 1.15;
+      const nearCircular = Math.abs(radialVel) <= tol &&
+        Math.abs(Math.abs(tangentialVel) - vCirc) <= tol;
+
+      if (bounded && nearCircular && periR >= minR) {
+        // Holding a bounded, near-circular, safe orbit — capture complete.
         s.throttle = 0;
         s.captureAssist = false;
         s.captureTargetId = null;
         s.captureOrbitSign = 0;
       } else {
-        const tgtUp = relT.normalize();
-        const tgtEast = this.eastDir(tgtUp);
-        const tangentialVel = s.velocity.dot(tgtEast);
-        if (s.captureOrbitSign === 0) {
-          s.captureOrbitSign = tangentialVel < -0.003 ? -1 : 1;
+        const descending = radialVel < -Math.max(0.002, vCirc * 0.03);
+        const periapsisSafe = periR >= minR;
+        const aboveBand = rNow > targetR * 1.02;
+        if (descending && aboveBand && periapsisSafe && apoR > safeMaxR) {
+          // Coast down toward periapsis; gravity does the work, so the eventual
+          // circularization burn is cheap and settles a low, stable orbit.
+          s.attitude = 'retrograde';
+          s.throttle = 0;
+        } else {
+          // Insertion burn: aim velocity at a purely tangential circular velocity
+          // (zero radial) at the current radius. The craft can only ever settle
+          // INTO orbit — it brakes its own descent and sheds excess speed rather
+          // than over-burning past escape.
+          const desiredVel = tgtEast.clone().multiplyScalar(vCirc * sign);
+          const correction = desiredVel.sub(s.velocity);
+          if (correction.lengthSq() > 1e-10) this.aimToward(correction, tgtUp);
+          s.throttle = correction.length() > Math.max(0.003, vCirc * 0.03) ? 1 : 0;
         }
-
-        const orbitSign = s.captureOrbitSign;
-        const targetRadius = tgt.radius + targetOrbit;
-        const radialVelT = s.velocity.dot(tgtUp);
-        const vCirc = Math.sqrt(tgt.GM / rNow);
-        const radialLimit = Math.max(0.02, vCirc * 0.35);
-        const desiredRadial = THREE.MathUtils.clamp((targetRadius - rNow) * 0.0015, -radialLimit, radialLimit);
-        const desiredVel = tgtEast.multiplyScalar(vCirc * orbitSign).addScaledVector(tgtUp, desiredRadial);
-        const correction = desiredVel.sub(s.velocity);
-
-        if (correction.lengthSq() > 1e-10) this.aimToward(correction, up);
-        const speedError = correction.length();
-        const radialOverspeed = radialVelT < desiredRadial - Math.max(0.005, vCirc * 0.25);
-        s.throttle = speedError > Math.max(0.004, vCirc * 0.04) || radialOverspeed ? 1 : 0;
       }
     }
 
@@ -444,8 +481,22 @@ export class Simulator {
         // Projected apoapsis has reached the target while still climbing
         // (Infinity counts — that means we're at/over escape energy).
         return radialVel >= 0 && this.state.apoapsis >= (t.value ?? 0);
-      case 'at-periapsis-altitude':
-        return this.state.periapsis >= (t.value ?? 0);
+      case 'at-periapsis-altitude': {
+        const target = t.value ?? 0;
+        if (this.state.periapsis >= target) return true;
+        // Circularization safety: a positive periapsis target is an insertion
+        // burn cutoff. Atmospheric drag during the ascent coast can bleed the
+        // apoapsis below that target, leaving the cutoff unreachable — so the
+        // prograde burn would raise the orbit without bound and escape. Stop
+        // once the orbit is effectively circular above the surface instead.
+        if (target > 0) {
+          const { apo, peri } = this.apsides(this.body());
+          if (Number.isFinite(apo) && peri > 0 && apo - peri <= Math.max(5, apo * 0.05)) {
+            return true;
+          }
+        }
+        return false;
+      }
       case 'on-fuel-empty':
         return (this.state.stageFuel[this.state.activeStage] ?? 0) <= 0.01;
       case 'after-touchdown':
@@ -492,14 +543,15 @@ export class Simulator {
   private applyActions(node: Maneuver) {
     const s = this.state;
     const a = node.actions;
-    if (a.descend) { s.landingAssist = true; s.ascentAssist = false; s.captureAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.attitude = 'retrograde'; }
-    if (a.ascend)  { s.ascentAssist = true; s.landingAssist = false; s.captureAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.relaunchStart = s.elapsed; }
-    if (a.capture) { s.captureAssist = true; s.captureTargetId = node.trigger.targetBodyId ?? null; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; }
-    if (a.depart)  { s.departAssist = true; s.departFromId = this.body().id; s.departTargetId = node.trigger.targetBodyId ?? this.cfg.bodies[0]?.id ?? null; s.captureAssist = false; s.captureOrbitSign = 0; s.landingAssist = false; s.ascentAssist = false; }
+    if (a.descend) { s.landingAssist = true; s.ascentAssist = false; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.attitude = 'retrograde'; }
+    if (a.ascend)  { s.ascentAssist = true; s.landingAssist = false; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.relaunchStart = s.elapsed; }
+    if (a.capture) { s.captureAssist = true; s.captureTargetId = node.trigger.targetBodyId ?? null; s.captureOrbitSign = 0; s.circularizeAssist = false; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; }
+    if (a.circularize) { s.circularizeAssist = true; s.captureAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; s.attitude = 'prograde'; }
+    if (a.depart)  { s.departAssist = true; s.departFromId = this.body().id; s.departTargetId = node.trigger.targetBodyId ?? this.cfg.bodies[0]?.id ?? null; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.landingAssist = false; s.ascentAssist = false; }
     // An explicit throttle command (e.g. a manual burn) takes manual control
     // back from the autopilots so the craft can leave orbit.
-    if (a.throttle !== undefined && !a.descend && !a.ascend && !a.capture && !a.depart) {
-      s.captureAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departFromId = null; s.departTargetId = null;
+    if (a.throttle !== undefined && !a.descend && !a.ascend && !a.capture && !a.circularize && !a.depart) {
+      s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departFromId = null; s.departTargetId = null;
     }
     if (a.attitude !== undefined) s.attitude = a.attitude;
     if (a.heading !== undefined) { s.angle = THREE.MathUtils.clamp(a.heading, -90, 90); s.attitude = 'manual'; }
@@ -528,6 +580,7 @@ export class Simulator {
     const s = this.state;
     s.deorbitAssist = true;
     s.captureAssist = false;
+    s.circularizeAssist = false;
     s.captureOrbitSign = 0;
     s.ascentAssist = false;
     s.departAssist = false;

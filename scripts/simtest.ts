@@ -6,7 +6,7 @@ import { autoPlan } from '../lib/game/plan/AutoPlan';
 import { MissionKind } from '../lib/game/plan/FlightPlan';
 import { ROCKET_PRESETS, ROUTE_PROVER_BUILD } from '../lib/game/career/Presets';
 import { buildFlightSimSetup } from '../lib/game/SimSetup';
-import { RocketBuild } from '../lib/game/types';
+import { RocketBuild, DEFAULT_BUILD } from '../lib/game/types';
 
 const DT = 1 / 60;
 const MAX_STEPS = 4_000_000;
@@ -102,6 +102,21 @@ function assertOrbit(result: RunResult, bodyId: string) {
   expectReached(result, bodyId);
 }
 
+/**
+ * A direct orbit mission must settle into a stable orbit around the launch
+ * world WITHOUT "shooting into space" — i.e. the craft must never run away on
+ * an escape trajectory. A regression here is exactly the bug where a capable
+ * engine over-burned the ascent circularization and flew off past escape
+ * velocity. The altitude cap is far above any legitimate parking orbit but far
+ * below the tens of thousands of km an escaping craft reaches.
+ */
+function assertStableOrbit(result: RunResult, bodyId: string, maxAltKm: number) {
+  assertOrbit(result, bodyId);
+  expect(result.label, result.phase !== 'destroyed', `expected craft not destroyed, got ${result.phase}`);
+  expect(result.label, result.maxAlt <= maxAltKm,
+    `expected stable orbit (maxAlt <= ${maxAltKm}km, did not escape), got ${result.maxAlt.toFixed(0)}km`);
+}
+
 function assertLanding(result: RunResult, bodyId: string) {
   assertFinished(result);
   expect(result.label, result.phase === 'landed', `expected phase=landed, got ${result.phase}`);
@@ -119,6 +134,30 @@ assertOrbit(lowEarth, 'earth');
 expect(lowEarth.label, (lowEarth.plannedOrbitKm ?? 0) >= 100, `expected low Earth orbit to clamp >= 100km, got ${lowEarth.plannedOrbitKm}`);
 
 assertOrbit(run('Earth orbit @300', 'earth', 'orbit', 'orbit', 300, ROUTE_PROVER, ORBIT_STEPS), 'earth');
+
+// ── Normal-build direct orbits (regression: must not "shoot into space") ─────
+// These mirror what a player actually flies — the starter rocket and the
+// orbiter preset — across a range of requested altitudes. Before the fix, a
+// capable engine over-burned the circularization and escaped Earth entirely
+// while `npm test` (which only flew the overpowered ROUTE_PROVER build) stayed
+// green. The 2000km cap is comfortably above any real parking orbit and far
+// below the >18,000km an escaping craft climbs to.
+const ORBIT_ALT_CAP = 2000;
+const ORBITER_BUILD = ROCKET_PRESETS.find((p) => p.id === 'orbiter')?.build ?? ROUTE_PROVER;
+for (const orbitKm of [200, 300, 400]) {
+  assertStableOrbit(
+    run(`Orbiter Earth orbit @${orbitKm}`, 'earth', 'orbit', 'orbit', orbitKm, ORBITER_BUILD, ORBIT_STEPS),
+    'earth', ORBIT_ALT_CAP,
+  );
+}
+assertStableOrbit(
+  run('Starter Earth orbit @300', 'earth', 'orbit', 'orbit', 300, DEFAULT_BUILD, ORBIT_STEPS),
+  'earth', ORBIT_ALT_CAP,
+);
+assertStableOrbit(
+  run('Moon Lander Earth orbit @400', 'earth', 'orbit', 'orbit', 400, ROCKET_PRESETS.find((p) => p.id === 'moon-lander')!.build, ORBIT_STEPS),
+  'earth', ORBIT_ALT_CAP,
+);
 
 const moonOrbit = run('Moon orbit', 'earth', 'moon', 'orbit', 60);
 assertOrbit(moonOrbit, 'moon');

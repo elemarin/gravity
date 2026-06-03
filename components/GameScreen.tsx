@@ -27,7 +27,7 @@ type ToastInfo = { id: number; title: string; subtitle: string };
 type PreviewInfo = { apoapsis: number; periapsis: number; impact: boolean };
 
 // Time-warp ladder. Long interplanetary coasts need the high multipliers.
-const WARP_STEPS = [1, 2, 4, 8, 16, 25, 50, 75, 100];
+const WARP_STEPS = [1, 2, 4, 8, 16, 25, 50, 75, 100, 200, 300, 400, 500];
 
 function bodyNameWithArticle(id: string): string {
   const name = bodyDef(id).name;
@@ -201,6 +201,22 @@ export default function GameScreen() {
     });
   }, []);
 
+  const handleWarpUp = useCallback(() => {
+    setTimeScale((ts) => {
+      const i = WARP_STEPS.indexOf(ts);
+      if (i < 0) return WARP_STEPS[1];
+      return WARP_STEPS[Math.min(i + 1, WARP_STEPS.length - 1)];
+    });
+  }, []);
+
+  const handleWarpDown = useCallback(() => {
+    setTimeScale((ts) => {
+      const i = WARP_STEPS.indexOf(ts);
+      if (i <= 0) return WARP_STEPS[0];
+      return WARP_STEPS[i - 1];
+    });
+  }, []);
+
   const handleSkip = useCallback(() => {
     setTimeScale(1);
     gameRef.current?.skipToCompletion();
@@ -302,6 +318,8 @@ export default function GameScreen() {
           onEdit={handleEdit}
           onReplay={handleReplay}
           onWarp={handleWarp}
+          onWarpUp={handleWarpUp}
+          onWarpDown={handleWarpDown}
           onSkip={handleSkip}
           onStage={handleStage}
           onLander={handleLander}

@@ -42,6 +42,8 @@ export type ManeuverActions = {
   ascend?: boolean;
   /** Engage the capture autopilot — brake toward a circular orbit at arrival. */
   capture?: boolean;
+  /** Engage the circularize autopilot — close the current arc into a circular orbit. */
+  circularize?: boolean;
   /** Engage the departure autopilot — burn until escaping back to the home body. */
   depart?: boolean;
   jettisonStage?: boolean;  // drop the spent stage, ignite the next
@@ -149,6 +151,7 @@ export function describeActions(a: ManeuverActions): string {
   if (a.descend)                parts.push('descend');
   if (a.ascend)                 parts.push('ascend');
   if (a.capture)                parts.push('capture');
+  if (a.circularize)            parts.push('circularize');
   if (a.depart)                 parts.push('depart home');
   if (a.attitude && a.attitude !== 'manual') parts.push(a.attitude);
   else if (a.heading !== undefined) parts.push(`aim ${Math.round(a.heading)}°`);

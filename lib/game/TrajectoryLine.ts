@@ -183,18 +183,30 @@ export class TrajectoryLine {
     let peri = points[0];
     let apoAlt = -Infinity;
     let periAlt = Infinity;
-    for (const p of points) {
+    let apoIdx = -1;
+    let periIdx = -1;
+    // Only accept apsides that are genuine local extrema along the path —
+    // skip endpoints. Without this, the predicted arc that starts at the
+    // rocket's current position spuriously labels the rocket itself as PE
+    // (lowest point in a descending forecast) or AP (highest in an ascending
+    // forecast), making the marker visually "glued" to the craft.
+    for (let i = 1; i < points.length - 1; i++) {
+      const p = points[i];
       const alt = p.distanceTo(focus) - radius;
-      if (alt > apoAlt) { apoAlt = alt; apo = p; }
-      if (alt < periAlt) { periAlt = alt; peri = p; }
+      const prevAlt = points[i - 1].distanceTo(focus) - radius;
+      const nextAlt = points[i + 1].distanceTo(focus) - radius;
+      const isLocalMax = alt >= prevAlt && alt >= nextAlt;
+      const isLocalMin = alt <= prevAlt && alt <= nextAlt;
+      if (isLocalMax && alt > apoAlt) { apoAlt = alt; apo = p; apoIdx = i; }
+      if (isLocalMin && alt < periAlt) { periAlt = alt; peri = p; periIdx = i; }
     }
 
     this.apoMarker.position.copy(apo);
     this.periMarker.position.copy(peri);
     // Suppress apsis labels that sit on the surface — on the pad and during early
     // ascent the "periapsis" is just the launch point, which looks broken.
-    this.apoMarker.visible = Number.isFinite(apoAlt) && apoAlt > MIN_APSIS_ALT;
-    this.periMarker.visible = Number.isFinite(periAlt) && periAlt > MIN_APSIS_ALT
+    this.apoMarker.visible = apoIdx >= 0 && Number.isFinite(apoAlt) && apoAlt > MIN_APSIS_ALT;
+    this.periMarker.visible = periIdx >= 0 && Number.isFinite(periAlt) && periAlt > MIN_APSIS_ALT
       && peri.distanceTo(apo) > 0.5;
     this.drawLabel(this.apoCanvas, 'AP', '#2ee59d');
     this.drawLabel(this.periCanvas, 'PE', '#00e5ff');

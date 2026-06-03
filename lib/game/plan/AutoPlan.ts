@@ -36,11 +36,29 @@ export function defaultOrbitKm(launchId: string): number {
   return Math.max(minimumOrbitKm(launchId), Math.round(def.radius * 1.4));
 }
 
-/** Gravity-turn ascent into a circular orbit at `orbitKm`, scaled to the world. */
-export function ascentNodes(launchId: string, orbitKm: number): Maneuver[] {
+/**
+ * Gravity-turn ascent into an orbit at `orbitKm`, scaled to the world.
+ *
+ * `circularize` picks the insertion style:
+ *  - true  → a closed-loop circularization autopilot. It steers the velocity
+ *            correction and only ever asks for circular speed, so even a very
+ *            powerful engine brakes itself instead of overshooting the burn
+ *            into an escape trajectory. Used for direct orbit missions.
+ *  - false → the original open-loop apoapsis burn + periapsis-altitude cutoff,
+ *            which interplanetary transfers are tuned around for their parking
+ *            orbit. Transfers only ever fly capable builds, so the open-loop
+ *            burn's escape pathology doesn't bite there.
+ */
+export function ascentNodes(launchId: string, orbitKm: number, circularize = true): Maneuver[] {
   const def = bodyDef(launchId);
   const atmo = def.atmosphereHeight;
   const insert = Math.max(2, orbitKm * 0.85);
+  const insertion = (): Maneuver[] => (circularize
+    ? [node('at-apoapsis', undefined, undefined, { circularize: true })]
+    : [
+        node('at-apoapsis', undefined, undefined, { heading: 90, throttle: 0.5 }),
+        node('at-periapsis-altitude', insert, undefined, { throttle: 0 }),
+      ]);
 
   if (atmo > 0) {
     // Atmospheric world (Earth-like): tuned gravity turn → coast → circularize.
@@ -49,8 +67,7 @@ export function ascentNodes(launchId: string, orbitKm: number): Maneuver[] {
       node('at-altitude', atmo * 0.17, undefined, { heading: 45 }),
       node('at-altitude', atmo * 0.40, undefined, { heading: 66 }),
       node('at-apoapsis-altitude', orbitKm, undefined, { heading: 90, throttle: 0 }),
-      node('at-apoapsis', undefined, undefined, { heading: 90, throttle: 0.5 }),
-      node('at-periapsis-altitude', insert, undefined, { throttle: 0 }),
+      ...insertion(),
     ];
   }
 
@@ -60,8 +77,7 @@ export function ascentNodes(launchId: string, orbitKm: number): Maneuver[] {
     node('at-altitude', r * 0.08, undefined, { heading: 45 }),
     node('at-altitude', r * 0.20, undefined, { heading: 82 }),
     node('at-apoapsis-altitude', orbitKm, undefined, { heading: 90, throttle: 0 }),
-    node('at-apoapsis', undefined, undefined, { heading: 90, throttle: 0.6 }),
-    node('at-periapsis-altitude', insert, undefined, { throttle: 0 }),
+    ...insertion(),
   ];
 }
 
@@ -79,11 +95,13 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
   const orbitKm = Math.max(minimumOrbitKm(orbitBodyId), opts.orbitKm ?? defaultOrbitKm(orbitBodyId));
 
   // Parking orbit for transfers stays low to save delta-v; orbitKm is the
-  // *target* orbit at the destination body.
+  // *target* orbit at the destination body. Direct orbit missions get the
+  // closed-loop circularization; transfer parking orbits keep the open-loop
+  // burn their intercept timing is tuned around.
   const parkingKm = targetId ? defaultOrbitKm(launchId) : orbitKm;
   const nodes = needsAscentAssist(launchId)
     ? [node('at-time', 0, undefined, { ascend: true })]
-    : ascentNodes(launchId, parkingKm);
+    : ascentNodes(launchId, parkingKm, !targetId);
 
   if (!targetId) {
     // Orbiting (or de-orbiting onto) the launch world itself.
