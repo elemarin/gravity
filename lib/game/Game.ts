@@ -16,7 +16,9 @@ import { EARTH_BODY } from './bodies';
 import { KARMAN_LINE } from './constants';
 
 const FIXED_DT = 1 / 60;
-const SKIP_MAX_STEPS = 600_000;
+// Generous cap so a full interplanetary coast + descent can fast-forward to
+// completion in one call.
+const SKIP_MAX_STEPS = 3_000_000;
 
 // Preview: forward-run the plan to draw the predicted arc.
 const PREVIEW_DT = 0.25;
@@ -363,6 +365,11 @@ export class Game {
     const altitude = this.sim.altitude();
     const speed = s.velocity.length();
     const stageCount = this.cfg.stages.length;
+    // Distance to the destination body (the non-launch body), if any.
+    const target = this.bodies.find((b) => b.id !== this.launchBodyId);
+    const targetDistance = target
+      ? Math.max(0, s.position.distanceTo(target.center) - target.radius)
+      : undefined;
     return {
       position: s.position.clone(),
       velocity: s.velocity.clone(),
@@ -384,6 +391,8 @@ export class Game {
       landedBodyId: s.landedBodyId,
       reachedBodyIds: Array.from(s.reachedBodyIds),
       landerDeployed: s.deployedLander,
+      targetName: target?.name,
+      targetDistance,
     };
   }
 
@@ -423,11 +432,13 @@ export class Game {
     s.position.copy(cur.position);
     s.velocity.copy(cur.velocity);
     s.angle          = cur.angle;
+    s.attitude       = cur.attitude;
     s.throttle       = cur.throttle;
     s.activeStage    = cur.activeStage;
     s.stageFuel      = [...cur.stageFuel];
     s.deployedLander    = cur.deployedLander;
     s.deployedParachute = cur.deployedParachute;
+    s.landingAssist     = cur.landingAssist;
     s.elapsed        = cur.elapsed;
     s.phase          = cur.phase;
     s.maxAltitude    = cur.maxAltitude;

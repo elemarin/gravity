@@ -23,6 +23,8 @@ export type FlightState = {
   landedBodyId?: string | null; // body currently/last landed on
   reachedBodyIds?: string[];    // bodies whose vicinity has been reached
   landerDeployed?: boolean;     // a lander payload has separated
+  targetName?: string;          // destination body name, if any
+  targetDistance?: number;      // km to the destination body surface
 };
 
 /** A single stage = one engine plus the fuel tanks feeding it. */

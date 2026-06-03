@@ -126,6 +126,16 @@ export default function HUDOverlay({
           </div>
         )}
 
+        {/* Target distance (interplanetary guidance) */}
+        {state?.targetName && state.targetDistance !== undefined && (
+          <div
+            className="px-3 pb-1.5 text-[12px]"
+            style={{ borderTop: '1px solid rgba(255,255,255,0.1)', color: '#bb8bff', paddingTop: 4 }}
+          >
+            → {state.targetName} {fmtOrbit(state.targetDistance)}
+          </div>
+        )}
+
         {/* Stage indicator */}
         {stageCount > 1 && (
           <div

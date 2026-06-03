@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Body, dominantBody } from '../bodies';
-import { FlightPlan, Maneuver } from './FlightPlan';
+import { FlightPlan, Maneuver, Attitude } from './FlightPlan';
 import { StageStats } from '../BuildSpec';
 
 export type SimPhase =
@@ -14,6 +14,9 @@ const BASE_SAFE_MS = 10;
 const CHUTE_MS     = 45;
 const LEGS_MS      = 10;
 const LANDER_MS    = 35;
+// Powered-descent autopilot: allowed speed (m/s) = floor + altitude·rate.
+const LAND_FLOOR_MS = 4;
+const LAND_RATE     = 1.1;
 
 /** Everything the deterministic simulation needs to run a build + plan. */
 export type SimConfig = {
@@ -32,11 +35,13 @@ export type SimState = {
   position: THREE.Vector3;
   velocity: THREE.Vector3;
   angle: number;            // deg from local up
+  attitude: Attitude;       // 'manual' aim, or auto prograde/retrograde hold
   throttle: number;         // 0..1
   activeStage: number;
   stageFuel: number[];      // 0..100 per stage
   deployedLander: boolean;
   deployedParachute: boolean;
+  landingAssist: boolean;   // powered-descent autopilot engaged
   elapsed: number;          // sim seconds
   phase: SimPhase;
   maxAltitude: number;      // km
@@ -78,11 +83,13 @@ export class Simulator {
       position: this.cfg.startPosition.clone(),
       velocity: new THREE.Vector3(),
       angle: this.plan.launch.heading,
+      attitude: 'manual',
       throttle: 0,
       activeStage: 0,
       stageFuel: this.cfg.stages.map(() => 100),
       deployedLander: false,
       deployedParachute: false,
+      landingAssist: false,
       elapsed: 0,
       phase: 'prelaunch',
       maxAltitude: 0,
@@ -144,6 +151,30 @@ export class Simulator {
         s.firedNodeIds.add(node.id);
         this.applyActions(node);
       }
+    }
+
+    // --- Powered-descent autopilot ---
+    // Holds retrograde and throttles bang-bang to keep speed under a safe
+    // altitude-scaled limit, producing a soft touchdown on the target world.
+    if (s.landingAssist) {
+      s.attitude = 'retrograde';
+      const speedMs = s.velocity.length() * 1000;
+      const safeMs = LAND_FLOOR_MS + altitude * LAND_RATE;
+      s.throttle = speedMs > safeMs ? 1 : 0;
+    }
+
+    // --- Automatic attitude hold (prograde / retrograde) ---
+    // Convert the desired thrust direction into the up/east aim angle so the
+    // existing thrust + mesh code "just works". Everything stays in the x-y
+    // plane, where the planets live.
+    if (s.attitude !== 'manual' && s.velocity.lengthSq() > 1e-8) {
+      const east = this.eastDir(up);
+      const dir = (s.attitude === 'retrograde'
+        ? s.velocity.clone().negate()
+        : s.velocity.clone()).normalize();
+      const cosA = THREE.MathUtils.clamp(dir.dot(up), -1, 1);
+      const sinA = dir.dot(east);
+      s.angle = THREE.MathUtils.radToDeg(Math.atan2(sinA, cosA));
     }
 
     // --- Auto-deploying parachute ---
@@ -253,14 +284,29 @@ export class Simulator {
         if (!tgt) return false;
         return this.state.position.distanceTo(tgt.center) <= tgt.soiRadius;
       }
+      case 'at-transfer-window': {
+        // Fire when, from a parking orbit, the craft sits roughly opposite the
+        // target so that a prograde burn raises apoapsis toward it.
+        const tgt = this.cfg.bodies.find((b) => b.id === t.targetBodyId);
+        if (!tgt || altitude < 25) return false;
+        const central = this.body();
+        if (tgt.id === central.id) return false;
+        const craftDir = new THREE.Vector3().subVectors(this.state.position, central.center).normalize();
+        const tgtDir = new THREE.Vector3().subVectors(tgt.center, central.center).normalize();
+        // Tight alignment: a prograde burn here puts apoapsis within ~10° of the
+        // target so its (large) sphere of influence captures the craft.
+        return craftDir.dot(tgtDir) < -0.985;
+      }
     }
   }
 
   private applyActions(node: Maneuver) {
     const s = this.state;
     const a = node.actions;
-    if (a.heading !== undefined)  s.angle = THREE.MathUtils.clamp(a.heading, -90, 90);
-    if (a.throttle !== undefined) s.throttle = THREE.MathUtils.clamp(a.throttle, 0, 1);
+    if (a.descend) { s.landingAssist = true; s.attitude = 'retrograde'; }
+    if (a.attitude !== undefined) s.attitude = a.attitude;
+    if (a.heading !== undefined) { s.angle = THREE.MathUtils.clamp(a.heading, -90, 90); s.attitude = 'manual'; }
+    if (a.throttle !== undefined && !a.descend) s.throttle = THREE.MathUtils.clamp(a.throttle, 0, 1);
     if (a.jettisonStage) this.doStage();
     if (a.deployLander)  this.doDeployLander();
     if (a.deployParachute) this.doDeployParachute();
@@ -326,15 +372,25 @@ export class Simulator {
     return acc;
   }
 
+  /**
+   * Horizontal "east" tangent in the x-y plane (where all bodies live). Using
+   * the x-y tangent — rather than a tangent around the y-axis — keeps the whole
+   * flight, including gravity turns and transfers, in a single clean plane and
+   * matches the rocket's visual tilt (a rotation about z).
+   */
+  private eastDir(up: THREE.Vector3): THREE.Vector3 {
+    const east = new THREE.Vector3(up.y, -up.x, 0);
+    if (east.lengthSq() < 1e-6) east.set(1, 0, 0);
+    return east.normalize();
+  }
+
   private thrustAccel(up: THREE.Vector3, _body: Body): THREE.Vector3 {
     const s = this.state;
     const stage = this.cfg.stages[s.activeStage];
     if (!stage || s.throttle < 0.01 || (s.stageFuel[s.activeStage] ?? 0) <= 0 || stage.thrust <= 0) {
       return new THREE.Vector3();
     }
-    const east = new THREE.Vector3(-up.z, 0, up.x);
-    if (east.lengthSq() < 0.01) east.set(1, 0, 0);
-    east.normalize();
+    const east = this.eastDir(up);
     const rad = THREE.MathUtils.degToRad(s.angle);
     const dir = up.clone().multiplyScalar(Math.cos(rad)).addScaledVector(east, Math.sin(rad)).normalize();
     const accelMs = (stage.thrust * s.throttle) / Math.max(this.mass(), 0.001);

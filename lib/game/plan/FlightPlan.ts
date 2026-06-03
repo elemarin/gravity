@@ -15,6 +15,7 @@ export type TriggerType =
   | 'at-periapsis'        // lowest point of the current arc
   | 'at-apoapsis-altitude'  // when projected apoapsis ≥ value km (ascending)
   | 'at-periapsis-altitude' // when projected periapsis ≥ value km
+  | 'at-transfer-window'  // aligned to burn toward targetBodyId
   | 'on-fuel-empty'       // active stage runs dry
   | 'at-soi-entry';       // enters targetBodyId's sphere of influence
 
@@ -24,10 +25,17 @@ export type Trigger = {
   targetBodyId?: string; // for at-soi-entry
 };
 
+/** How the craft orients itself when thrusting. */
+export type Attitude = 'manual' | 'prograde' | 'retrograde';
+
 /** What the node does when it fires. Any field left undefined is a no-op. */
 export type ManeuverActions = {
   throttle?: number;        // 0..1, sets the held throttle
   heading?: number;         // degrees from local up (-90..90), sets aim
+  /** Hold an automatic attitude (prograde/retrograde) instead of a fixed aim. */
+  attitude?: Attitude;
+  /** Engage the powered-descent autopilot for a guided soft landing. */
+  descend?: boolean;
   jettisonStage?: boolean;  // drop the spent stage, ignite the next
   deployLander?: boolean;   // separate the lander payload
   deployParachute?: boolean;// pop the parachute for a soft landing
@@ -85,6 +93,7 @@ export const TRIGGER_LABELS: Record<TriggerType, string> = {
   'at-periapsis':  'At periapsis',
   'at-apoapsis-altitude':  'Apoapsis ≥',
   'at-periapsis-altitude': 'Periapsis ≥',
+  'at-transfer-window': 'Transfer window',
   'on-fuel-empty': 'On fuel empty',
   'at-soi-entry':  'At SOI entry',
 };
@@ -98,6 +107,7 @@ export function describeTrigger(t: Trigger): string {
     case 'at-periapsis': return 'Periapsis';
     case 'at-apoapsis-altitude':  return `AP ≥ ${Math.round(t.value ?? 0)} km`;
     case 'at-periapsis-altitude': return `PE ≥ ${Math.round(t.value ?? 0)} km`;
+    case 'at-transfer-window': return 'Transfer window';
     case 'on-fuel-empty':return 'Fuel empty';
     case 'at-soi-entry': return `Enter ${t.targetBodyId ?? 'SOI'}`;
   }
@@ -105,7 +115,8 @@ export function describeTrigger(t: Trigger): string {
 
 export function describeActions(a: ManeuverActions): string {
   const parts: string[] = [];
-  if (a.heading !== undefined)  parts.push(`aim ${Math.round(a.heading)}°`);
+  if (a.attitude && a.attitude !== 'manual') parts.push(a.attitude);
+  else if (a.heading !== undefined) parts.push(`aim ${Math.round(a.heading)}°`);
   if (a.throttle !== undefined) parts.push(`thr ${Math.round(a.throttle * 100)}%`);
   if (a.jettisonStage)          parts.push('stage');
   if (a.deployLander)           parts.push('lander');

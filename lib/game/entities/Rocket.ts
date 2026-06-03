@@ -310,8 +310,9 @@ export class Rocket {
 
   private getNozzleInfo(): { pos: THREE.Vector3; dir: THREE.Vector3 } {
     const up = new THREE.Vector3().subVectors(this.position, this.upCenter).normalize();
-    const east = new THREE.Vector3(-up.z, 0, up.x);
-    if (east.lengthSq() < 0.01) east.set(1, 0, 0);
+    // x-y plane tangent — matches the Simulator's thrust frame.
+    const east = new THREE.Vector3(up.y, -up.x, 0);
+    if (east.lengthSq() < 1e-6) east.set(1, 0, 0);
     east.normalize();
     const rad = THREE.MathUtils.degToRad(this.angle);
     const thrustUp = up.clone().multiplyScalar(Math.cos(rad)).addScaledVector(east, Math.sin(rad)).normalize();

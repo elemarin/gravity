@@ -6,6 +6,7 @@ import {
   describeTrigger, describeActions, newNodeId,
 } from '@/lib/game/plan/FlightPlan';
 import { Body, DESTINATIONS, getDestination } from '@/lib/game/bodies';
+import { autoPlan } from '@/lib/game/plan/AutoPlan';
 
 type Props = {
   plan: FlightPlan;
@@ -19,8 +20,10 @@ type Props = {
 const TRIGGER_TYPES: TriggerType[] = [
   'at-altitude', 'at-apoapsis', 'at-periapsis',
   'at-apoapsis-altitude', 'at-periapsis-altitude',
-  'at-time', 'on-fuel-empty', 'at-soi-entry',
+  'at-time', 'on-fuel-empty', 'at-transfer-window', 'at-soi-entry',
 ];
+
+const TARGET_TRIGGERS: TriggerType[] = ['at-soi-entry', 'at-transfer-window'];
 
 const VALUE_TRIGGERS: TriggerType[] = [
   'at-altitude', 'at-time', 'at-apoapsis-altitude', 'at-periapsis-altitude',
@@ -75,7 +78,9 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
   const otherBodies = bodies.slice(1);
   const dest = getDestination(plan.destinationId);
 
-  const setDestination = (id: string) => onChange({ ...plan, destinationId: id });
+  // Switching destination loads a fresh guided plan for it.
+  const setDestination = (id: string) => onChange(autoPlan(plan.launchBodyId, id));
+  const regenerate = () => onChange(autoPlan(plan.launchBodyId, plan.destinationId));
   const setLaunch = (patch: Partial<FlightPlan['launch']>) =>
     onChange({ ...plan, launch: { ...plan.launch, ...patch } });
 
@@ -110,7 +115,13 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
           <div className="max-h-[46vh] overflow-y-auto px-3 py-3 flex flex-col gap-2">
             {/* Destination */}
             <div>
-              <span className="stat-label">Destination</span>
+              <div className="flex items-center justify-between">
+                <span className="stat-label">Destination</span>
+                <button onClick={regenerate}
+                  className="text-[10px] rounded-md px-2 py-0.5 border border-green/50 bg-green/15 text-green font-bold active:scale-95">
+                  ✨ Auto-plan
+                </button>
+              </div>
               <div className="mt-1 flex flex-wrap gap-1">
                 {DESTINATIONS.map((d) => (
                   <button key={d.id}
@@ -124,6 +135,11 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                 ))}
               </div>
               <div className="mt-1 text-[10px] text-dim/90 leading-snug">{dest.objective}</div>
+              {dest.targetId && (
+                <div className="mt-1 text-[10px] text-cyan/90 leading-snug">
+                  ✨ Auto-plan flies the whole transfer — just build a capable rocket (add a lander), then launch &amp; warp.
+                </div>
+              )}
             </div>
 
             {/* Launch vector */}
@@ -185,7 +201,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                             <button key={t}
                               onClick={() => updateTrigger(node.id, {
                                 type: t,
-                                targetBodyId: t === 'at-soi-entry' ? (otherBodies[0]?.id) : undefined,
+                                targetBodyId: TARGET_TRIGGERS.includes(t) ? (otherBodies[0]?.id) : undefined,
                               })}
                               className={`text-[9px] rounded-md py-1.5 px-1 border tracking-wide
                                 ${node.trigger.type === t
@@ -208,7 +224,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                           </label>
                         )}
 
-                        {node.trigger.type === 'at-soi-entry' && (
+                        {TARGET_TRIGGERS.includes(node.trigger.type) && (
                           <select
                             value={node.trigger.targetBodyId ?? ''}
                             onChange={(e) => updateTrigger(node.id, { targetBodyId: e.target.value })}
@@ -242,6 +258,20 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                         />
 
                         <div className="flex flex-wrap gap-1.5">
+                          {(['manual', 'prograde', 'retrograde'] as const).map((a) => {
+                            const on = (node.actions.attitude ?? 'manual') === a;
+                            return (
+                              <button key={a}
+                                onClick={() => updateActions(node.id, { attitude: a === 'manual' ? undefined : a })}
+                                className={`text-[10px] rounded-md py-1.5 px-2.5 border tracking-wide
+                                  ${on ? 'border-cyan/60 bg-cyan/15 text-cyan' : 'border-white/10 bg-white/[0.03] text-dim'}`}>
+                                {a === 'manual' ? 'Aim' : a}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5">
                           <Toggle label="Stage" on={!!node.actions.jettisonStage}
                                   onClick={() => updateActions(node.id, { jettisonStage: !node.actions.jettisonStage })} />
                           {hasLander && (
@@ -250,6 +280,8 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                           )}
                           <Toggle label="Parachute" on={!!node.actions.deployParachute}
                                   onClick={() => updateActions(node.id, { deployParachute: !node.actions.deployParachute })} />
+                          <Toggle label="Descend" on={!!node.actions.descend}
+                                  onClick={() => updateActions(node.id, { descend: !node.actions.descend })} />
                         </div>
                       </div>
                     </div>
