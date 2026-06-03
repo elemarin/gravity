@@ -7,7 +7,7 @@ import { TrajectoryLine } from './TrajectoryLine';
 import { MilestoneManager } from './career/Milestones';
 import { Simulator, SimConfig } from './plan/Simulator';
 import { FlightPlan, DEFAULT_PLAN, clonePlan } from './plan/FlightPlan';
-import { Body, dominantBody, getScenario } from './bodies';
+import { Body, dominantBody, buildFlightBodies, getDestination, bodyDef } from './bodies';
 import { buildSimStages } from './BuildSpec';
 import {
   FlightState, FlightPhase, GameCallbacks, MissionResult, RocketBuild, DEFAULT_BUILD,
@@ -16,7 +16,9 @@ import { EARTH_BODY } from './bodies';
 import { KARMAN_LINE } from './constants';
 
 const FIXED_DT = 1 / 60;
-const SKIP_MAX_STEPS = 600_000;
+// Generous cap so a full interplanetary coast + descent can fast-forward to
+// completion in one call.
+const SKIP_MAX_STEPS = 3_000_000;
 
 // Preview: forward-run the plan to draw the predicted arc.
 const PREVIEW_DT = 0.25;
@@ -66,8 +68,8 @@ export class Game {
     this.build = opts.build ?? DEFAULT_BUILD;
     this.plan = clonePlan(opts.plan ?? DEFAULT_PLAN);
 
-    const scenario = getScenario(this.plan.scenarioId);
-    this.bodies = scenario.bodies;
+    const dest = getDestination(this.plan.destinationId);
+    this.bodies = buildFlightBodies(this.plan.launchBodyId, dest.targetId);
     this.launchBodyId = this.bodies[0]?.id ?? EARTH_BODY.id;
 
     this.renderer = new Renderer(opts.container);
@@ -81,6 +83,11 @@ export class Game {
     const lb = this.launchBody();
     const surfacePos = lb.center.clone().add(new THREE.Vector3(0, lb.radius, 0));
     this.launchpad = new Launchpad(this.renderer.scene, surfacePos, lb.center);
+
+    // Sky tint follows the launch world's atmosphere (bright day at the
+    // surface, fading to space with altitude).
+    const ld = bodyDef(this.launchBodyId);
+    this.renderer.setSky(ld.skyDay, ld.atmosphereHeight);
 
     this.cfg = this.buildConfig();
     this.sim = new Simulator(this.cfg, this.plan);
@@ -272,6 +279,7 @@ export class Game {
       const center = this.dominant().center;
       this.rocket.applyState(this.sim.state, center, FIXED_DT);
       this.renderer.updateCameraOffset(this.sim.altitude());
+      this.renderer.updateSky(this.sim.altitude());
       this.renderer.followTarget(this.rocket.position, FIXED_DT);
       this.flightState = this.buildFlightState();
       this.callbacks.onState?.(this.flightState);
@@ -357,6 +365,11 @@ export class Game {
     const altitude = this.sim.altitude();
     const speed = s.velocity.length();
     const stageCount = this.cfg.stages.length;
+    // Distance to the destination body (the non-launch body), if any.
+    const target = this.bodies.find((b) => b.id !== this.launchBodyId);
+    const targetDistance = target
+      ? Math.max(0, s.position.distanceTo(target.center) - target.radius)
+      : undefined;
     return {
       position: s.position.clone(),
       velocity: s.velocity.clone(),
@@ -378,6 +391,8 @@ export class Game {
       landedBodyId: s.landedBodyId,
       reachedBodyIds: Array.from(s.reachedBodyIds),
       landerDeployed: s.deployedLander,
+      targetName: target?.name,
+      targetDistance,
     };
   }
 
@@ -417,11 +432,13 @@ export class Game {
     s.position.copy(cur.position);
     s.velocity.copy(cur.velocity);
     s.angle          = cur.angle;
+    s.attitude       = cur.attitude;
     s.throttle       = cur.throttle;
     s.activeStage    = cur.activeStage;
     s.stageFuel      = [...cur.stageFuel];
     s.deployedLander    = cur.deployedLander;
     s.deployedParachute = cur.deployedParachute;
+    s.landingAssist     = cur.landingAssist;
     s.elapsed        = cur.elapsed;
     s.phase          = cur.phase;
     s.maxAltitude    = cur.maxAltitude;

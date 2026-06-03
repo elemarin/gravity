@@ -17,7 +17,6 @@ type Props = {
   onWarp: () => void;
   onSkip: () => void;
   onStage: () => void;
-  onChute: () => void;
   onLander: () => void;
 };
 
@@ -29,15 +28,14 @@ function PixelBtn({
   return (
     <button
       onClick={onClick}
-      className={`${large ? 'px-4 py-3' : 'px-3 py-2.5'} font-pixel uppercase tracking-wider
-                  border-2 active:scale-95 transition-transform`}
+      className={`${large ? 'px-4 py-3.5' : 'px-3.5 py-3'} font-pixel uppercase tracking-wider
+                  rounded-lg border-2 active:scale-95 transition-transform`}
       style={{
-        fontSize: large ? 10 : 8,
+        fontSize: large ? 13 : 11,
         borderColor: color,
-        background: `rgba(${hexToRgb(color)},0.1)`,
+        background: `rgba(${hexToRgb(color)},0.14)`,
         color,
-        boxShadow: glow ? `0 0 12px ${color}66, inset 0 0 8px ${color}11` : undefined,
-        imageRendering: 'pixelated',
+        boxShadow: glow ? `0 0 14px ${color}66, inset 0 0 8px ${color}11` : undefined,
       }}
     >
       {label}
@@ -56,11 +54,10 @@ export default function SimControls({
   finished, phase, timeScale, canSkip,
   canStage, hasParachute, parachuteDeployed,
   hasLander, landerDeployed,
-  onEdit, onReplay, onWarp, onSkip, onStage, onChute, onLander,
+  onEdit, onReplay, onWarp, onSkip, onStage, onLander,
 }: Props) {
   const active = !finished && phase !== 'prelaunch';
   const inFlight = phase !== 'prelaunch' && phase !== 'landed' && phase !== 'destroyed';
-  const showChute = hasParachute && !parachuteDeployed && inFlight;
   const showLander = hasLander && !landerDeployed && inFlight;
 
   return (
@@ -73,16 +70,26 @@ export default function SimControls({
       {/* Left: action buttons */}
       <div className="flex items-center gap-2">
         {active && canStage && (
-          <PixelBtn label="STAGE" color="#ff8a3d" onClick={onStage} glow large />
-        )}
-        {active && showChute && (
-          <PixelBtn label="CHUTE" color="#2ee59d" onClick={onChute} glow />
+          <PixelBtn label="STAGE" color="#ff9a45" onClick={onStage} glow large />
         )}
         {active && showLander && (
-          <PixelBtn label="LANDER" color="#b070ff" onClick={onLander} glow />
+          <PixelBtn label="LANDER" color="#bb8bff" onClick={onLander} glow />
+        )}
+        {active && hasParachute && (
+          <div
+            className="rounded-lg border-2 px-3 py-2.5 font-pixel uppercase tracking-wider"
+            style={{
+              fontSize: 10,
+              borderColor: parachuteDeployed ? '#39e9a6' : 'rgba(255,255,255,0.25)',
+              color: parachuteDeployed ? '#39e9a6' : '#c4d6f0',
+              background: parachuteDeployed ? 'rgba(57,233,166,0.12)' : 'rgba(255,255,255,0.04)',
+            }}
+          >
+            {parachuteDeployed ? 'CHUTE ▼' : 'CHUTE ◇'}
+          </div>
         )}
         {finished && (
-          <PixelBtn label="✎ EDIT" color="#8aa0b5" onClick={onEdit} />
+          <PixelBtn label="✎ EDIT" color="#c4d6f0" onClick={onEdit} />
         )}
       </div>
 
@@ -90,18 +97,16 @@ export default function SimControls({
       <div className="flex items-center gap-2">
         {!finished && (
           <>
-            {canSkip && (
-              <PixelBtn label="SKIP" color="#8aa0b5" onClick={onSkip} />
-            )}
+            {canSkip && <PixelBtn label="SKIP" color="#c4d6f0" onClick={onSkip} />}
             <PixelBtn
               label={timeScale > 1 ? `${timeScale}× ▶▶` : '▶▶'}
-              color={timeScale > 1 ? '#ffd54a' : '#8aa0b5'}
+              color={timeScale > 1 ? '#ffd84d' : '#c4d6f0'}
               onClick={onWarp}
               glow={timeScale > 1}
             />
           </>
         )}
-        <PixelBtn label="↻ REPLAY" color="#00e5ff" onClick={onReplay} glow />
+        <PixelBtn label="↻ REPLAY" color="#1fd9ff" onClick={onReplay} glow />
       </div>
     </div>
   );

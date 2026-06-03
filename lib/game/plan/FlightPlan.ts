@@ -9,12 +9,15 @@
 
 /** What makes a maneuver node fire. */
 export type TriggerType =
-  | 'at-time'        // value = sim seconds since launch
-  | 'at-altitude'    // value = km above the dominant body surface (ascending)
-  | 'at-apoapsis'    // highest point of the current arc
-  | 'at-periapsis'   // lowest point of the current arc
-  | 'on-fuel-empty'  // active stage runs dry
-  | 'at-soi-entry';  // enters targetBodyId's sphere of influence
+  | 'at-time'             // value = sim seconds since launch
+  | 'at-altitude'         // value = km above the dominant body surface (ascending)
+  | 'at-apoapsis'         // highest point of the current arc
+  | 'at-periapsis'        // lowest point of the current arc
+  | 'at-apoapsis-altitude'  // when projected apoapsis ≥ value km (ascending)
+  | 'at-periapsis-altitude' // when projected periapsis ≥ value km
+  | 'at-transfer-window'  // aligned to burn toward targetBodyId
+  | 'on-fuel-empty'       // active stage runs dry
+  | 'at-soi-entry';       // enters targetBodyId's sphere of influence
 
 export type Trigger = {
   type: TriggerType;
@@ -22,10 +25,17 @@ export type Trigger = {
   targetBodyId?: string; // for at-soi-entry
 };
 
+/** How the craft orients itself when thrusting. */
+export type Attitude = 'manual' | 'prograde' | 'retrograde';
+
 /** What the node does when it fires. Any field left undefined is a no-op. */
 export type ManeuverActions = {
   throttle?: number;        // 0..1, sets the held throttle
   heading?: number;         // degrees from local up (-90..90), sets aim
+  /** Hold an automatic attitude (prograde/retrograde) instead of a fixed aim. */
+  attitude?: Attitude;
+  /** Engage the powered-descent autopilot for a guided soft landing. */
+  descend?: boolean;
   jettisonStage?: boolean;  // drop the spent stage, ignite the next
   deployLander?: boolean;   // separate the lander payload
   deployParachute?: boolean;// pop the parachute for a soft landing
@@ -44,25 +54,28 @@ export type LaunchVector = {
 };
 
 export type FlightPlan = {
-  scenarioId: string;
+  /** Body the flight launches from (an unlocked base). */
+  launchBodyId: string;
+  /** Destination id (see DESTINATIONS), e.g. 'orbit' | 'moon' | 'mars'. */
+  destinationId: string;
   launch: LaunchVector;
   nodes: Maneuver[];
 };
 
 export const DEFAULT_PLAN: FlightPlan = {
-  scenarioId: 'earth-orbit',
+  launchBodyId: 'earth',
+  destinationId: 'orbit',
   launch: { heading: 0, power: 1 },
+  // A forgiving "gravity turn → coast → circularize" profile that reaches a
+  // stable low orbit on the default rocket. Tunable in the plan panel.
   nodes: [
-    {
-      id: 'turn',
-      trigger: { type: 'at-altitude', value: 12 },
-      actions: { heading: 45 },
-    },
-    {
-      id: 'circularize',
-      trigger: { type: 'at-apoapsis' },
-      actions: { heading: 80, throttle: 1 },
-    },
+    { id: 'turn-1', trigger: { type: 'at-altitude', value: 4 },  actions: { heading: 22 } },
+    { id: 'turn-2', trigger: { type: 'at-altitude', value: 12 }, actions: { heading: 45 } },
+    { id: 'turn-3', trigger: { type: 'at-altitude', value: 28 }, actions: { heading: 66 } },
+    { id: 'turn-4', trigger: { type: 'at-altitude', value: 55 }, actions: { heading: 82 } },
+    { id: 'meco',        trigger: { type: 'at-apoapsis-altitude', value: 130 }, actions: { heading: 90, throttle: 0 } },
+    { id: 'circularize', trigger: { type: 'at-apoapsis' }, actions: { heading: 90, throttle: 0.5 } },
+    { id: 'insert',      trigger: { type: 'at-periapsis-altitude', value: 105 }, actions: { throttle: 0 } },
   ],
 };
 
@@ -78,6 +91,9 @@ export const TRIGGER_LABELS: Record<TriggerType, string> = {
   'at-altitude':   'At altitude',
   'at-apoapsis':   'At apoapsis',
   'at-periapsis':  'At periapsis',
+  'at-apoapsis-altitude':  'Apoapsis ≥',
+  'at-periapsis-altitude': 'Periapsis ≥',
+  'at-transfer-window': 'Transfer window',
   'on-fuel-empty': 'On fuel empty',
   'at-soi-entry':  'At SOI entry',
 };
@@ -89,6 +105,9 @@ export function describeTrigger(t: Trigger): string {
     case 'at-altitude':  return `${Math.round(t.value ?? 0)} km up`;
     case 'at-apoapsis':  return 'Apoapsis';
     case 'at-periapsis': return 'Periapsis';
+    case 'at-apoapsis-altitude':  return `AP ≥ ${Math.round(t.value ?? 0)} km`;
+    case 'at-periapsis-altitude': return `PE ≥ ${Math.round(t.value ?? 0)} km`;
+    case 'at-transfer-window': return 'Transfer window';
     case 'on-fuel-empty':return 'Fuel empty';
     case 'at-soi-entry': return `Enter ${t.targetBodyId ?? 'SOI'}`;
   }
@@ -96,7 +115,8 @@ export function describeTrigger(t: Trigger): string {
 
 export function describeActions(a: ManeuverActions): string {
   const parts: string[] = [];
-  if (a.heading !== undefined)  parts.push(`aim ${Math.round(a.heading)}°`);
+  if (a.attitude && a.attitude !== 'manual') parts.push(a.attitude);
+  else if (a.heading !== undefined) parts.push(`aim ${Math.round(a.heading)}°`);
   if (a.throttle !== undefined) parts.push(`thr ${Math.round(a.throttle * 100)}%`);
   if (a.jettisonStage)          parts.push('stage');
   if (a.deployLander)           parts.push('lander');
@@ -107,7 +127,8 @@ export function describeActions(a: ManeuverActions): string {
 /** Defensive clone so UI edits never mutate a running plan. */
 export function clonePlan(plan: FlightPlan): FlightPlan {
   return {
-    scenarioId: plan.scenarioId,
+    launchBodyId: plan.launchBodyId,
+    destinationId: plan.destinationId,
     launch: { ...plan.launch },
     nodes: plan.nodes.map((n) => ({
       id: n.id,

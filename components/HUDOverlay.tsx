@@ -80,31 +80,31 @@ export default function HUDOverlay({
       >
         {/* Phase row */}
         <div
-          className="px-2.5 pt-2 pb-1 text-[12px] tracking-[0.2em]"
+          className="px-3 pt-2.5 pb-1 text-[13px] tracking-[0.2em]"
           style={{ color: meta.color, textShadow: `0 0 8px ${meta.color}` }}
         >
           {meta.label}
           {timeScale > 1 && (
-            <span className="ml-2 text-yellow" style={{ textShadow: '0 0 8px #ffd54a' }}>
+            <span className="ml-2 text-yellow" style={{ textShadow: '0 0 8px #ffd84d' }}>
               {timeScale}×
             </span>
           )}
         </div>
 
         {/* Alt + Vel values */}
-        <div className="px-2.5 pb-2 grid grid-cols-2 gap-x-3">
+        <div className="px-3 pb-2.5 grid grid-cols-2 gap-x-4">
           <div>
-            <div className="text-[10px] text-dim/60 tracking-widest mb-0.5">ALT</div>
+            <div className="text-[11px] text-dim/70 tracking-widest mb-0.5">ALT</div>
             <div
-              className="text-[18px] tabular-nums leading-none text-ink"
+              className="text-[21px] tabular-nums leading-none text-ink"
               style={{ textShadow: `0 0 10px ${meta.color}88` }}
             >{altLabel}</div>
           </div>
           <div>
-            <div className="text-[10px] text-orange/60 tracking-widest mb-0.5">VEL</div>
+            <div className="text-[11px] text-orange/80 tracking-widest mb-0.5">VEL</div>
             <div
-              className="text-[18px] tabular-nums leading-none text-ink"
-              style={{ textShadow: '0 0 10px rgba(255,138,61,0.5)' }}
+              className="text-[21px] tabular-nums leading-none text-ink"
+              style={{ textShadow: '0 0 10px rgba(255,154,69,0.5)' }}
             >{spdLabel}</div>
           </div>
         </div>
@@ -112,8 +112,8 @@ export default function HUDOverlay({
         {/* Orbit info */}
         {showOrbit && (
           <div
-            className="px-2.5 pb-2 flex flex-wrap gap-x-2 gap-y-1 text-[11px] leading-tight"
-            style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
+            className="px-3 pb-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] leading-tight"
+            style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
           >
             <span>
               <span className="text-dim/50">AP </span>
@@ -126,12 +126,22 @@ export default function HUDOverlay({
           </div>
         )}
 
+        {/* Target distance (interplanetary guidance) */}
+        {state?.targetName && state.targetDistance !== undefined && (
+          <div
+            className="px-3 pb-1.5 text-[12px]"
+            style={{ borderTop: '1px solid rgba(255,255,255,0.1)', color: '#bb8bff', paddingTop: 4 }}
+          >
+            → {state.targetName} {fmtOrbit(state.targetDistance)}
+          </div>
+        )}
+
         {/* Stage indicator */}
         {stageCount > 1 && (
           <div
-            className="px-2.5 pb-1.5 text-[11px]"
+            className="px-3 pb-1.5 text-[12px]"
             style={{
-              borderTop: '1px solid rgba(255,255,255,0.06)',
+              borderTop: '1px solid rgba(255,255,255,0.1)',
               color: meta.color,
               paddingTop: 4,
             }}
@@ -145,16 +155,16 @@ export default function HUDOverlay({
       {nextTarget && (
         <div
           className="absolute bottom-[calc(5.5rem+env(safe-area-inset-bottom))]
-                     left-1/2 -translate-x-1/2
-                     px-3 py-1.5 text-[12px] text-center
-                     max-w-[calc(100vw-3rem)] truncate"
+                     left-[calc(0.6rem+env(safe-area-inset-left))]
+                     px-3 py-2 text-[13px] text-left
+                     max-w-[calc(100vw-5rem)] truncate rounded-lg"
           style={{
-            background: 'rgba(4,6,14,0.8)',
-            border: '1px solid rgba(255,213,74,0.25)',
+            background: 'rgba(8,24,56,0.78)',
+            border: '1px solid rgba(255,216,77,0.35)',
             backdropFilter: 'blur(6px)',
             WebkitBackdropFilter: 'blur(6px)',
-            color: 'rgba(255,213,74,0.7)',
-            textShadow: '0 0 8px rgba(255,213,74,0.4)',
+            color: 'rgba(255,216,77,0.95)',
+            textShadow: '0 0 8px rgba(255,216,77,0.4)',
           }}
         >
           ★ {nextTarget}

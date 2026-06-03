@@ -2,22 +2,22 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Game } from '@/lib/game/Game';
-import type { FlightState, MissionResult } from '@/lib/game/types';
+import type { FlightState, MissionResult, RocketBuild } from '@/lib/game/types';
 import type { FlightPlan } from '@/lib/game/plan/FlightPlan';
-import type { Body } from '@/lib/game/bodies';
-import { getScenario, SCENARIOS } from '@/lib/game/bodies';
+import { buildFlightBodies, getDestination, bodyDef } from '@/lib/game/bodies';
 import {
   loadBuild, loadCompletedMilestones, addCompletedMilestone, addUnlockedParts,
-  loadPlan, savePlan,
+  loadPlan, savePlan, loadBases, addBase, loadGoals, addGoal,
 } from '@/lib/storage';
 import { MILESTONES } from '@/lib/game/career/Milestones';
+import { evaluateGoals, campaignGoal } from '@/lib/game/career/Progress';
 import {
   hapticThrust, hapticStage, hapticDeploy, hapticLanding, hapticCrash,
 } from '@/lib/haptics';
 import HUDOverlay from './HUDOverlay';
-import PlanControls from './PlanControls';
 import PlanPanel from './PlanPanel';
 import SimControls from './SimControls';
+import StageStack from './StageStack';
 import MissionSummary from './MissionSummary';
 import MilestoneToast from './MilestoneToast';
 import NavDrawer from './NavDrawer';
@@ -29,11 +29,11 @@ export default function GameScreen() {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Game | null>(null);
   const planRef = useRef<FlightPlan | null>(null);
+  const buildRef = useRef<RocketBuild | null>(null);
 
   const [gameKey, setGameKey] = useState(0);
   const [mode, setMode] = useState<'plan' | 'sim'>('plan');
   const [plan, setPlanState] = useState<FlightPlan | null>(null);
-  const [bodies, setBodies] = useState<Body[]>([]);
   const [hasLander, setHasLander] = useState(false);
   const [hasParachute, setHasParachute] = useState(false);
   const [flightState, setFlightState] = useState<FlightState | null>(null);
@@ -42,6 +42,7 @@ export default function GameScreen() {
   const [nextTarget, setNextTarget] = useState<string>('Reach orbit');
   const [timeScale, setTimeScale] = useState(1);
   const [toast, setToast] = useState<ToastInfo | null>(null);
+  const [bases, setBases] = useState<string[]>(['earth']);
   const toastId = useRef(0);
 
   const setPlan = useCallback((p: FlightPlan | null) => {
@@ -60,9 +61,10 @@ export default function GameScreen() {
 
     const initialPlan = planRef.current ?? loadPlan();
     const build = loadBuild();
+    buildRef.current = build;
     setPlan(initialPlan);
-    setBodies(getScenario(initialPlan.scenarioId).bodies);
     setHasLander(!!build.landerId);
+    setBases(loadBases());
     setMode('plan');
 
     (async () => {
@@ -91,7 +93,10 @@ export default function GameScreen() {
             const next = game.getNextMilestone();
             setNextTarget(next ? next.description : 'All milestones complete!');
           },
-          onMissionEnd: (r) => setMissionResult(r),
+          onMissionEnd: (r) => {
+            setMissionResult(r);
+            awardGoals(r);
+          },
         },
       });
 
@@ -107,22 +112,42 @@ export default function GameScreen() {
       gameRef.current?.destroy();
       gameRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameKey, pushToast, setPlan]);
 
   useEffect(() => {
     if (gameRef.current) gameRef.current.timeScale = timeScale;
   }, [timeScale]);
 
+  /** Award campaign goals (Moon landing, ISS, bases, Mars…) on mission end. */
+  const awardGoals = useCallback((result: MissionResult) => {
+    const build = buildRef.current;
+    const p = planRef.current;
+    if (!build || !p) return;
+    const newly = evaluateGoals(
+      { result, build, launchBodyId: p.launchBodyId },
+      loadGoals(),
+    );
+    for (const id of newly) {
+      addGoal(id);
+      const g = campaignGoal(id);
+      if (g?.baseUnlock) { addBase(g.baseUnlock); setBases(loadBases()); }
+      if (g) pushToast(`🏆 ${g.name}`, g.baseUnlock ? 'New launch site unlocked!' : g.description);
+    }
+  }, [pushToast]);
+
   const handlePlanChange = useCallback((next: FlightPlan) => {
+    const prev = planRef.current;
     setPlan(next);
     savePlan(next);
-    gameRef.current?.setPlan(next);
-  }, [setPlan]);
-
-  const handleAim = useCallback((heading: number, power: number) => {
-    gameRef.current?.setLaunch(heading, power);
-    const next = gameRef.current?.getPlan();
-    if (next) { setPlan(next); savePlan(next); }
+    // Changing launch site or destination rebuilds the world.
+    if (prev && (prev.launchBodyId !== next.launchBodyId || prev.destinationId !== next.destinationId)) {
+      setMissionResult(null);
+      setTimeScale(1);
+      setGameKey((k) => k + 1);
+    } else {
+      gameRef.current?.setPlan(next);
+    }
   }, [setPlan]);
 
   const handlePlay = useCallback(() => {
@@ -152,92 +177,70 @@ export default function GameScreen() {
     gameRef.current?.skipToCompletion();
   }, []);
 
-  const handleStage = useCallback(() => {
-    gameRef.current?.manualStage();
-  }, []);
+  const handleStage = useCallback(() => gameRef.current?.manualStage(), []);
+  const handleLander = useCallback(() => gameRef.current?.manualLander(), []);
 
-  const handleChute = useCallback(() => {
-    gameRef.current?.manualParachute();
-  }, []);
-
-  const handleLander = useCallback(() => {
-    gameRef.current?.manualLander();
-  }, []);
-
-  const handleScenario = useCallback((id: string) => {
+  const handleLaunchSite = useCallback((id: string) => {
     const cur = planRef.current;
-    if (!cur || cur.scenarioId === id) return;
-    const next = { ...cur, scenarioId: id };
-    savePlan(next);
-    setPlan(next);
-    setBodies(getScenario(id).bodies);
-    setMissionResult(null);
-    setTimeScale(1);
-    setGameKey((k) => k + 1); // rebuild Game with the new body set
-  }, [setPlan]);
+    if (!cur || cur.launchBodyId === id) return;
+    handlePlanChange({ ...cur, launchBodyId: id });
+  }, [handlePlanChange]);
 
   const phase = flightState?.phase ?? 'prelaunch';
   const finished = phase === 'landed' || phase === 'destroyed' || !!missionResult;
   const canSkip = mode === 'sim' && !finished && phase !== 'prelaunch';
   const canStage = flightState?.canStage ?? false;
-  const parachuteDeployed = flightState?.parachuteDeployed ?? false;
   const landerDeployed = flightState?.landerDeployed ?? false;
-  const scenario = plan ? getScenario(plan.scenarioId) : null;
+
+  const dest = plan ? getDestination(plan.destinationId) : null;
+  const bodies = plan ? buildFlightBodies(plan.launchBodyId, dest?.targetId ?? null) : [];
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-bg">
       <div ref={containerRef} className="absolute inset-0 z-0" />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-[5] h-32
-                      bg-gradient-to-b from-bg/80 to-transparent" />
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-[5] h-28
+                      bg-gradient-to-b from-bg/55 to-transparent" />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[5] h-48
-                      bg-gradient-to-t from-bg/85 to-transparent" />
+                      bg-gradient-to-t from-bg/65 to-transparent" />
 
       {mode === 'sim' && (
-        <HUDOverlay state={flightState} nextTarget={nextTarget} timeScale={timeScale} />
+        <>
+          <HUDOverlay state={flightState} nextTarget={nextTarget} timeScale={timeScale} />
+          <StageStack state={flightState} />
+        </>
       )}
 
       <NavDrawer title="Flight Menu" />
 
-      {/* Plan mode: scenario banner + objective */}
-      {mode === 'plan' && scenario && (
+      {/* Launch-site chip (replaces the old scenario banner) */}
+      {mode === 'plan' && plan && bases.length > 1 && (
         <div className="absolute z-30 top-[calc(0.75rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2
-                        panel px-3 py-2 text-center max-w-[80vw] flex flex-col items-center gap-1.5">
-          <div className="flex gap-1">
-            {SCENARIOS.map((sc) => (
-              <button
-                key={sc.id}
-                onClick={() => handleScenario(sc.id)}
-                aria-label={`Select ${sc.name} scenario`}
-                aria-current={sc.id === scenario.id ? 'true' : undefined}
-                className={`text-[9px] font-black tracking-[0.15em] uppercase rounded-full px-2.5 py-1 border
-                  ${sc.id === scenario.id
-                    ? 'border-cyan/60 bg-cyan/15 text-cyan'
-                    : 'border-white/10 bg-white/[0.03] text-dim'}`}
-              >{sc.name}</button>
-            ))}
-          </div>
-          <div className="text-[10px] text-dim truncate max-w-[70vw]">{scenario.objective}</div>
+                        panel px-2 py-1.5 flex items-center gap-1">
+          <span className="text-[9px] text-dim px-1">LAUNCH&nbsp;FROM</span>
+          {bases.map((id) => (
+            <button
+              key={id}
+              onClick={() => handleLaunchSite(id)}
+              className={`text-[10px] font-black tracking-wider uppercase rounded-md px-2.5 py-1 border
+                ${id === plan.launchBodyId
+                  ? 'border-cyan/70 bg-cyan/20 text-cyan'
+                  : 'border-white/15 bg-white/[0.06] text-dim'}`}
+            >{bodyDef(id).name}</button>
+          ))}
         </div>
       )}
 
-      {/* Plan mode: aim controller + plan panel */}
+      {/* Plan mode: plan panel (destination, launch + maneuvers) */}
       {mode === 'plan' && plan && (
-        <>
-          <PlanControls
-            heading={plan.launch.heading}
-            power={plan.launch.power}
-            onCommit={handleAim}
-          />
-          <PlanPanel
-            plan={plan}
-            bodies={bodies}
-            hasLander={hasLander}
-            preview={preview}
-            onChange={handlePlanChange}
-            onPlay={handlePlay}
-          />
-        </>
+        <PlanPanel
+          plan={plan}
+          bodies={bodies}
+          hasLander={hasLander}
+          preview={preview}
+          onChange={handlePlanChange}
+          onPlay={handlePlay}
+        />
       )}
 
       {/* Sim mode: controls */}
@@ -248,16 +251,15 @@ export default function GameScreen() {
           timeScale={timeScale}
           canSkip={canSkip}
           canStage={canStage}
-          hasParachute={hasParachute}
-          parachuteDeployed={parachuteDeployed}
           hasLander={hasLander}
+          hasParachute={hasParachute}
           landerDeployed={landerDeployed}
+          parachuteDeployed={flightState?.parachuteDeployed ?? false}
           onEdit={handleEdit}
           onReplay={handleReplay}
           onWarp={handleWarp}
           onSkip={handleSkip}
           onStage={handleStage}
-          onChute={handleChute}
           onLander={handleLander}
         />
       )}

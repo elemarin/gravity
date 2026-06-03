@@ -4,18 +4,31 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { MILESTONES } from '@/lib/game/career/Milestones';
 import { PARTS_CATALOG } from '@/lib/game/career/Parts';
-import { loadCompletedMilestones, loadUnlockedParts, resetProgress } from '@/lib/storage';
+import {
+  facilityTier, nextFacilityTier, canUpgradeFacility, CAMPAIGN_GOALS,
+} from '@/lib/game/career/Progress';
+import { bodyDef } from '@/lib/game/bodies';
+import {
+  loadCompletedMilestones, loadUnlockedParts, resetProgress,
+  loadFacilityLevel, saveFacilityLevel, loadGoals, loadBases,
+} from '@/lib/storage';
 import NavDrawer from './NavDrawer';
 
 export default function CareerView() {
   const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [unlocked,  setUnlocked]  = useState<Set<string>>(new Set());
+  const [facility, setFacility]   = useState(0);
+  const [goals, setGoals]         = useState<Set<string>>(new Set());
+  const [bases, setBases]         = useState<string[]>(['earth']);
 
   useEffect(() => {
     setCompleted(new Set(loadCompletedMilestones()));
     const u = new Set(loadUnlockedParts());
     PARTS_CATALOG.forEach((p) => { if (p.unlockedByDefault) u.add(p.id); });
     setUnlocked(u);
+    setFacility(loadFacilityLevel());
+    setGoals(new Set(loadGoals()));
+    setBases(loadBases());
   }, []);
 
   const handleReset = () => {
@@ -23,10 +36,22 @@ export default function CareerView() {
       resetProgress();
       setCompleted(new Set());
       setUnlocked(new Set(PARTS_CATALOG.filter((p) => p.unlockedByDefault).map((p) => p.id)));
+      setFacility(0);
+      setGoals(new Set());
+      setBases(['earth']);
     }
   };
 
   const totalDone = completed.size;
+  const tier = facilityTier(facility);
+  const next = nextFacilityTier(facility);
+  const canUpgrade = canUpgradeFacility(facility, totalDone);
+  const handleUpgrade = () => {
+    if (!canUpgrade) return;
+    const lvl = facility + 1;
+    saveFacilityLevel(lvl);
+    setFacility(lvl);
+  };
 
   return (
     <main className="fixed inset-0 overflow-y-auto bg-bg">
@@ -59,6 +84,74 @@ export default function CareerView() {
               <span className="text-dim text-base">/{PARTS_CATALOG.length}</span>
             </div>
           </div>
+        </div>
+
+        {/* Launch facility */}
+        <h2 className="stat-label mb-3 px-1">Launch Facility</h2>
+        <div className="panel p-4 mb-5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-base font-black text-cyan">🏭 {tier.name}</div>
+              <div className="text-[11px] text-dim mt-0.5">
+                Lifts up to <span className="text-ink font-bold">{tier.maxMass}t</span> ·
+                {' '}<span className="text-ink font-bold">{tier.maxStages}</span> stages
+              </div>
+            </div>
+            {next ? (
+              <button
+                onClick={handleUpgrade}
+                disabled={!canUpgrade}
+                className={`shrink-0 rounded-lg border-2 px-3 py-2 text-[11px] font-black tracking-wider
+                  ${canUpgrade
+                    ? 'border-green/70 bg-green/15 text-green active:scale-95'
+                    : 'border-white/15 bg-white/5 text-dim/60 cursor-not-allowed'}`}
+              >
+                {canUpgrade ? `⬆ ${next.name}` : `🔒 ${next.milestonesNeeded} milestones`}
+              </button>
+            ) : (
+              <span className="shrink-0 text-[11px] text-green font-bold">MAX TIER</span>
+            )}
+          </div>
+          {next && !canUpgrade && (
+            <div className="mt-2 text-[10px] text-dim">
+              Next: {next.name} — lifts {next.maxMass}t, {next.maxStages} stages.
+              Complete {next.milestonesNeeded - totalDone} more milestone(s).
+            </div>
+          )}
+        </div>
+
+        {/* Campaign goals */}
+        <h2 className="stat-label mb-3 px-1">Campaign — Conquer the System</h2>
+        <ol className="flex flex-col gap-2 mb-5">
+          {CAMPAIGN_GOALS.map((g) => {
+            const done = goals.has(g.id);
+            return (
+              <li key={g.id}
+                  className={`panel flex items-center gap-3 p-3 ${done ? 'border-green/40 bg-green/[0.06]' : ''}`}>
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm
+                                ${done ? 'bg-green/20 text-green border border-green/40' : 'bg-white/5 text-dim border border-white/12'}`}>
+                  {done ? '✓' : '🏆'}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className={`font-bold text-sm ${done ? 'text-green' : 'text-ink'}`}>{g.name}</div>
+                  <div className="text-xs text-dim truncate">{g.description}</div>
+                </div>
+                {g.baseUnlock && (
+                  <span className="shrink-0 pill text-[10px] px-2 py-0.5">🚩 {bodyDef(g.baseUnlock).name} base</span>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+
+        {/* Launch sites */}
+        <h2 className="stat-label mb-3 px-1">Launch Sites</h2>
+        <div className="flex flex-wrap gap-2 mb-8">
+          {bases.map((id) => (
+            <span key={id} className="pill text-[11px] px-3 py-1.5 text-cyan font-bold">
+              🚩 {bodyDef(id).name}
+            </span>
+          ))}
         </div>
 
         {/* Milestone list */}

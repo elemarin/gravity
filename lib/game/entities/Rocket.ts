@@ -1,17 +1,22 @@
 import * as THREE from 'three';
 import { EARTH_CENTER, EARTH_RADIUS } from '../constants';
-import { Exhaust } from './Exhaust';
+import { Flame, FxBursts } from './Flame';
 import { RocketBuild } from '../types';
 import { getStages } from '../BuildSpec';
 import { getPart } from '../career/Parts';
 import type { SimState } from '../plan/Simulator';
 
+// Origin sits at the very base of the engine bell, so the rocket rests flush
+// on the launch pad (no part dips below y = 0).
 export const ROCKET_START_ALTITUDE = 0.001;
 
+const BODY_R = 0.18;          // main stack radius
+const stagePalette = 0x2a3550;
+
 /**
- * Visual rocket. In Gravity 2.0 all physics live in the deterministic
- * {@link Simulator}; this entity only renders the stack and follows the
- * sim state via {@link applyState} (position, aim, staging, exhaust).
+ * Visual rocket. All physics live in the deterministic {@link Simulator};
+ * this entity renders the stack from the bottom up and follows the sim state
+ * via {@link applyState} (position, aim, staging, flame).
  */
 export class Rocket {
   mesh: THREE.Group;
@@ -27,7 +32,8 @@ export class Rocket {
   private meshActiveStage = 0;
 
   private scene: THREE.Scene;
-  private exhaust: Exhaust;
+  private flame: Flame;
+  private fx: FxBursts;
   private upCenter = EARTH_CENTER.clone();
   private parachute?: THREE.Group;
   private droppedStages: { group: THREE.Group; velocity: THREE.Vector3; spin: THREE.Vector3; age: number }[] = [];
@@ -38,7 +44,8 @@ export class Rocket {
     this.position = new THREE.Vector3(0, EARTH_CENTER.y + EARTH_RADIUS + ROCKET_START_ALTITUDE, 0);
     this.mesh = this.buildMesh(build);
     scene.add(this.mesh);
-    this.exhaust = new Exhaust(scene);
+    this.flame = new Flame(scene);
+    this.fx = new FxBursts(scene);
     this.syncMesh();
   }
 
@@ -85,118 +92,165 @@ export class Rocket {
     this.syncMesh();
     if (this.parachute) this.parachute.visible = s.deployedParachute;
     this.updateDroppedStages(dt, upCenter);
+    this.fx.update(dt);
+
     const fuel = s.stageFuel[s.activeStage] ?? 0;
     const { pos, dir } = this.getNozzleInfo();
     const engineId = this.build.stages?.[s.activeStage]?.engineId ?? 'engine-basic';
-    this.exhaust.update(dt, pos, dir, fuel > 0 ? s.throttle : 0, engineId);
+    this.flame.update(dt, pos, dir, fuel > 0 ? s.throttle : 0, engineId);
   }
 
   emitStageBurst() {
     const up = new THREE.Vector3().subVectors(this.position, this.upCenter).normalize();
-    this.exhaust.burst(this.position.clone().addScaledVector(up, -0.15), up.clone().negate(), 90, [1, 0.42, 0.1], 6);
+    this.fx.burst(this.position.clone().addScaledVector(up, 0.1), up.clone().negate(), 8, 0xffaa44, 1.0);
   }
 
   emitParachuteBurst() {
     const up = new THREE.Vector3().subVectors(this.position, this.upCenter).normalize();
-    this.exhaust.burst(this.position.clone().addScaledVector(up, 0.8), up, 70, [0.55, 1, 0.8], 3.5);
+    this.fx.burst(this.position.clone().addScaledVector(up, 1.0), up, 6, 0x9effd0, 0.7);
   }
+
+  // ── Mesh construction (bottom-up from y = 0) ──────────────────────────────
 
   private buildMesh(build: RocketBuild): THREE.Group {
     const group = new THREE.Group();
     this.stageMeshes = [];
-    let y = -0.55;
 
     const stages = getStages(build);
+    let y = 0;
+
     stages.forEach((stage, si) => {
       const stageGroup = new THREE.Group();
+      const start = y;
 
+      // Engine bell
       const engine = getPart(stage.engineId);
-      if (engine) {
-        const geo = new THREE.CylinderGeometry(0.12, 0.2, 0.3, 8);
-        const mat = new THREE.MeshPhongMaterial({ color: engine.color, flatShading: true });
-        const m = new THREE.Mesh(geo, mat);
-        m.position.y = y;
-        stageGroup.add(m);
-        y += 0.25;
-      }
+      const bellColor = engine?.color ?? 0x9aa3b8;
+      const bell = new THREE.Mesh(
+        new THREE.CylinderGeometry(BODY_R * 0.7, BODY_R * 0.95, 0.28, 10),
+        mat(bellColor, 30),
+      );
+      bell.position.y = y + 0.14;
+      stageGroup.add(bell);
+      // Nozzle lip
+      const lip = new THREE.Mesh(
+        new THREE.CylinderGeometry(BODY_R * 0.95, BODY_R * 0.78, 0.06, 10),
+        mat(0x20242e, 10),
+      );
+      lip.position.y = y + 0.02;
+      stageGroup.add(lip);
+      y += 0.26;
 
+      // Fuel tanks
       for (const tankId of stage.tankIds) {
         const tank = getPart(tankId);
         if (!tank) continue;
-        const h = 0.4 + Math.min(tank.fuelCapacity / 200, 0.8);
-        const geo = new THREE.CylinderGeometry(0.14, 0.14, h, 8);
-        const mat = new THREE.MeshPhongMaterial({ color: tank.color, flatShading: true });
-        const m = new THREE.Mesh(geo, mat);
-        m.position.y = y + h / 2;
-        stageGroup.add(m);
+        const h = 0.34 + Math.min(tank.fuelCapacity / 320, 0.9);
+        const body = new THREE.Mesh(
+          new THREE.CylinderGeometry(BODY_R, BODY_R, h, 12),
+          mat(tank.color, 18),
+        );
+        body.position.y = y + h / 2;
+        stageGroup.add(body);
+        // Band rings for a paneled look
+        const band = new THREE.Mesh(
+          new THREE.CylinderGeometry(BODY_R * 1.02, BODY_R * 1.02, 0.04, 12),
+          mat(0xffffff, 40),
+        );
+        band.position.y = y + 0.04;
+        stageGroup.add(band);
         y += h;
       }
 
+      // Fins on the first stage
       if (si === 0) {
-        for (let i = 0; i < 3; i++) {
-          const geo = new THREE.BoxGeometry(0.04, 0.26, 0.16);
-          const mat = new THREE.MeshPhongMaterial({ color: 0xcc4400, flatShading: true });
-          const fin = new THREE.Mesh(geo, mat);
-          const a = (i / 3) * Math.PI * 2;
-          fin.position.set(Math.cos(a) * 0.16, -0.42, Math.sin(a) * 0.16);
+        for (let i = 0; i < 4; i++) {
+          const fin = new THREE.Mesh(
+            new THREE.BoxGeometry(0.03, 0.3, 0.2),
+            mat(0xff7a3c, 20),
+          );
+          const a = (i / 4) * Math.PI * 2;
+          fin.position.set(Math.cos(a) * (BODY_R + 0.04), start + 0.22, Math.sin(a) * (BODY_R + 0.04));
           fin.rotation.y = a;
           stageGroup.add(fin);
         }
       }
 
+      // Interstage decoupler ring
       if (si < stages.length - 1 || build.landerId) {
-        const geo = new THREE.CylinderGeometry(0.145, 0.145, 0.05, 8);
-        const mat = new THREE.MeshPhongMaterial({ color: 0x222230, flatShading: true });
-        const m = new THREE.Mesh(geo, mat);
-        m.position.y = y + 0.025;
-        stageGroup.add(m);
-        y += 0.05;
+        const ring = new THREE.Mesh(
+          new THREE.CylinderGeometry(BODY_R * 0.96, BODY_R * 0.96, 0.06, 12),
+          mat(stagePalette, 8),
+        );
+        ring.position.y = y + 0.03;
+        stageGroup.add(ring);
+        y += 0.06;
       }
 
       group.add(stageGroup);
       this.stageMeshes.push(stageGroup);
+
+      // Strap-on boosters ride alongside the first stage and drop with it.
+      if (si === 0) this.addBoosters(stageGroup, build, start, y);
     });
 
-    // Lander forms an extra separable top "stage".
+    // Lander forms an extra separable top "stage"
     if (build.landerId) {
       const lander = getPart(build.landerId);
       if (lander) {
         const landerGroup = new THREE.Group();
-        const bodyGeo = new THREE.CylinderGeometry(0.16, 0.13, 0.32, 8);
-        const bodyMat = new THREE.MeshPhongMaterial({ color: lander.color, flatShading: true });
-        const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-        bodyMesh.position.y = y + 0.16;
-        landerGroup.add(bodyMesh);
+        const body = new THREE.Mesh(
+          new THREE.CylinderGeometry(BODY_R * 0.95, BODY_R * 0.8, 0.34, 8),
+          mat(lander.color, 24),
+        );
+        body.position.y = y + 0.17;
+        landerGroup.add(body);
         for (let i = 0; i < 3; i++) {
-          const legGeo = new THREE.BoxGeometry(0.03, 0.22, 0.03);
-          const legMat = new THREE.MeshPhongMaterial({ color: 0x999999, flatShading: true });
-          const leg = new THREE.Mesh(legGeo, legMat);
+          const leg = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.24, 0.03), mat(0xb8bcc8, 12));
           const a = (i / 3) * Math.PI * 2;
-          leg.position.set(Math.cos(a) * 0.15, y + 0.02, Math.sin(a) * 0.15);
+          leg.position.set(Math.cos(a) * 0.16, y + 0.04, Math.sin(a) * 0.16);
           leg.rotation.z = Math.cos(a) * 0.4;
           leg.rotation.x = Math.sin(a) * 0.4;
           landerGroup.add(leg);
         }
-        y += 0.34;
+        y += 0.36;
         group.add(landerGroup);
         this.stageMeshes.push(landerGroup);
       }
     }
 
+    // Nose / payload
     const nose = getPart(build.noseId);
     if (nose) {
-      const noseH = nose.type === 'capsule' ? 0.4 : 0.35;
-      const noseGeo = nose.type === 'capsule'
-        ? new THREE.CylinderGeometry(0.10, 0.14, noseH, 8)
-        : new THREE.ConeGeometry(0.12, noseH, 8);
-      const noseMat = new THREE.MeshPhongMaterial({ color: nose.color, flatShading: true });
-      const m = new THREE.Mesh(noseGeo, noseMat);
-      m.position.y = y + noseH / 2;
-      group.add(m);
+      if (nose.type === 'capsule') {
+        const cap = new THREE.Mesh(
+          new THREE.CylinderGeometry(BODY_R * 0.6, BODY_R, 0.4, 12),
+          mat(nose.color, 30),
+        );
+        cap.position.y = y + 0.2;
+        group.add(cap);
+        if (nose.id === 'station-module' || nose.id === 'satellite-bus') {
+          // Solar panels
+          for (const sgn of [-1, 1]) {
+            const panel = new THREE.Mesh(
+              new THREE.BoxGeometry(0.5, 0.18, 0.01),
+              mat(0x2b5cff, 60),
+            );
+            panel.position.set(sgn * 0.36, y + 0.2, 0);
+            group.add(panel);
+          }
+        }
+        y += 0.4;
+      } else {
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(BODY_R, 0.42, 12), mat(nose.color, 36));
+        cone.position.y = y + 0.21;
+        group.add(cone);
+        y += 0.42;
+      }
     }
 
-    if (build.utilityIds.includes('parachute')) {
-      this.parachute = this.buildParachute(y + 0.68);
+    if (build.utilityIds?.includes('parachute')) {
+      this.parachute = this.buildParachute(y + 0.5);
       this.parachute.visible = false;
       group.add(this.parachute);
     } else {
@@ -206,42 +260,64 @@ export class Rocket {
     return group;
   }
 
+  private addBoosters(stageGroup: THREE.Group, build: RocketBuild, startY: number, endY: number) {
+    const ids = build.boosterIds ?? [];
+    if (ids.length === 0) return;
+    const h = Math.max(0.6, (endY - startY) * 0.92);
+    const midY = startY + (endY - startY) * 0.5;
+    ids.forEach((id, i) => {
+      const part = getPart(id);
+      const color = part?.color ?? 0xf2f2f5;
+      const a = (i / ids.length) * Math.PI * 2 + Math.PI / 4;
+      const off = BODY_R + 0.12;
+      const bg = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, h, 8), mat(color, 18));
+      body.position.y = midY;
+      bg.add(body);
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.18, 8), mat(0xff7a3c, 24));
+      cone.position.y = midY + h / 2 + 0.09;
+      bg.add(cone);
+      const noz = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 0.1, 8), mat(0x20242e, 10));
+      noz.position.y = midY - h / 2 - 0.05;
+      bg.add(noz);
+      bg.position.set(Math.cos(a) * off, 0, Math.sin(a) * off);
+      stageGroup.add(bg);
+    });
+  }
+
   private buildParachute(y: number): THREE.Group {
     const chute = new THREE.Group();
-    const canopyGeo = new THREE.SphereGeometry(0.58, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
-    const canopyMat = new THREE.MeshPhongMaterial({
-      color: 0x7fffd4,
-      transparent: true,
-      opacity: 0.78,
-      flatShading: true,
-      side: THREE.DoubleSide,
-    });
-    const canopy = new THREE.Mesh(canopyGeo, canopyMat);
-    canopy.scale.y = 0.45;
+    const canopy = new THREE.Mesh(
+      new THREE.SphereGeometry(0.58, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+      new THREE.MeshPhongMaterial({
+        color: 0xff8f4a, transparent: true, opacity: 0.85, flatShading: true, side: THREE.DoubleSide,
+      }),
+    );
+    canopy.scale.y = 0.5;
     canopy.position.y = y;
     chute.add(canopy);
-
-    const lineMat = new THREE.LineBasicMaterial({ color: 0xe8f4ff, transparent: true, opacity: 0.55 });
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xe8f4ff, transparent: true, opacity: 0.5 });
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2;
-      const points = [
+      const pts = [
         new THREE.Vector3(Math.cos(a) * 0.48, y - 0.05, Math.sin(a) * 0.48),
-        new THREE.Vector3(0, y - 0.75, 0),
+        new THREE.Vector3(0, y - 0.7, 0),
       ];
-      chute.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), lineMat.clone()));
+      chute.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat.clone()));
     }
     return chute;
   }
 
   private getNozzleInfo(): { pos: THREE.Vector3; dir: THREE.Vector3 } {
     const up = new THREE.Vector3().subVectors(this.position, this.upCenter).normalize();
-    const east = new THREE.Vector3(-up.z, 0, up.x);
-    if (east.lengthSq() < 0.01) east.set(1, 0, 0);
+    // x-y plane tangent — matches the Simulator's thrust frame.
+    const east = new THREE.Vector3(up.y, -up.x, 0);
+    if (east.lengthSq() < 1e-6) east.set(1, 0, 0);
     east.normalize();
     const rad = THREE.MathUtils.degToRad(this.angle);
     const thrustUp = up.clone().multiplyScalar(Math.cos(rad)).addScaledVector(east, Math.sin(rad)).normalize();
-    // Spawn particles above rocket center so they're visible above the terrain surface
-    const pos = this.position.clone().addScaledVector(thrustUp, 0.2);
+    // Nozzle sits just below the base; exhaust streams opposite the thrust.
+    const pos = this.position.clone().addScaledVector(thrustUp, 0.04);
     return { pos, dir: thrustUp.clone().negate() };
   }
 
@@ -250,8 +326,7 @@ export class Rocket {
     const up = new THREE.Vector3().subVectors(this.position, this.upCenter).normalize();
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
     const tilt = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 0, 1),
-      -THREE.MathUtils.degToRad(this.angle),
+      new THREE.Vector3(0, 0, 1), -THREE.MathUtils.degToRad(this.angle),
     );
     this.mesh.quaternion.copy(q).multiply(tilt);
   }
@@ -314,13 +389,16 @@ export class Rocket {
     });
   }
 
-  private disposeMesh() {
-    this.disposeGroup(this.mesh);
-  }
+  private disposeMesh() { this.disposeGroup(this.mesh); }
 
   dispose() {
-    this.exhaust.dispose();
+    this.flame.dispose();
+    this.fx.dispose();
     this.clearDroppedStages();
     this.disposeMesh();
   }
+}
+
+function mat(color: number, shininess = 16): THREE.MeshPhongMaterial {
+  return new THREE.MeshPhongMaterial({ color, flatShading: true, shininess });
 }
