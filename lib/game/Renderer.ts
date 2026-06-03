@@ -24,6 +24,12 @@ export class Renderer {
   private lastSingleX = 0;
   private lastPinchDist = 0;
 
+  // Rocket extent (units) used to auto-frame the craft on the pad so it is
+  // always fully visible regardless of how big the build is.
+  private rocketHeight = 3;
+  // How far to lift the look target along "up" so the rocket sits centred.
+  private targetLift = 0;
+
   constructor(container: HTMLElement) {
     this.container = container;
 
@@ -102,7 +108,15 @@ export class Renderer {
     el.addEventListener('pointermove',   this.onCamPointerMove);
     el.addEventListener('pointerup',     this.onCamPointerUp);
     el.addEventListener('pointercancel', this.onCamPointerUp);
+    el.addEventListener('wheel',         this.onCamWheel, { passive: false });
   }
+
+  // Desktop mouse-wheel / trackpad zoom.
+  private onCamWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    const factor = Math.exp(e.deltaY * 0.0015);
+    this.userZoom = Math.max(0.12, Math.min(18, this.userZoom * factor));
+  };
 
   private onCamPointerDown = (e: PointerEvent) => {
     try { this.renderer.domElement.setPointerCapture(e.pointerId); } catch { /* ok */ }
@@ -128,7 +142,9 @@ export class Renderer {
       const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
       if (this.lastPinchDist > 1) {
         const ratio = dist / this.lastPinchDist;
-        this.userZoom = Math.max(0.18, Math.min(4.5, this.userZoom / ratio));
+        // Wide zoom range so the player can pull back far enough to see a whole
+        // orbit, or push in close to the craft.
+        this.userZoom = Math.max(0.12, Math.min(18, this.userZoom / ratio));
       }
       this.lastPinchDist = dist;
     }
@@ -142,19 +158,49 @@ export class Renderer {
     }
   };
 
-  followTarget(targetPos: THREE.Vector3, dt: number) {
-    if (this.cameraTarget.distanceTo(targetPos) > 24) this.cameraTarget.copy(targetPos);
-    else this.cameraTarget.lerp(targetPos, 1 - Math.exp(-9 * dt));
+  /** Lift the framed point up the craft's body so a tall rocket sits centred. */
+  private liftedTarget(targetPos: THREE.Vector3, up?: THREE.Vector3): THREE.Vector3 {
+    if (!up || this.targetLift <= 0) return targetPos;
+    return targetPos.clone().addScaledVector(up, this.targetLift);
+  }
+
+  followTarget(targetPos: THREE.Vector3, dt: number, up?: THREE.Vector3) {
+    const aim = this.liftedTarget(targetPos, up);
+    if (this.cameraTarget.distanceTo(aim) > 24) this.cameraTarget.copy(aim);
+    else this.cameraTarget.lerp(aim, 1 - Math.exp(-9 * dt));
     const desired = this.cameraTarget.clone().add(this.cameraOffset);
     this.camera.position.lerp(desired, 1 - Math.exp(-7 * dt));
     this.camera.lookAt(this.cameraTarget);
   }
 
+  /** Snap the camera straight to its framed pose (no easing) — used on launch. */
+  snapTo(targetPos: THREE.Vector3, up?: THREE.Vector3) {
+    this.cameraTarget.copy(this.liftedTarget(targetPos, up));
+    this.camera.position.copy(this.cameraTarget).add(this.cameraOffset);
+    this.camera.lookAt(this.cameraTarget);
+  }
+
+  /** Record the built rocket's height so the pad view frames the whole stack. */
+  setRocketHeight(height: number) {
+    this.rocketHeight = Math.max(0.5, height);
+  }
+
   updateCameraOffset(altitude: number) {
     const t = THREE.MathUtils.clamp(altitude / 150, 0, 1);
     const isDesktop = this.container.clientWidth >= 900;
-    const baseDist = THREE.MathUtils.lerp(isDesktop ? 8 : 6, isDesktop ? 120 : 90, t);
-    const upOff    = THREE.MathUtils.lerp(isDesktop ? 3 : 2, isDesktop ? 28 : 22, t);
+
+    // Ground framing: pull back far enough that the full rocket fits the
+    // vertical field of view (plus margin), so big builds aren't clipped.
+    const vfov = THREE.MathUtils.degToRad(this.camera.fov);
+    const fitDist = (this.rocketHeight * 0.62) / Math.tan(vfov / 2);
+    const groundDist = Math.max(isDesktop ? 8 : 6, fitDist);
+    const groundUp   = Math.max(isDesktop ? 3 : 2, this.rocketHeight * 0.5);
+
+    const baseDist = THREE.MathUtils.lerp(groundDist, isDesktop ? 120 : 90, t);
+    const upOff    = THREE.MathUtils.lerp(groundUp, isDesktop ? 28 : 22, t);
+    // Centre the rocket body near the pad; fade the lift out once airborne so
+    // the camera tracks the craft itself at altitude.
+    this.targetLift = THREE.MathUtils.lerp(this.rocketHeight * 0.5, 0, Math.min(altitude / 8, 1));
     const dist     = baseDist * this.userZoom;
     this.cameraOffset.set(
       Math.sin(this.userAzimuth) * dist,
@@ -192,6 +238,7 @@ export class Renderer {
     el.removeEventListener('pointermove',   this.onCamPointerMove);
     el.removeEventListener('pointerup',     this.onCamPointerUp);
     el.removeEventListener('pointercancel', this.onCamPointerUp);
+    el.removeEventListener('wheel',         this.onCamWheel);
 
     window.removeEventListener('resize', this.handleResize);
     this.resizeObserver?.disconnect();

@@ -5,9 +5,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { PARTS_CATALOG, RocketPart, PartType } from '@/lib/game/career/Parts';
 import { RocketBuild, StageSpec, DEFAULT_BUILD } from '@/lib/game/types';
-import { computeStats, estimateBuildDeltaV, getStages } from '@/lib/game/BuildSpec';
+import { computeStats, estimateBuildDeltaV, getStages, buildPartIds } from '@/lib/game/BuildSpec';
 import { loadBuild, saveBuild, loadUnlockedParts, loadFacilityLevel } from '@/lib/storage';
 import { facilityTier } from '@/lib/game/career/Progress';
+import { ROCKET_PRESETS, RocketPreset } from '@/lib/game/career/Presets';
 import NavDrawer from './NavDrawer';
 
 const CATEGORIES: { type: PartType; label: string; short: string }[] = [
@@ -93,6 +94,13 @@ export default function RocketBuilder() {
       return withStages(b, s);
     });
 
+  const loadPreset = (p: RocketPreset) => {
+    setBuild({ ...p.build, stages: p.build.stages?.map((s) => ({ ...s, tankIds: [...s.tankIds] })) });
+    setSelectedStage(0);
+    setActiveCategory('engine');
+  };
+  const presetLocked = (p: RocketPreset) => buildPartIds(p.build).some((id) => !unlocked.has(id));
+
   const setNose = (id: string) => setBuild((b) => ({ ...b, noseId: id }));
   const toggleLander = (id: string) => setBuild((b) => ({ ...b, landerId: b.landerId === id ? undefined : id }));
   const toggleUtility = (id: string) =>
@@ -139,9 +147,34 @@ export default function RocketBuilder() {
                 aria-label="Reset">↻</button>
       </header>
 
+      {/* ── Preset quick-select ── */}
+      <div className="shrink-0 flex items-center gap-1.5 px-4 pt-2 overflow-x-auto no-scrollbar">
+        <span className="shrink-0 text-[9px] font-black tracking-widest uppercase text-dim pr-1">Presets</span>
+        {ROCKET_PRESETS.map((p) => {
+          const locked = presetLocked(p);
+          return (
+            <button
+              key={p.id}
+              disabled={locked}
+              onClick={() => loadPreset(p)}
+              title={locked ? 'Unlock its parts in Career to use this preset' : p.description}
+              className={`shrink-0 h-8 px-3 rounded-full border text-[10px] font-black tracking-wide
+                          flex items-center gap-1 transition-all active:scale-95
+                ${locked
+                  ? 'border-white/5 bg-white/[0.02] text-dim/40 cursor-not-allowed'
+                  : 'border-cyan/40 bg-cyan/[0.07] text-cyan hover:bg-cyan/15'}`}
+            >
+              <span className="text-sm leading-none">{p.icon}</span>
+              {p.name}
+              {locked && <span className="text-[10px]">🔒</span>}
+            </button>
+          );
+        })}
+      </div>
+
       {/* ── Rocket preview ── */}
       <section className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-3 px-4 py-3 md:grid md:grid-cols-[minmax(24rem,1fr)_minmax(22rem,30rem)] md:items-stretch">
-      <div className="shrink-0 flex items-start justify-center gap-6 md:gap-10"
+      <div className="shrink-0 flex items-start justify-center gap-6 md:gap-10 md:col-start-1 md:row-start-1 md:self-start"
            style={{ minHeight: '32vh', maxHeight: '42vh' }}>
         {/* Blueprint */}
         <div className="flex-1 flex flex-col items-center justify-end h-full overflow-hidden">
@@ -170,8 +203,11 @@ export default function RocketBuilder() {
         </div>
       </div>
 
+      {/* ── Right column: facility hint, category tabs, parts drawer ── */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2 md:col-start-2 md:row-start-1">
+
       {/* ── Facility + stage hint ── */}
-      <div className="shrink-0 px-0 pb-1 md:col-start-2 md:row-start-1 flex flex-col gap-1">
+      <div className="shrink-0 px-0 pb-1 flex flex-col gap-1">
         <div className="rounded-lg border border-cyan/25 bg-cyan/[0.06] px-3 py-1.5 text-[11px] text-center">
           <span className="text-cyan font-black">🏭 {tier.name}</span>
           <span className="text-dim"> · up to {tier.maxMass}t · {tier.maxStages} stages</span>
@@ -183,7 +219,7 @@ export default function RocketBuilder() {
       </div>
 
       {/* ── Category tabs ── */}
-      <div className="shrink-0 flex gap-1.5 px-0 py-2 overflow-x-auto no-scrollbar md:col-start-2 md:row-start-1 md:mt-12">
+      <div className="shrink-0 flex gap-1.5 px-0 py-2 overflow-x-auto no-scrollbar">
         {CATEGORIES.map(({ type, short }) => (
           <button
             key={type}
@@ -198,7 +234,7 @@ export default function RocketBuilder() {
       </div>
 
       {/* ── Parts drawer ── */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-0 pb-1 md:col-start-2 md:row-start-1 md:mt-24 md:rounded-3xl md:border md:border-white/10 md:bg-white/[0.035] md:p-3">
+      <div className="flex-1 min-h-0 overflow-y-auto px-0 pb-1 md:rounded-3xl md:border md:border-white/10 md:bg-white/[0.035] md:p-3">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-2">
           {categoryParts.map((p) => {
             const isUnlk = unlocked.has(p.id);
@@ -237,6 +273,7 @@ export default function RocketBuilder() {
             );
           })}
         </div>
+      </div>
       </div>
       </section>
 

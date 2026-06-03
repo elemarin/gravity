@@ -43,7 +43,12 @@ export default function HUDOverlay({
   const altLabel = state ? fmtAlt(state.altitude) : '0m';
   const spdLabel = state ? fmtSpd(state.speed) : '0m/s';
   const fuelPct  = state ? Math.max(0, Math.min(100, Math.round(state.fuel))) : 100;
-  const fuelColor = fuelPct > 50 ? '#2ee59d' : fuelPct > 20 ? '#ffd54a' : '#ff5577';
+  // Steps through green → yellow → orange → red as the active stage drains.
+  const fuelColor =
+    fuelPct > 50 ? '#2ee59d' :
+    fuelPct > 25 ? '#ffd54a' :
+    fuelPct > 10 ? '#ff9a45' : '#ff5577';
+  const fuelLow = fuelPct <= 10;
 
   const apo  = state?.apoapsis;
   const peri = state?.periapsis;
@@ -55,12 +60,45 @@ export default function HUDOverlay({
   return (
     <div className="pointer-events-none absolute inset-0 z-10 font-pixel">
 
-      {/* Fuel bar — very top edge, full width */}
-      <div className="absolute inset-x-0 top-0 h-[2px] bg-white/5">
+      {/* Vertical fuel gauge — left edge, hard to miss. Fills bottom-up and
+          steps colour as the active stage drains. */}
+      <div
+        className="absolute z-20 flex flex-col items-center gap-1 select-none
+                   left-[calc(0.5rem+env(safe-area-inset-left))] top-1/2 -translate-y-1/2"
+      >
+        <span className="text-[8px] tracking-[0.2em] text-dim/80">FUEL</span>
         <div
-          className="h-full transition-[width] duration-300"
-          style={{ width: `${fuelPct}%`, background: fuelColor, boxShadow: `0 0 4px ${fuelColor}` }}
-        />
+          className="relative w-3.5 h-[36vh] max-h-44 min-h-[7rem] rounded-full overflow-hidden
+                     border border-white/25"
+          style={{
+            background: 'rgba(4,6,14,0.7)',
+            boxShadow: '0 0 10px rgba(0,0,0,0.45), inset 0 0 6px rgba(0,0,0,0.6)',
+          }}
+        >
+          {/* quarter tick marks */}
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              backgroundImage:
+                'repeating-linear-gradient(to top, transparent 0, transparent calc(25% - 1px), rgba(255,255,255,0.16) calc(25% - 1px), rgba(255,255,255,0.16) 25%)',
+            }}
+          />
+          {/* fill */}
+          <div
+            className={`absolute inset-x-0 bottom-0 transition-[height] duration-300 ${fuelLow ? 'pixel-blink' : ''}`}
+            style={{
+              height: `${fuelPct}%`,
+              background: `linear-gradient(to top, ${fuelColor}, ${fuelColor}bb)`,
+              boxShadow: `0 0 8px ${fuelColor}`,
+            }}
+          />
+        </div>
+        <span
+          className="text-[12px] font-black tabular-nums leading-none"
+          style={{ color: fuelColor, textShadow: `0 0 6px ${fuelColor}99` }}
+        >
+          {fuelPct}%
+        </span>
       </div>
 
       {/* Main HUD card — top right */}

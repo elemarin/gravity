@@ -137,9 +137,16 @@ export function loadPlan(): FlightPlan {
     if (!parsed?.launch || !Array.isArray(parsed.nodes)) return clonePlan(DEFAULT_PLAN);
     // Migrate legacy scenarioId → launch body + destination.
     const legacyDest = parsed.scenarioId === 'moon-transfer' ? 'moon' : 'orbit';
+    const mission = parsed.mission && typeof parsed.mission.kind === 'string'
+      ? {
+          kind: parsed.mission.kind,
+          orbitKm: Number.isFinite(parsed.mission.orbitKm) ? parsed.mission.orbitKm : 120,
+        }
+      : undefined;
     return {
       launchBodyId: typeof parsed.launchBodyId === 'string' ? parsed.launchBodyId : 'earth',
       destinationId: typeof parsed.destinationId === 'string' ? parsed.destinationId : legacyDest,
+      mission,
       launch: {
         heading: Number.isFinite(parsed.launch.heading) ? parsed.launch.heading : 0,
         power:   Number.isFinite(parsed.launch.power) ? parsed.launch.power : 1,

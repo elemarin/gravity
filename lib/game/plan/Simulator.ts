@@ -42,6 +42,14 @@ export type SimState = {
   deployedLander: boolean;
   deployedParachute: boolean;
   landingAssist: boolean;   // powered-descent autopilot engaged
+  ascentAssist: boolean;    // powered-ascent autopilot engaged (relaunch)
+  captureAssist: boolean;   // orbital-capture autopilot engaged (brake to circular)
+  captureTargetId: string | null; // body the capture autopilot brakes relative to
+  deorbitAssist: boolean;   // de-orbit autopilot engaged (lower periapsis then land)
+  departAssist: boolean;    // departure autopilot engaged (burn until escaping home-ward)
+  departFromId: string | null; // body being escaped during a departure burn
+  landedTime: number | null;   // sim seconds of first soft touchdown
+  relaunchStart: number | null;// sim seconds a relaunch was commanded
   elapsed: number;          // sim seconds
   phase: SimPhase;
   maxAltitude: number;      // km
@@ -90,6 +98,14 @@ export class Simulator {
       deployedLander: false,
       deployedParachute: false,
       landingAssist: false,
+      ascentAssist: false,
+      captureAssist: false,
+      captureTargetId: null,
+      deorbitAssist: false,
+      departAssist: false,
+      departFromId: null,
+      landedTime: null,
+      relaunchStart: null,
       elapsed: 0,
       phase: 'prelaunch',
       maxAltitude: 0,
@@ -112,7 +128,23 @@ export class Simulator {
 
   /** True once the flight has reached a terminal state. */
   get finished(): boolean {
-    return this.state.phase === 'landed' || this.state.phase === 'destroyed';
+    if (this.state.phase === 'destroyed') return true;
+    // A soft landing isn't terminal while a relaunch (return trip) is still
+    // pending — the craft will lift off again and carry on.
+    if (this.state.phase === 'landed') return !this.hasPendingRelaunch();
+    return false;
+  }
+
+  private hasPendingRelaunch(): boolean {
+    return this.plan.nodes.some(
+      (n) => n.trigger.type === 'after-touchdown' && !this.state.firedNodeIds.has(n.id),
+    );
+  }
+
+  /** Whether the active stage can currently produce thrust (engine + fuel). */
+  private hasThrust(): boolean {
+    const st = this.cfg.stages[this.state.activeStage];
+    return !!st && st.thrust > 0 && (this.state.stageFuel[this.state.activeStage] ?? 0) > 0.001;
   }
 
   body(): Body { return dominantBody(this.cfg.bodies, this.state.position); }
@@ -129,7 +161,9 @@ export class Simulator {
     s.justDeployedLander = false;
     s.justDeployedParachute = false;
     s.justIgnited = false;
-    if (s.phase === 'landed' || s.phase === 'destroyed') return;
+    // Destroyed is terminal; a soft landing keeps simulating so a pending
+    // relaunch (return trip) can lift the craft off again.
+    if (s.phase === 'destroyed') return;
 
     const body = this.body();
     const up = new THREE.Vector3().subVectors(s.position, body.center).normalize();
@@ -153,6 +187,21 @@ export class Simulator {
       }
     }
 
+    // --- De-orbit autopilot (the LAND button) ---
+    // Burns retrograde to drop periapsis below the surface, then hands off to the
+    // powered-descent autopilot for a soft touchdown from any orbit.
+    if (s.deorbitAssist) {
+      s.attitude = 'retrograde';
+      const lowTarget = body.atmosphereHeight > 0 ? body.atmosphereHeight * 0.2 : body.radius * 0.04;
+      if (s.periapsis > lowTarget) {
+        s.throttle = 1;
+      } else {
+        s.throttle = 0;
+        s.deorbitAssist = false;
+        s.landingAssist = true;
+      }
+    }
+
     // --- Powered-descent autopilot ---
     // Holds retrograde and throttles bang-bang to keep speed under a safe
     // altitude-scaled limit, producing a soft touchdown on the target world.
@@ -161,6 +210,84 @@ export class Simulator {
       const speedMs = s.velocity.length() * 1000;
       const safeMs = LAND_FLOOR_MS + altitude * LAND_RATE;
       s.throttle = speedMs > safeMs ? 1 : 0;
+
+      // Stage the lander LATE: only once the upper stage has braked the bulk of
+      // the arrival speed and we're low and slow, so the lander's small tank
+      // just finishes the touchdown instead of fighting the whole descent.
+      if (this.cfg.landerIndex >= 0 && !s.deployedLander) {
+        const lowEnough = altitude < Math.max(2, body.radius * 0.35);
+        const slowEnough = speedMs < 90;
+        const onLanderStage = s.activeStage >= this.cfg.landerIndex;
+        if (lowEnough && slowEnough && !onLanderStage) this.doDeployLander();
+      }
+    }
+
+    // --- Powered-ascent autopilot (relaunch from a surface) ---
+    // Flies an automatic gravity turn up to a low orbit around the current body,
+    // then circularizes and hands control back to the plan. Used by return
+    // missions after a touchdown.
+    if (s.ascentAssist) {
+      const targetApo = body.radius * 0.7 + Math.max(body.atmosphereHeight, body.radius * 0.5);
+      const turnSpan = Math.max(1, body.radius + body.atmosphereHeight);
+      if (s.apoapsis < targetApo) {
+        const frac = THREE.MathUtils.clamp(altitude / turnSpan, 0, 1);
+        s.attitude = 'manual';
+        s.angle = THREE.MathUtils.lerp(5, 88, frac);
+        s.throttle = 1;
+      } else if (radialVel > 0.0008) {
+        s.throttle = 0;             // coasting up to apoapsis
+      } else {
+        s.attitude = 'prograde';    // circularize at the top
+        if (s.periapsis < targetApo * 0.6) {
+          s.throttle = 1;
+        } else {
+          s.throttle = 0;
+          s.ascentAssist = false;   // in orbit — let the plan take over
+        }
+      }
+    }
+
+    // --- Orbital-capture autopilot ---
+    // Brakes retrograde whenever the craft is moving faster than the local
+    // circular speed, settling an arrival hyperbola/ellipse into a near-circular
+    // orbit around whichever body now dominates (the destination on arrival).
+    if (s.captureAssist) {
+      // Brake relative to the *target* body (not whichever body momentarily
+      // dominates), so the burn starts on approach — at the SOI edge the target
+      // may still be gravitationally out-ranked by the launch world.
+      const tgt = this.cfg.bodies.find((b) => b.id === s.captureTargetId) ?? body;
+      const rNow = Math.max(s.position.distanceTo(tgt.center), tgt.radius);
+      const altT = rNow - tgt.radius;
+      const vCirc = Math.sqrt(tgt.GM / rNow);
+      const speed = s.velocity.length();
+      s.attitude = 'retrograde';
+      // Brake to a safe descent whenever we're low OR the approach is steep
+      // (closing fast on the target's surface), so a near-radial airless arrival
+      // is arrested in time instead of slamming in.
+      const tgtRadialVel = s.position.clone().sub(tgt.center).normalize().dot(s.velocity);
+      const safeMs = LAND_FLOOR_MS + altT * LAND_RATE;
+      const closingFast = tgtRadialVel < 0 && (-tgtRadialVel * 1000) > safeMs;
+      if (altT < tgt.radius * 1.5 || closingFast) {
+        s.throttle = speed * 1000 > safeMs ? 1 : 0;
+      } else {
+        // Higher up and not plunging — shed excess speed toward a circular orbit.
+        s.throttle = speed > vCirc * 1.06 ? 1 : 0;
+      }
+    }
+
+    // --- Departure autopilot (the return-home burn) ---
+    // Burns prograde to climb out of the body it is leaving and cuts the instant
+    // a different body takes over gravity — i.e. once it has escaped back toward
+    // home — so the return burn can never run away into deep space.
+    if (s.departAssist) {
+      s.attitude = 'prograde';
+      if (s.departFromId !== null && body.id !== s.departFromId) {
+        s.throttle = 0;
+        s.departAssist = false;
+        s.departFromId = null;
+      } else {
+        s.throttle = 1;
+      }
     }
 
     // --- Automatic attitude hold (prograde / retrograde) ---
@@ -236,6 +363,10 @@ export class Simulator {
     s.prevRadialVel = radialVel;
     s.phase = this.determinePhase(body);
     if (s.phase === 'orbit') s.everOrbit = true;
+    // Record the first soft touchdown so an after-touchdown relaunch can time
+    // off it; clear it again once the craft is airborne and climbing.
+    if (s.phase === 'landed' && s.landedTime === null) s.landedTime = s.elapsed;
+    else if (s.phase !== 'landed' && altitude > body.radius * 0.01) s.landedTime = null;
   }
 
   /**
@@ -279,6 +410,9 @@ export class Simulator {
         return this.state.periapsis >= (t.value ?? 0);
       case 'on-fuel-empty':
         return (this.state.stageFuel[this.state.activeStage] ?? 0) <= 0.01;
+      case 'after-touchdown':
+        return this.state.landedTime !== null &&
+               this.state.elapsed >= this.state.landedTime + (t.value ?? 0);
       case 'at-soi-entry': {
         const tgt = this.cfg.bodies.find((b) => b.id === t.targetBodyId);
         if (!tgt) return false;
@@ -288,14 +422,18 @@ export class Simulator {
         // Fire when, from a parking orbit, the craft sits roughly opposite the
         // target so that a prograde burn raises apoapsis toward it.
         const tgt = this.cfg.bodies.find((b) => b.id === t.targetBodyId);
-        if (!tgt || altitude < 25) return false;
+        if (!tgt) return false;
         const central = this.body();
+        // Gate on altitude so we burn from orbit, scaled down for small bodies
+        // (a low lunar orbit is well under the 25 km Earth threshold).
+        if (altitude < Math.min(25, central.radius * 0.5)) return false;
         if (tgt.id === central.id) return false;
         const craftDir = new THREE.Vector3().subVectors(this.state.position, central.center).normalize();
         const tgtDir = new THREE.Vector3().subVectors(tgt.center, central.center).normalize();
-        // Tight alignment: a prograde burn here puts apoapsis within ~10° of the
-        // target so its (large) sphere of influence captures the craft.
-        return craftDir.dot(tgtDir) < -0.985;
+        // Tight alignment: burning when the craft is near-exactly opposite the
+        // target lands the resulting apoapsis close enough that the target's
+        // gravity takes over (its dominance region is tighter than its SOI).
+        return craftDir.dot(tgtDir) < -0.997;
       }
     }
   }
@@ -303,7 +441,15 @@ export class Simulator {
   private applyActions(node: Maneuver) {
     const s = this.state;
     const a = node.actions;
-    if (a.descend) { s.landingAssist = true; s.attitude = 'retrograde'; }
+    if (a.descend) { s.landingAssist = true; s.ascentAssist = false; s.captureAssist = false; s.attitude = 'retrograde'; }
+    if (a.ascend)  { s.ascentAssist = true; s.landingAssist = false; s.captureAssist = false; s.relaunchStart = s.elapsed; }
+    if (a.capture) { s.captureAssist = true; s.captureTargetId = node.trigger.targetBodyId ?? null; s.landingAssist = false; s.ascentAssist = false; }
+    if (a.depart)  { s.departAssist = true; s.departFromId = this.body().id; s.captureAssist = false; s.landingAssist = false; s.ascentAssist = false; }
+    // An explicit throttle command (e.g. a manual burn) takes manual control
+    // back from the autopilots so the craft can leave orbit.
+    if (a.throttle !== undefined && !a.descend && !a.ascend && !a.capture && !a.depart) {
+      s.captureAssist = false; s.departAssist = false;
+    }
     if (a.attitude !== undefined) s.attitude = a.attitude;
     if (a.heading !== undefined) { s.angle = THREE.MathUtils.clamp(a.heading, -90, 90); s.attitude = 'manual'; }
     if (a.throttle !== undefined && !a.descend) s.throttle = THREE.MathUtils.clamp(a.throttle, 0, 1);
@@ -323,6 +469,17 @@ export class Simulator {
     if (!this.cfg.hasParachute || this.state.deployedParachute) return false;
     if (this.state.phase === 'landed' || this.state.phase === 'destroyed') return false;
     return this.doDeployParachute();
+  }
+
+  /** Real-time user-initiated de-orbit + landing (the LAND button). */
+  manualDeorbit(): boolean {
+    if (this.state.phase === 'landed' || this.state.phase === 'destroyed') return false;
+    const s = this.state;
+    s.deorbitAssist = true;
+    s.captureAssist = false;
+    s.ascentAssist = false;
+    s.departAssist = false;
+    return true;
   }
 
   /** Real-time user-initiated lander deployment. */
@@ -477,7 +634,9 @@ export class Simulator {
     const onGround = altitude < 0.01;
     const speedMs = s.velocity.length() * 1000;
 
-    if (onGround && speedMs < 1 && s.throttle < 0.01) {
+    // At rest on the surface with the engine idle — or unable to thrust (out of
+    // fuel) — counts as landed, which keeps a failed relaunch from hanging.
+    if (onGround && speedMs < 1 && (s.throttle < 0.01 || !this.hasThrust())) {
       return s.maxAltitude > 0.1 ? 'landed' : 'prelaunch';
     }
 

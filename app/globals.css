@@ -57,6 +57,37 @@ body::after {
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
+/* Fluid range slider — large grabbable thumb that drags on mouse and touch.
+   The global `touch-action: none` would otherwise stop touch-drag, so we
+   re-enable the gesture on the control itself. */
+.range-fluid {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 24px;
+  background: transparent;
+  cursor: pointer;
+  touch-action: pan-x;
+}
+.range-fluid::-webkit-slider-runnable-track {
+  height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.16);
+}
+.range-fluid::-moz-range-track {
+  height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.16);
+}
+.range-fluid::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 22px; height: 22px; margin-top: -8px; border-radius: 50%;
+  background: #00e5ff; border: 2px solid #04060e;
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.6);
+}
+.range-fluid::-moz-range-thumb {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: #00e5ff; border: 2px solid #04060e;
+  box-shadow: 0 0 8px rgba(0, 229, 255, 0.6);
+}
+.range-fluid:disabled { opacity: 0.3; cursor: default; }
+
 @layer components {
   .panel {
     @apply rounded-xl border border-white/15;

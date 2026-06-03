@@ -100,6 +100,15 @@ export class Rocket {
     this.flame.update(dt, pos, dir, fuel > 0 ? s.throttle : 0, engineId);
   }
 
+  /** Local height of the full stack (units), used to auto-frame the pad view. */
+  getHeight(): number {
+    const box = new THREE.Box3().setFromObject(this.mesh);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const h = Math.max(size.x, size.y, size.z);
+    return Number.isFinite(h) && h > 0 ? h : 3;
+  }
+
   emitStageBurst() {
     const up = new THREE.Vector3().subVectors(this.position, this.upCenter).normalize();
     this.fx.burst(this.position.clone().addScaledVector(up, 0.1), up.clone().negate(), 8, 0xffaa44, 1.0);

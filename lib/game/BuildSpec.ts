@@ -17,6 +17,20 @@ export function getStages(build: RocketBuild): StageSpec[] {
   return [{ engineId: build.engineId, tankIds: build.tankIds }];
 }
 
+/** Every part id referenced by a build — used to check unlock requirements. */
+export function buildPartIds(build: RocketBuild): string[] {
+  const ids = new Set<string>();
+  getStages(build).forEach((s) => {
+    ids.add(s.engineId);
+    s.tankIds.forEach((t) => ids.add(t));
+  });
+  (build.boosterIds ?? []).forEach((id) => ids.add(id));
+  ids.add(build.noseId);
+  (build.utilityIds ?? []).forEach((id) => ids.add(id));
+  if (build.landerId) ids.add(build.landerId);
+  return Array.from(ids);
+}
+
 export type StageStats = {
   dryMass:      number;
   fuelMass:     number;

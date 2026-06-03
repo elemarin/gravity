@@ -25,6 +25,9 @@ import NavDrawer from './NavDrawer';
 type ToastInfo = { id: number; title: string; subtitle: string };
 type PreviewInfo = { apoapsis: number; periapsis: number; impact: boolean };
 
+// Time-warp ladder. Long interplanetary coasts need the high multipliers.
+const WARP_STEPS = [1, 2, 4, 8, 16, 25, 50, 75, 100];
+
 export default function GameScreen() {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Game | null>(null);
@@ -169,7 +172,10 @@ export default function GameScreen() {
   }, []);
 
   const handleWarp = useCallback(() => {
-    setTimeScale((ts) => (ts >= 16 ? 1 : ts >= 8 ? 16 : ts >= 4 ? 8 : ts * 2));
+    setTimeScale((ts) => {
+      const i = WARP_STEPS.indexOf(ts);
+      return WARP_STEPS[(i + 1) % WARP_STEPS.length];
+    });
   }, []);
 
   const handleSkip = useCallback(() => {
@@ -179,6 +185,7 @@ export default function GameScreen() {
 
   const handleStage = useCallback(() => gameRef.current?.manualStage(), []);
   const handleLander = useCallback(() => gameRef.current?.manualLander(), []);
+  const handleLand = useCallback(() => gameRef.current?.manualLand(), []);
 
   const handleLaunchSite = useCallback((id: string) => {
     const cur = planRef.current;
@@ -191,6 +198,8 @@ export default function GameScreen() {
   const canSkip = mode === 'sim' && !finished && phase !== 'prelaunch';
   const canStage = flightState?.canStage ?? false;
   const landerDeployed = flightState?.landerDeployed ?? false;
+  // Offer the de-orbit/land button once the craft is actually in a stable orbit.
+  const canLand = mode === 'sim' && !finished && phase === 'orbit';
 
   const dest = plan ? getDestination(plan.destinationId) : null;
   const bodies = plan ? buildFlightBodies(plan.launchBodyId, dest?.targetId ?? null) : [];
@@ -254,6 +263,7 @@ export default function GameScreen() {
           hasLander={hasLander}
           hasParachute={hasParachute}
           landerDeployed={landerDeployed}
+          canLand={canLand}
           parachuteDeployed={flightState?.parachuteDeployed ?? false}
           onEdit={handleEdit}
           onReplay={handleReplay}
@@ -261,6 +271,7 @@ export default function GameScreen() {
           onSkip={handleSkip}
           onStage={handleStage}
           onLander={handleLander}
+          onLand={handleLand}
         />
       )}
 
