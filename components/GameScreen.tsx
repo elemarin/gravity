@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Game } from '@/lib/game/Game';
 import type { FlightState, MissionResult, RocketBuild } from '@/lib/game/types';
-import type { FlightPlan } from '@/lib/game/plan/FlightPlan';
-import { buildFlightBodies, getDestination, bodyDef } from '@/lib/game/bodies';
+import { MISSION_LABELS, type FlightPlan } from '@/lib/game/plan/FlightPlan';
+import { buildFlightBodies, destinationTargetId, bodyDef } from '@/lib/game/bodies';
+import { autoPlan, defaultOrbitKm } from '@/lib/game/plan/AutoPlan';
 import {
   loadBuild, loadCompletedMilestones, addCompletedMilestone, addUnlockedParts,
   loadPlan, savePlan, loadBases, addBase, loadGoals, addGoal,
@@ -27,6 +28,28 @@ type PreviewInfo = { apoapsis: number; periapsis: number; impact: boolean };
 
 // Time-warp ladder. Long interplanetary coasts need the high multipliers.
 const WARP_STEPS = [1, 2, 4, 8, 16, 25, 50, 75, 100];
+
+function bodyNameWithArticle(id: string): string {
+  const name = bodyDef(id).name;
+  return name === 'Moon' ? 'the Moon' : name;
+}
+
+function missionObjective(plan: FlightPlan | null): string {
+  if (!plan) return 'Launch';
+  const kind = plan.mission?.kind ?? 'orbit';
+  const targetId = destinationTargetId(plan.destinationId, plan.launchBodyId);
+  if (targetId) {
+    const target = bodyNameWithArticle(targetId);
+    if (kind === 'orbit') return `Orbit ${target}`;
+    if (kind === 'land') return `Land on ${target}`;
+    return `${MISSION_LABELS[kind].replace(' & ', ' and ')} from ${target}`;
+  }
+  const launchBody = bodyNameWithArticle(plan.launchBodyId);
+  const label = MISSION_LABELS[kind].replace(' & ', ' and ');
+  return kind === 'land' || kind === 'land-return'
+    ? `${label} on ${launchBody}`
+    : `${label} around ${launchBody}`;
+}
 
 export default function GameScreen() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -168,7 +191,7 @@ export default function GameScreen() {
   const handleReplay = useCallback(() => {
     setMissionResult(null);
     setTimeScale(1);
-    gameRef.current?.play();
+    gameRef.current?.edit();
   }, []);
 
   const handleWarp = useCallback(() => {
@@ -190,7 +213,12 @@ export default function GameScreen() {
   const handleLaunchSite = useCallback((id: string) => {
     const cur = planRef.current;
     if (!cur || cur.launchBodyId === id) return;
-    handlePlanChange({ ...cur, launchBodyId: id });
+    const mission = cur.mission ?? { kind: 'orbit' as const, orbitKm: defaultOrbitKm(id) };
+    const targetId = destinationTargetId(cur.destinationId, id);
+    const kind = targetId
+      ? mission.kind
+      : (mission.kind === 'land' || mission.kind === 'land-return' ? 'land' : 'orbit');
+    handlePlanChange(autoPlan(id, cur.destinationId, { ...mission, kind }));
   }, [handlePlanChange]);
 
   const phase = flightState?.phase ?? 'prelaunch';
@@ -201,8 +229,9 @@ export default function GameScreen() {
   // Offer the de-orbit/land button once the craft is actually in a stable orbit.
   const canLand = mode === 'sim' && !finished && phase === 'orbit';
 
-  const dest = plan ? getDestination(plan.destinationId) : null;
-  const bodies = plan ? buildFlightBodies(plan.launchBodyId, dest?.targetId ?? null) : [];
+  const bodies = plan
+    ? buildFlightBodies(plan.launchBodyId, destinationTargetId(plan.destinationId, plan.launchBodyId))
+    : [];
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-bg">
@@ -215,7 +244,12 @@ export default function GameScreen() {
 
       {mode === 'sim' && (
         <>
-          <HUDOverlay state={flightState} nextTarget={nextTarget} timeScale={timeScale} />
+          <HUDOverlay
+            state={flightState}
+            nextTarget={nextTarget}
+            timeScale={timeScale}
+            objective={missionObjective(plan)}
+          />
           <StageStack state={flightState} />
         </>
       )}

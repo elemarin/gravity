@@ -1,42 +1,52 @@
-/* Headless sanity checks for the deterministic Simulator + auto-planner.
- * Run: npx tsx scripts/simtest.ts
+/* Deterministic Simulator + auto-planner regression tests.
+ * Run: npm run test:sim
  */
-import { Simulator } from '../lib/game/plan/Simulator';
+import { Simulator, SimPhase } from '../lib/game/plan/Simulator';
 import { autoPlan } from '../lib/game/plan/AutoPlan';
-import { buildSimStages } from '../lib/game/BuildSpec';
-import { buildFlightBodies, getDestination, bodyDef } from '../lib/game/bodies';
+import { MissionKind } from '../lib/game/plan/FlightPlan';
+import { ROCKET_PRESETS, ROUTE_PROVER_BUILD } from '../lib/game/career/Presets';
+import { buildFlightSimSetup } from '../lib/game/SimSetup';
 import { RocketBuild } from '../lib/game/types';
-import * as THREE from 'three';
 
 const DT = 1 / 60;
 const MAX_STEPS = 4_000_000;
 
-// A beefy 3-stage rocket with a heavy lander and parachute — enough delta-v to
-// exercise transfer + capture/descent + return without fuel being the blocker.
-const BIG: RocketBuild = {
-  engineId: 'engine-heavy',
-  tankIds: ['tank-xl', 'tank-xl'],
-  noseId: 'capsule-crew',
-  utilityIds: ['parachute', 'landing-legs'],
-  boosterIds: ['booster-liquid', 'booster-liquid'],
-  landerId: 'lander-heavy',
-  stages: [
-    { engineId: 'engine-heavy', tankIds: ['tank-xl', 'tank-xl', 'tank-xl'] },
-    { engineId: 'engine-heavy', tankIds: ['tank-xl', 'tank-xl'] },
-    { engineId: 'engine-vacuum', tankIds: ['tank-large', 'tank-large'] },
-  ],
+type RunResult = {
+  label: string;
+  finished: boolean;
+  everOrbit: boolean;
+  phase: SimPhase;
+  bodyId: string;
+  landedBodyId: string | null;
+  touchdowns: number;
+  maxAlt: number;
+  reached: string[];
+  plannedOrbitKm: number | undefined;
+  steps: number;
 };
 
-function run(label: string, launchId: string, destId: string, kind: any, orbitKm?: number) {
+const ROUTE_PROVER = ROUTE_PROVER_BUILD;
+
+function expect(label: string, condition: boolean, details: string) {
+  if (!condition) throw new Error(`${label}: ${details}`);
+}
+
+function expectReached(result: RunResult, bodyId: string) {
+  expect(result.label, result.reached.includes(bodyId), `expected reached=[${result.reached.join(',')}] to include ${bodyId}`);
+}
+
+function run(
+  label: string,
+  launchId: string,
+  destId: string,
+  kind: MissionKind,
+  orbitKm?: number,
+  build: RocketBuild = ROUTE_PROVER,
+  maxSteps: number = MAX_STEPS,
+): RunResult {
   const plan = autoPlan(launchId, destId, { kind, orbitKm });
-  const dest = getDestination(destId);
-  const bodies = buildFlightBodies(launchId, dest.targetId);
-  const lb = bodyDef(launchId);
-  const start = bodies[0].center.clone().add(new THREE.Vector3(0, bodies[0].radius + 0.001, 0));
-  const sim = new Simulator(
-    { ...buildSimStages(BIG), bodies, startPosition: start },
-    plan,
-  );
+  const setup = buildFlightSimSetup(build, plan);
+  const sim = new Simulator(setup.config, plan);
   sim.reset();
 
   let steps = 0;
@@ -44,7 +54,7 @@ function run(label: string, launchId: string, destId: string, kind: any, orbitKm
   let touchdowns = 0;
   let prevLanded = false;
   let maxAlt = 0;
-  for (; steps < MAX_STEPS; steps++) {
+  for (; steps < maxSteps; steps++) {
     sim.step(DT);
     const s = sim.state;
     everOrbit = everOrbit || s.everOrbit;
@@ -54,23 +64,86 @@ function run(label: string, launchId: string, destId: string, kind: any, orbitKm
     prevLanded = landedNow;
     if (sim.finished) break;
   }
+
   const s = sim.state;
-  const reached = Array.from(s.reachedBodyIds).join(',');
-  const finished = sim.finished;
+  const result: RunResult = {
+    label,
+    finished: sim.finished,
+    everOrbit,
+    phase: s.phase,
+    bodyId: sim.body().id,
+    landedBodyId: s.landedBodyId,
+    touchdowns,
+    maxAlt,
+    reached: Array.from(s.reachedBodyIds),
+    plannedOrbitKm: plan.mission?.orbitKm,
+    steps,
+  };
+
   const simSecs = (steps * DT).toFixed(0);
   console.log(
-    `${label.padEnd(26)} | finished=${finished ? 'Y' : 'N'} phase=${s.phase.padEnd(9)} ` +
-    `orbit=${everOrbit ? 'Y' : 'N'} maxAlt=${maxAlt.toFixed(0)}km touchdowns=${touchdowns} ` +
-    `reached=[${reached}] simT=${simSecs}s steps=${steps}`,
+    `${label.padEnd(28)} | finished=${result.finished ? 'Y' : 'N'} phase=${result.phase.padEnd(9)} ` +
+    `body=${result.bodyId.padEnd(5)} orbit=${result.everOrbit ? 'Y' : 'N'} ` +
+    `maxAlt=${result.maxAlt.toFixed(0)}km touchdowns=${result.touchdowns} ` +
+    `landed=${result.landedBodyId ?? '-'} reached=[${result.reached.join(',')}] simT=${simSecs}s`,
   );
-  return { finished, everOrbit, phase: s.phase, touchdowns, maxAlt, reached };
+  return result;
 }
 
-console.log('— Auto-plan simulation sanity —');
-run('Earth orbit @120',   'earth', 'orbit', 'orbit', 120);
-run('Earth orbit @300',   'earth', 'orbit', 'orbit', 300);
-run('Moon orbit',         'earth', 'moon',  'orbit', 60);
-run('Moon orbit & return','earth', 'moon',  'orbit-return', 60);
-run('Moon land',          'earth', 'moon',  'land');
-run('Moon land & return', 'earth', 'moon',  'land-return');
-run('Mars land',          'earth', 'mars',  'land');
+function assertFinished(result: RunResult) {
+  expect(result.label, result.finished, `expected mission to finish within ${MAX_STEPS} steps`);
+}
+
+function assertOrbit(result: RunResult, bodyId: string) {
+  // Orbit missions don't auto-finish — the sim runs until the step limit or
+  // perturbations cause a natural reentry. We verify the craft reached a
+  // stable orbit around the correct body at some point during the run.
+  expect(result.label, result.everOrbit, 'expected everOrbit=true');
+  expectReached(result, bodyId);
+}
+
+function assertLanding(result: RunResult, bodyId: string) {
+  assertFinished(result);
+  expect(result.label, result.phase === 'landed', `expected phase=landed, got ${result.phase}`);
+  expect(result.label, result.landedBodyId === bodyId, `expected landedBody=${bodyId}, got ${result.landedBodyId ?? '-'}`);
+  expect(result.label, result.touchdowns >= 1, 'expected at least one touchdown');
+  expectReached(result, bodyId);
+}
+
+console.log('-- Auto-plan simulation regressions --');
+
+const ORBIT_STEPS = 200_000;
+
+const lowEarth = run('Earth orbit requested 60', 'earth', 'orbit', 'orbit', 60, ROUTE_PROVER, ORBIT_STEPS);
+assertOrbit(lowEarth, 'earth');
+expect(lowEarth.label, (lowEarth.plannedOrbitKm ?? 0) >= 100, `expected low Earth orbit to clamp >= 100km, got ${lowEarth.plannedOrbitKm}`);
+
+assertOrbit(run('Earth orbit @300', 'earth', 'orbit', 'orbit', 300, ROUTE_PROVER, ORBIT_STEPS), 'earth');
+
+const moonOrbit = run('Moon orbit', 'earth', 'moon', 'orbit', 60);
+assertOrbit(moonOrbit, 'moon');
+expectReached(moonOrbit, 'earth');
+
+const moonOrbitReturn = run('Moon orbit & return', 'earth', 'moon', 'orbit-return', 60);
+assertLanding(moonOrbitReturn, 'earth');
+expectReached(moonOrbitReturn, 'moon');
+
+const moonLand = run('Moon land', 'earth', 'moon', 'land');
+assertLanding(moonLand, 'moon');
+expectReached(moonLand, 'earth');
+
+const moonLanderPreset = ROCKET_PRESETS.find((p) => p.id === 'moon-lander');
+expect('Moon Lander preset exists', !!moonLanderPreset, 'expected moon-lander preset to exist');
+const moonPresetLand = run('Moon Lander preset land', 'earth', 'moon', 'land', undefined, moonLanderPreset!.build);
+assertLanding(moonPresetLand, 'moon');
+expectReached(moonPresetLand, 'earth');
+
+const moonLandReturn = run('Moon land & return', 'earth', 'moon', 'land-return');
+assertLanding(moonLandReturn, 'earth');
+expectReached(moonLandReturn, 'moon');
+
+const marsLand = run('Mars land', 'earth', 'mars', 'land');
+assertLanding(marsLand, 'mars');
+expectReached(marsLand, 'earth');
+
+console.log('All simulation regression tests passed.');

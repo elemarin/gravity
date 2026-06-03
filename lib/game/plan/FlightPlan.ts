@@ -18,6 +18,7 @@ export type TriggerType =
   | 'at-transfer-window'  // aligned to burn toward targetBodyId
   | 'on-fuel-empty'       // active stage runs dry
   | 'at-soi-entry'        // enters targetBodyId's sphere of influence
+  | 'after-orbit'         // after reaching orbit around a non-target body
   | 'after-touchdown';    // value = seconds after a soft landing (for relaunch)
 
 export type Trigger = {
@@ -122,6 +123,7 @@ export const TRIGGER_LABELS: Record<TriggerType, string> = {
   'at-transfer-window': 'Transfer window',
   'on-fuel-empty': 'On fuel empty',
   'at-soi-entry':  'At SOI entry',
+  'after-orbit':   'After orbit',
   'after-touchdown': 'After landing',
 };
 
@@ -137,6 +139,7 @@ export function describeTrigger(t: Trigger): string {
     case 'at-transfer-window': return 'Transfer window';
     case 'on-fuel-empty':return 'Fuel empty';
     case 'at-soi-entry': return `Enter ${t.targetBodyId ?? 'SOI'}`;
+    case 'after-orbit':  return `Orbit, then ${t.targetBodyId ?? 'depart'}`;
     case 'after-touchdown': return `T+${Math.round(t.value ?? 0)}s after landing`;
   }
 }

@@ -105,6 +105,7 @@ export type Destination = {
 
 export const DESTINATIONS: Destination[] = [
   { id: 'orbit', name: 'Orbit',   targetId: null,    objective: 'Reach a stable orbit above the Kármán line.' },
+  { id: 'earth', name: 'Earth',   targetId: 'earth', objective: 'Transfer to Earth for orbit or landing.' },
   { id: 'moon',  name: 'Moon',    targetId: 'moon',  objective: 'Transfer to the Moon and reach it.' },
   { id: 'mars',  name: 'Mars',    targetId: 'mars',  objective: 'Transfer to Mars — the red planet awaits.' },
   { id: 'venus', name: 'Venus',   targetId: 'venus', objective: 'Brave the thick skies of Venus.' },
@@ -112,6 +113,12 @@ export const DESTINATIONS: Destination[] = [
 
 export function getDestination(id: string): Destination {
   return DESTINATIONS.find((d) => d.id === id) ?? DESTINATIONS[0];
+}
+
+/** Returns the transfer target, or null when the destination is the launch body itself. */
+export function destinationTargetId(destinationId: string, launchId: string): string | null {
+  const targetId = getDestination(destinationId).targetId;
+  return targetId && targetId !== launchId ? targetId : null;
 }
 
 // ── Legacy scenario shim (kept so older saves/imports still resolve) ───────

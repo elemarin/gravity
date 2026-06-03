@@ -2,6 +2,14 @@ import * as THREE from 'three';
 
 export type FlightPhase = 'prelaunch' | 'flight' | 'orbit' | 'reentry' | 'landed' | 'destroyed';
 
+export type GuidanceStep = {
+  id: string;
+  index: number;
+  trigger: string;
+  action: string;
+  status: 'done' | 'current' | 'pending';
+};
+
 export type FlightState = {
   position: THREE.Vector3;
   velocity: THREE.Vector3;
@@ -25,6 +33,7 @@ export type FlightState = {
   landerDeployed?: boolean;     // a lander payload has separated
   targetName?: string;          // destination body name, if any
   targetDistance?: number;      // km to the destination body surface
+  guidanceSteps?: GuidanceStep[]; // auto-plan / maneuver checklist for the HUD
 };
 
 /** A single stage = one engine plus the fuel tanks feeding it. */

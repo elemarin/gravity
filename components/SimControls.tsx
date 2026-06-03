@@ -30,7 +30,8 @@ function PixelBtn({
   return (
     <button
       onClick={onClick}
-      className={`${large ? 'px-3.5 py-3' : 'px-2.5 py-2.5'} font-pixel uppercase tracking-wide
+      className={`${large ? 'px-3.5 py-3' : 'px-2.5 py-2.5'} min-w-[4.75rem]
+                  inline-flex items-center justify-center font-pixel uppercase tracking-wide
                   rounded-lg border-2 active:scale-95 transition-transform whitespace-nowrap`}
       style={{
         fontSize: large ? 12 : 10,
@@ -64,13 +65,13 @@ export default function SimControls({
 
   return (
     <div
-      className="absolute inset-x-0 bottom-0 z-30 flex items-end justify-between gap-1.5
+      className="absolute inset-x-0 bottom-0 z-30 flex items-end justify-between gap-2
                  pb-[calc(0.75rem+env(safe-area-inset-bottom))]
                  px-[calc(0.6rem+env(safe-area-inset-left))]
                  pr-[calc(0.6rem+env(safe-area-inset-right))]"
     >
       {/* Left: action buttons */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-col items-start gap-1.5 sm:flex-row sm:items-center">
         {active && canStage && (
           <PixelBtn label="STAGE" color="#ff9a45" onClick={onStage} glow large />
         )}
@@ -82,7 +83,7 @@ export default function SimControls({
         )}
         {active && hasParachute && (
           <div
-            className="rounded-lg border-2 px-2.5 py-2.5 font-pixel uppercase tracking-wide"
+            className="min-w-[4.75rem] rounded-lg border-2 px-2.5 py-2.5 text-center font-pixel uppercase tracking-wide"
             style={{
               fontSize: 13,
               borderColor: parachuteDeployed ? '#39e9a6' : 'rgba(255,255,255,0.25)',
@@ -100,7 +101,7 @@ export default function SimControls({
       </div>
 
       {/* Right: time/nav controls */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-col items-end gap-1.5 sm:flex-row sm:items-center">
         {!finished && (
           <>
             {canSkip && <PixelBtn label="SKIP" color="#c4d6f0" onClick={onSkip} />}

@@ -1,19 +1,18 @@
 import * as THREE from 'three';
 import { Renderer } from './Renderer';
 import { Planet } from './entities/Planet';
-import { Rocket, ROCKET_START_ALTITUDE } from './entities/Rocket';
+import { Rocket } from './entities/Rocket';
 import { Launchpad } from './entities/Launchpad';
 import { TrajectoryLine } from './TrajectoryLine';
 import { MilestoneManager } from './career/Milestones';
 import { Simulator, SimConfig } from './plan/Simulator';
-import { FlightPlan, DEFAULT_PLAN, clonePlan } from './plan/FlightPlan';
-import { Body, dominantBody, buildFlightBodies, getDestination, bodyDef } from './bodies';
+import { FlightPlan, DEFAULT_PLAN, clonePlan, describeActions, describeTrigger } from './plan/FlightPlan';
+import { Body, dominantBody, bodyDef } from './bodies';
 import { orbitEllipse } from './orbit';
-import { buildSimStages } from './BuildSpec';
+import { buildFlightSimSetup, launchStartPosition } from './SimSetup';
 import {
   FlightState, FlightPhase, GameCallbacks, MissionResult, RocketBuild, DEFAULT_BUILD,
 } from './types';
-import { EARTH_BODY } from './bodies';
 import { KARMAN_LINE } from './constants';
 
 const FIXED_DT = 1 / 60;
@@ -25,6 +24,8 @@ const SKIP_MAX_STEPS = 3_000_000;
 const PREVIEW_DT = 0.25;
 const PREVIEW_STEPS = 4000;
 const PREVIEW_SAMPLE = 8;
+const SIM_TRAJECTORY_STEPS = 16000;
+const SIM_TRAJECTORY_SAMPLE = 12;
 
 export type GameMode = 'plan' | 'sim';
 
@@ -70,9 +71,10 @@ export class Game {
     this.build = opts.build ?? DEFAULT_BUILD;
     this.plan = clonePlan(opts.plan ?? DEFAULT_PLAN);
 
-    const dest = getDestination(this.plan.destinationId);
-    this.bodies = buildFlightBodies(this.plan.launchBodyId, dest.targetId);
-    this.launchBodyId = this.bodies[0]?.id ?? EARTH_BODY.id;
+    const setup = buildFlightSimSetup(this.build, this.plan);
+    this.bodies = setup.bodies;
+    this.launchBodyId = setup.launchBodyId;
+    this.cfg = setup.config;
 
     this.renderer = new Renderer(opts.container);
     this.planets = this.bodies.map((b) => new Planet(this.renderer.scene, b));
@@ -91,7 +93,6 @@ export class Game {
     const ld = bodyDef(this.launchBodyId);
     this.renderer.setSky(ld.skyDay, ld.atmosphereHeight);
 
-    this.cfg = this.buildConfig();
     this.sim = new Simulator(this.cfg, this.plan);
 
     this.flightState = this.buildFlightState();
@@ -115,21 +116,14 @@ export class Game {
   }
 
   private startPosition(): THREE.Vector3 {
-    const b = this.launchBody();
-    return b.center.clone().add(new THREE.Vector3(0, b.radius + ROCKET_START_ALTITUDE, 0));
+    return launchStartPosition(this.launchBody());
   }
 
   private buildConfig(): SimConfig {
-    const sim = buildSimStages(this.build);
-    return {
-      bodies: this.bodies,
-      stages: sim.stages,
-      payloadMass: sim.payloadMass,
-      landerIndex: sim.landerIndex,
-      hasParachute: sim.hasParachute,
-      hasLegs: sim.hasLegs,
-      startPosition: this.startPosition(),
-    };
+    const setup = buildFlightSimSetup(this.build, this.plan);
+    this.bodies = setup.bodies;
+    this.launchBodyId = setup.launchBodyId;
+    return setup.config;
   }
 
   start() {
@@ -286,12 +280,6 @@ export class Game {
     }
     this.fastForwarding = false;
 
-    // If the rocket is in a stable orbit and never landed, end the mission now.
-    if (!this.missionEnded && this.sim.state.everOrbit) {
-      this.missionEnded = true;
-      this.callbacks.onMissionEnd?.(this.buildMissionResult('landed'));
-    }
-
     this.rocket.applyState(this.sim.state, this.dominant().center, FIXED_DT);
     this.flightState = this.buildFlightState();
     this.callbacks.onState?.(this.flightState);
@@ -364,8 +352,10 @@ export class Game {
 
     if (this.sim.finished && !this.missionEnded) {
       this.missionEnded = true;
-      const outcome = s.phase === 'landed' ? 'landed' : 'crashed';
-      if (fireEvents) this.callbacks.onTouchdown?.(outcome, s.lastImpactSpeedMs);
+      const outcome = s.phase === 'destroyed' ? 'crashed' : 'landed';
+      if (fireEvents && (s.phase === 'landed' || s.phase === 'destroyed')) {
+        this.callbacks.onTouchdown?.(outcome, s.lastImpactSpeedMs);
+      }
       this.callbacks.onMissionEnd?.(this.buildMissionResult(outcome));
     }
   }
@@ -414,6 +404,17 @@ export class Game {
     const targetDistance = target
       ? Math.max(0, s.position.distanceTo(target.center) - target.radius)
       : undefined;
+    const nextNodeIndex = this.plan.nodes.findIndex((n) => !s.firedNodeIds.has(n.id));
+    const guidanceSteps = this.plan.nodes.map((node, index) => {
+      const done = s.firedNodeIds.has(node.id);
+      return {
+        id: node.id,
+        index,
+        trigger: describeTrigger(node.trigger),
+        action: describeActions(node.actions),
+        status: done ? 'done' as const : index === nextNodeIndex ? 'current' as const : 'pending' as const,
+      };
+    });
     return {
       position: s.position.clone(),
       velocity: s.velocity.clone(),
@@ -437,6 +438,7 @@ export class Game {
       landerDeployed: s.deployedLander,
       targetName: target?.name,
       targetDistance,
+      guidanceSteps,
     };
   }
 
@@ -479,10 +481,18 @@ export class Game {
 
     // A stable, surface-clearing orbit is drawn as its full analytic ellipse so
     // the path is a complete, steady loop rather than a half-arc that keeps
-    // getting recomputed as the craft moves.
+    // getting recomputed as the craft moves. Don't use it while guidance is
+    // still pending; transfer/landing plans need the forward-simulated route.
     const body = this.dominant();
+    const hasPendingGuidance =
+      this.plan.nodes.some((n) => !cur.firedNodeIds.has(n.id)) ||
+      cur.landingAssist ||
+      cur.ascentAssist ||
+      cur.captureAssist ||
+      cur.deorbitAssist ||
+      cur.departAssist;
     const ellipse = orbitEllipse(body, cur.position, cur.velocity);
-    if (ellipse && cur.phase !== 'prelaunch') {
+    if (!hasPendingGuidance && ellipse && cur.phase !== 'prelaunch') {
       let color = 0x2ee59d;
       if (ellipse.periAlt < 80) color = 0xffd54a;
       this.trajectory.update(ellipse.points, color, body.center, body.radius, false);
@@ -505,9 +515,11 @@ export class Game {
     s.ascentAssist      = cur.ascentAssist;
     s.captureAssist     = cur.captureAssist;
     s.captureTargetId   = cur.captureTargetId;
+    s.captureOrbitSign  = cur.captureOrbitSign;
     s.deorbitAssist     = cur.deorbitAssist;
     s.departAssist      = cur.departAssist;
     s.departFromId      = cur.departFromId;
+    s.departTargetId    = cur.departTargetId;
     s.landedTime        = cur.landedTime;
     s.relaunchStart     = cur.relaunchStart;
     s.elapsed        = cur.elapsed;
@@ -526,9 +538,9 @@ export class Game {
 
     const points: THREE.Vector3[] = [cur.position.clone()];
     let touchdown = false;
-    for (let i = 0; i < PREVIEW_STEPS; i++) {
+    for (let i = 0; i < SIM_TRAJECTORY_STEPS; i++) {
       preview.step(PREVIEW_DT);
-      if (i % PREVIEW_SAMPLE === 0) points.push(preview.state.position.clone());
+      if (i % SIM_TRAJECTORY_SAMPLE === 0) points.push(preview.state.position.clone());
       if (preview.finished) {
         touchdown = preview.state.landedBodyId !== null || preview.state.phase === 'destroyed';
         points.push(preview.state.position.clone());
@@ -541,7 +553,8 @@ export class Game {
     else if (preview.state.periapsis > 0 && preview.state.periapsis < 80) color = 0xffd54a;
     else if (preview.state.periapsis >= 80) color = 0x2ee59d;
 
-    this.trajectory.update(points, color, body.center, body.radius, touchdown);
+    const markerBody = touchdown ? dominantBody(this.bodies, preview.state.position) : body;
+    this.trajectory.update(points, color, markerBody.center, markerBody.radius, touchdown);
   }
 
   getNextMilestone() { return this.milestones.getNextTarget(); }

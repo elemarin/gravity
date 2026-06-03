@@ -8,7 +8,7 @@ export type OrbitPath = {
   periAlt: number; // km above surface
 };
 
-const SEGMENTS = 160;
+const SEGMENTS = 240;
 
 /**
  * Analytic two-body orbit around `body` from an instantaneous state. Returns the
@@ -35,7 +35,7 @@ export function orbitEllipse(body: Body, pos: THREE.Vector3, vel: THREE.Vector3)
   // Eccentricity vector points toward periapsis: e = (v×h)/µ − r̂.
   const eVec = vel.clone().cross(hVec).multiplyScalar(1 / mu).sub(rel.clone().multiplyScalar(1 / r));
   const e = eVec.length();
-  if (e >= 0.999) return null;            // too eccentric to read as a loop
+  if (e >= 0.9999) return null;           // too eccentric to read as a loop
 
   const a = -mu / (2 * eps);
   const rp = a * (1 - e);                 // periapsis radius

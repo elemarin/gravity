@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-const MAX_POINTS = 500;
+const MAX_POINTS = 1200;
 const APSIS_MARKER_SIZE = 96;
 const APSIS_MARKER_SCALE = 1.7;
 const APSIS_DOT_X = APSIS_MARKER_SIZE / 2;

@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   FlightPlan, Maneuver, TriggerType, TRIGGER_LABELS,
   MissionKind, MissionSpec, MISSION_LABELS,
   describeTrigger, describeActions, newNodeId,
 } from '@/lib/game/plan/FlightPlan';
-import { Body, DESTINATIONS, getDestination } from '@/lib/game/bodies';
-import { autoPlan, defaultOrbitKm } from '@/lib/game/plan/AutoPlan';
+import { Body, DESTINATIONS, destinationTargetId } from '@/lib/game/bodies';
+import { autoPlan, defaultOrbitKm, minimumOrbitKm } from '@/lib/game/plan/AutoPlan';
 
 type Props = {
   plan: FlightPlan;
@@ -21,11 +21,11 @@ type Props = {
 const TRIGGER_TYPES: TriggerType[] = [
   'at-altitude', 'at-apoapsis', 'at-periapsis',
   'at-apoapsis-altitude', 'at-periapsis-altitude',
-  'at-time', 'on-fuel-empty', 'at-transfer-window', 'at-soi-entry',
+  'at-time', 'on-fuel-empty', 'at-transfer-window', 'at-soi-entry', 'after-orbit',
   'after-touchdown',
 ];
 
-const TARGET_TRIGGERS: TriggerType[] = ['at-soi-entry', 'at-transfer-window'];
+const TARGET_TRIGGERS: TriggerType[] = ['at-soi-entry', 'at-transfer-window', 'after-orbit'];
 
 const VALUE_TRIGGERS: TriggerType[] = [
   'at-altitude', 'at-time', 'at-apoapsis-altitude', 'at-periapsis-altitude',
@@ -80,26 +80,28 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
   };
 
   const otherBodies = bodies.slice(1);
-  const dest = getDestination(plan.destinationId);
+  const targetId = destinationTargetId(plan.destinationId, plan.launchBodyId);
 
   // Mission objective + target orbit drive the auto-planner.
   const mission: MissionSpec = plan.mission ?? { kind: 'orbit', orbitKm: defaultOrbitKm(plan.launchBodyId) };
   // Which objectives make sense for the chosen destination.
-  const missionKinds: MissionKind[] = dest.targetId
+  const missionKinds: MissionKind[] = targetId
     ? ['orbit', 'orbit-return', 'land', 'land-return']
     : ['orbit', 'land'];
   const showOrbitKm = mission.kind === 'orbit' || mission.kind === 'orbit-return';
   // Orbit slider range scales to the body being orbited (the target, if any).
-  const orbitBody = (dest.targetId ? bodies[1] : bodies[0]) ?? bodies[0];
-  const orbitMin = orbitBody ? Math.max(20, orbitBody.atmosphereHeight || orbitBody.radius * 0.3) : 20;
+  const orbitBody = (targetId ? bodies.find((b) => b.id === targetId) : bodies[0]) ?? bodies[0];
+  const orbitMin = orbitBody ? minimumOrbitKm(orbitBody.id) : 20;
   const orbitMax = orbitBody ? orbitBody.radius * 6 + 200 : 600;
+  const orbitValue = Math.max(orbitMin, Math.round(mission.orbitKm));
 
   const regen = (destId: string, m: MissionSpec) =>
     onChange(autoPlan(plan.launchBodyId, destId, m));
 
   // Switching destination keeps the objective if still valid, else falls back.
   const setDestination = (id: string) => {
-    const valid = getDestination(id).targetId
+    const nextTargetId = destinationTargetId(id, plan.launchBodyId);
+    const valid = nextTargetId
       ? mission.kind
       : (mission.kind === 'land' || mission.kind === 'land-return' ? 'land' : 'orbit');
     regen(id, { ...mission, kind: valid });
@@ -110,14 +112,23 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
   const setLaunch = (patch: Partial<FlightPlan['launch']>) =>
     onChange({ ...plan, launch: { ...plan.launch, ...patch } });
 
+  useEffect(() => {
+    if (showOrbitKm && mission.orbitKm < orbitMin) {
+      setOrbitKm(orbitMin);
+    }
+    // setOrbitKm regenerates from current props; avoid including it as a changing dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showOrbitKm, mission.orbitKm, orbitMin]);
+
   return (
     <div className="absolute inset-x-0 bottom-0 z-30 font-pixel
                     pb-[calc(0.75rem+env(safe-area-inset-bottom))]
                     px-[calc(0.75rem+env(safe-area-inset-left))]
                     pr-[calc(0.75rem+env(safe-area-inset-right))]
-                    md:inset-y-0 md:right-auto md:bottom-auto md:w-[380px] md:max-w-[38vw]
-                    md:p-3 md:flex md:items-stretch">
-      <div className="panel mx-auto max-w-md flex flex-col overflow-hidden
+                    md:inset-x-auto md:left-3 md:right-auto
+                    md:top-[calc(4.25rem+env(safe-area-inset-top))] md:bottom-3
+                    md:w-[380px] md:max-w-[38vw] md:p-0 md:flex md:items-stretch">
+      <div className="panel mx-auto max-w-md flex min-h-0 flex-col overflow-hidden
                       md:mx-0 md:max-w-none md:w-full md:h-full">
         {/* Header row */}
         <button
@@ -141,7 +152,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
         </button>
 
         {open && (
-          <div className="max-h-[46vh] md:max-h-none md:flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2">
+          <div className="max-h-[46vh] min-h-0 md:max-h-none md:flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2">
             {/* Destination */}
             <div>
               <div className="flex items-center justify-between">
@@ -185,7 +196,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
               {showOrbitKm && (
                 <div className="mt-2 rounded-lg border border-white/10 bg-white/[0.04] p-2">
                   <Slider
-                    label="Orbit" enabled value={Math.round(mission.orbitKm)}
+                    label="Orbit" enabled value={orbitValue}
                     min={Math.round(orbitMin)} max={Math.round(orbitMax)} step={1} suffix="km"
                     onToggle={() => {}}
                     onChange={setOrbitKm}
@@ -197,7 +208,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                   ↩ Return trips are ambitious — pack extra fuel{mission.kind === 'land-return' ? ' and a lander that can fly back up' : ''}. Launch, then warp.
                 </div>
               )}
-              {dest.targetId && (
+              {targetId && (
                 <div className="mt-1 text-[10px] text-cyan/90 leading-snug">
                   ✨ Auto-plan flies the whole route. Build a capable rocket{(mission.kind === 'land' || mission.kind === 'land-return') ? ' with a lander' : ''}, then launch &amp; warp.
                 </div>

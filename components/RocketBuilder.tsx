@@ -173,11 +173,11 @@ export default function RocketBuilder() {
       </div>
 
       {/* ── Rocket preview ── */}
-      <section className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-3 px-4 py-3 md:grid md:grid-cols-[minmax(24rem,1fr)_minmax(22rem,30rem)] md:items-stretch">
+      <section className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-3 overflow-y-auto px-4 py-3 md:grid md:grid-cols-[minmax(24rem,1fr)_minmax(22rem,30rem)] md:items-stretch md:overflow-hidden">
       <div className="shrink-0 flex items-start justify-center gap-6 md:gap-10 md:col-start-1 md:row-start-1 md:self-start"
            style={{ minHeight: '32vh', maxHeight: '42vh' }}>
         {/* Blueprint */}
-        <div className="flex-1 flex flex-col items-center justify-end h-full overflow-hidden">
+        <div className="flex-1 flex flex-col items-center justify-start h-full overflow-y-auto overflow-x-visible py-1">
           <BlueprintRocket
             stages={stages}
             noseId={build.noseId}

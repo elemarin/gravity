@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { EARTH_CENTER, EARTH_RADIUS } from '../constants';
+import { SIM_START_ALTITUDE } from '../SimSetup';
 import { Flame, FxBursts } from './Flame';
 import { RocketBuild } from '../types';
 import { getStages } from '../BuildSpec';
@@ -8,7 +9,7 @@ import type { SimState } from '../plan/Simulator';
 
 // Origin sits at the very base of the engine bell, so the rocket rests flush
 // on the launch pad (no part dips below y = 0).
-export const ROCKET_START_ALTITUDE = 0.001;
+export const ROCKET_START_ALTITUDE = SIM_START_ALTITUDE;
 
 const BODY_R = 0.18;          // main stack radius
 const stagePalette = 0x2a3550;
@@ -28,6 +29,8 @@ export class Rocket {
 
   /** Per-stage mesh groups, bottom-first; a lander (if any) is the last group. */
   private stageMeshes: THREE.Group[] = [];
+  /** Local y-coordinate of each stage's engine base, bottom-first. */
+  private stageBaseY: number[] = [];
   /** How many lower stages have already been dropped from the mesh. */
   private meshActiveStage = 0;
 
@@ -124,6 +127,7 @@ export class Rocket {
   private buildMesh(build: RocketBuild): THREE.Group {
     const group = new THREE.Group();
     this.stageMeshes = [];
+    this.stageBaseY = [];
 
     const stages = getStages(build);
     let y = 0;
@@ -131,6 +135,7 @@ export class Rocket {
     stages.forEach((stage, si) => {
       const stageGroup = new THREE.Group();
       const start = y;
+      this.stageBaseY.push(start);
 
       // Engine bell
       const engine = getPart(stage.engineId);
@@ -208,6 +213,7 @@ export class Rocket {
       const lander = getPart(build.landerId);
       if (lander) {
         const landerGroup = new THREE.Group();
+        this.stageBaseY.push(y);
         const body = new THREE.Mesh(
           new THREE.CylinderGeometry(BODY_R * 0.95, BODY_R * 0.8, 0.34, 8),
           mat(lander.color, 24),
@@ -331,13 +337,15 @@ export class Rocket {
   }
 
   private syncMesh() {
-    this.mesh.position.copy(this.position);
     const up = new THREE.Vector3().subVectors(this.position, this.upCenter).normalize();
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
     const tilt = new THREE.Quaternion().setFromAxisAngle(
       new THREE.Vector3(0, 0, 1), -THREE.MathUtils.degToRad(this.angle),
     );
     this.mesh.quaternion.copy(q).multiply(tilt);
+    const activeBaseY = this.stageBaseY[this.meshActiveStage] ?? 0;
+    const baseOffset = new THREE.Vector3(0, activeBaseY, 0).applyQuaternion(this.mesh.quaternion);
+    this.mesh.position.copy(this.position).sub(baseOffset);
   }
 
   private detachStage(stage: THREE.Group, velocity: THREE.Vector3, upCenter: THREE.Vector3) {

@@ -33,10 +33,12 @@ export default function HUDOverlay({
   state,
   nextTarget,
   timeScale,
+  objective,
 }: {
   state: FlightState | null;
   nextTarget: string;
   timeScale: number;
+  objective: string;
 }) {
   const phase    = state?.phase ?? 'prelaunch';
   const meta     = PHASE_META[phase];
@@ -56,6 +58,14 @@ export default function HUDOverlay({
 
   const stageCount  = state?.stageCount ?? 1;
   const activeStage = state?.activeStage ?? 0;
+  const guidance = state?.guidanceSteps ?? [];
+  const currentStepIndex = guidance.findIndex((s) => s.status === 'current');
+  const guidanceStart = guidance.length === 0
+    ? 0
+    : currentStepIndex < 0
+      ? Math.max(0, guidance.length - 3)
+      : Math.max(0, currentStepIndex - 1);
+  const visibleGuidance = guidance.slice(guidanceStart, guidanceStart + 4);
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10 font-pixel">
@@ -101,11 +111,13 @@ export default function HUDOverlay({
         </span>
       </div>
 
-      {/* Main HUD card — top right */}
+      {/* Main HUD card */}
       <div
         className="absolute top-[calc(0.6rem+env(safe-area-inset-top))]
+                   left-[calc(0.6rem+env(safe-area-inset-left))]
                    right-[calc(0.6rem+env(safe-area-inset-right))]
-                   max-w-[calc(100vw-1.2rem)] overflow-hidden"
+                   overflow-hidden
+                   sm:left-auto sm:max-w-[calc(100vw-1.2rem)]"
         style={{
           background: 'rgba(4,6,14,0.85)',
           border: `1px solid ${meta.color}55`,
@@ -118,7 +130,7 @@ export default function HUDOverlay({
       >
         {/* Phase row */}
         <div
-          className="px-3 pt-2.5 pb-1 text-[13px] tracking-[0.2em]"
+          className="pl-14 pr-2.5 sm:px-3 pt-2.5 pb-1 text-[11px] sm:text-[13px] tracking-[0.2em]"
           style={{ color: meta.color, textShadow: `0 0 8px ${meta.color}` }}
         >
           {meta.label}
@@ -129,19 +141,23 @@ export default function HUDOverlay({
           )}
         </div>
 
+        <div className="pl-14 pr-2.5 sm:px-3 pb-2 text-[9px] sm:text-[10px] leading-tight text-yellow truncate">
+          <span className="text-dim/70">OBJECTIVE </span>{objective}
+        </div>
+
         {/* Alt + Vel values */}
-        <div className="px-3 pb-2.5 grid grid-cols-2 gap-x-4">
+        <div className="pl-14 pr-2.5 sm:px-3 pb-2.5 grid grid-cols-2 gap-x-3 sm:gap-x-4">
           <div>
             <div className="text-[11px] text-dim/70 tracking-widest mb-0.5">ALT</div>
             <div
-              className="text-[21px] tabular-nums leading-none text-ink"
+              className="text-[16px] sm:text-[21px] tabular-nums leading-none text-ink"
               style={{ textShadow: `0 0 10px ${meta.color}88` }}
             >{altLabel}</div>
           </div>
           <div>
             <div className="text-[11px] text-orange/80 tracking-widest mb-0.5">VEL</div>
             <div
-              className="text-[21px] tabular-nums leading-none text-ink"
+              className="text-[16px] sm:text-[21px] tabular-nums leading-none text-ink"
               style={{ textShadow: '0 0 10px rgba(255,154,69,0.5)' }}
             >{spdLabel}</div>
           </div>
@@ -150,7 +166,7 @@ export default function HUDOverlay({
         {/* Orbit info */}
         {showOrbit && (
           <div
-            className="px-3 pb-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] leading-tight"
+            className="px-2.5 sm:px-3 pb-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] sm:text-[12px] leading-tight"
             style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
           >
             <span>
@@ -167,17 +183,45 @@ export default function HUDOverlay({
         {/* Target distance (interplanetary guidance) */}
         {state?.targetName && state.targetDistance !== undefined && (
           <div
-            className="px-3 pb-1.5 text-[12px]"
+            className="px-2.5 sm:px-3 pb-1.5 text-[11px] sm:text-[12px]"
             style={{ borderTop: '1px solid rgba(255,255,255,0.1)', color: '#bb8bff', paddingTop: 4 }}
           >
             → {state.targetName} {fmtOrbit(state.targetDistance)}
           </div>
         )}
 
+        {visibleGuidance.length > 0 && (
+          <div
+            className="px-2.5 sm:px-3 pb-2 pt-1.5 text-[9px] sm:text-[10px] leading-tight"
+            style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            <div className="mb-1 tracking-[0.18em] text-cyan/80">MANEUVERS</div>
+            <div className="flex flex-col gap-1">
+              {visibleGuidance.map((step) => {
+                const current = step.status === 'current';
+                const done = step.status === 'done';
+                return (
+                  <div
+                    key={step.id}
+                    className={`grid grid-cols-[1rem_1fr] gap-1 ${current ? 'text-yellow' : done ? 'text-green/80' : 'text-dim/70'}`}
+                  >
+                    <span>{done ? '✓' : current ? '▶' : '·'}</span>
+                    <span className={current ? 'text-ink' : ''}>
+                      <span className="font-black">{step.trigger}</span>
+                      <span className="text-dim/70"> → </span>
+                      {step.action}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Stage indicator */}
         {stageCount > 1 && (
           <div
-            className="px-3 pb-1.5 text-[12px]"
+            className="px-2.5 sm:px-3 pb-1.5 text-[11px] sm:text-[12px]"
             style={{
               borderTop: '1px solid rgba(255,255,255,0.1)',
               color: meta.color,
@@ -192,7 +236,7 @@ export default function HUDOverlay({
       {/* Target — compact strip near bottom, above controls */}
       {nextTarget && (
         <div
-          className="absolute bottom-[calc(5.5rem+env(safe-area-inset-bottom))]
+          className="hidden sm:block absolute bottom-[calc(5.5rem+env(safe-area-inset-bottom))]
                      left-[calc(0.6rem+env(safe-area-inset-left))]
                      px-3 py-2 text-[13px] text-left
                      max-w-[calc(100vw-5rem)] truncate rounded-lg"

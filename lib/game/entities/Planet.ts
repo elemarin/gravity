@@ -52,24 +52,38 @@ export class Planet {
 
     // Atmosphere rim glow.
     if (body.atmosphereHeight > 0) {
+      const visualAtmosphere = Math.max(10, body.atmosphereHeight * 0.35);
+      const middleAtmosphere = Math.max(5, body.atmosphereHeight * 0.18);
       const rim = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(body.radius * 1.06 + 2, 2),
+        new THREE.IcosahedronGeometry(body.radius + visualAtmosphere, 2),
         new THREE.MeshBasicMaterial({
           color: new THREE.Color(body.skyDay),
           transparent: true,
-          opacity: 0.18,
+          opacity: 0.09,
           side: THREE.BackSide,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
         }),
       );
       this.mesh.add(rim);
+      const middle = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(body.radius + middleAtmosphere, 2),
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color(body.skyDay).lerp(new THREE.Color(0xffffff), 0.25),
+          transparent: true,
+          opacity: 0.11,
+          side: THREE.BackSide,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+        }),
+      );
+      this.mesh.add(middle);
       const inner = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(body.radius * 1.015 + 0.5, 2),
+        new THREE.IcosahedronGeometry(body.radius + Math.max(2, body.atmosphereHeight * 0.05), 2),
         new THREE.MeshPhongMaterial({
           color: new THREE.Color(body.skyDay),
           transparent: true,
-          opacity: 0.12,
+          opacity: 0.14,
           flatShading: true,
           side: THREE.BackSide,
           depthWrite: false,

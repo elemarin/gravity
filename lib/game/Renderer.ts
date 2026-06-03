@@ -16,6 +16,11 @@ export class Renderer {
   private skySpace = new THREE.Color(0x05070f);
   private skyFade = 120; // altitude (units) over which day fades to space
   private skyScratch = new THREE.Color();
+  private spaceVisibility = 0;
+  private readonly spaceBackdrop = new THREE.Group();
+  private readonly starMaterials: THREE.PointsMaterial[] = [];
+  private readonly spaceMaterials: THREE.SpriteMaterial[] = [];
+  private readonly spaceTextures: THREE.Texture[] = [];
 
   // User camera control state
   private userZoom    = 1.0;
@@ -45,7 +50,7 @@ export class Renderer {
     this.scene.background = this.skyDay.clone();
     this.scene.fog = new THREE.Fog(this.skyDay.clone(), 600, 3200);
 
-    this.camera = new THREE.PerspectiveCamera(60, 1, 0.01, 6000);
+    this.camera = new THREE.PerspectiveCamera(60, 1, 0.01, 10000);
     this.camera.position.set(0, EARTH_RADIUS + 2, 8);
     this.camera.lookAt(0, EARTH_RADIUS + 1, 0);
 
@@ -64,7 +69,7 @@ export class Renderer {
     fill.position.set(-80, -40, -60);
     this.scene.add(fill);
 
-    this.buildStarfield();
+    this.buildSpaceBackdrop();
 
     this.handleResize();
     this.resizeObserver = new ResizeObserver(() => this.handleResize());
@@ -84,22 +89,136 @@ export class Renderer {
     this.renderer.setSize(w, h, false);
   };
 
-  private buildStarfield() {
-    const count = 900;
+  private seededRandom(seed: number) {
+    let s = seed;
+    return () => {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      return s / 0x100000000;
+    };
+  }
+
+  private buildSpaceBackdrop() {
+    this.scene.add(this.spaceBackdrop);
+    this.buildStarLayer(1800, 4200, 1.15, 0xffffff, 0.22, 0x2f6b9d);
+    this.buildStarLayer(260, 4400, 2.25, 0xd9f0ff, 0.42, 0x8d52c8);
+
+    const nebulae: Array<{ theta: number; phi: number; scale: [number, number, number]; color: number; kind: 'nebula' | 'galaxy'; rotation: number }> = [
+      { theta: 0.25, phi: 1.05, scale: [720, 320, 1], color: 0x5bd8ff, kind: 'nebula', rotation: -0.35 },
+      { theta: 1.95, phi: 1.35, scale: [860, 360, 1], color: 0xb86dff, kind: 'nebula', rotation: 0.2 },
+      { theta: 3.6,  phi: 1.0,  scale: [620, 260, 1], color: 0xff8ac8, kind: 'nebula', rotation: 0.8 },
+      { theta: 4.85, phi: 1.4,  scale: [900, 260, 1], color: 0xffd47a, kind: 'galaxy', rotation: -0.6 },
+      { theta: 2.75, phi: 0.72, scale: [520, 180, 1], color: 0xd8e8ff, kind: 'galaxy', rotation: 0.45 },
+    ];
+
+    for (const n of nebulae) {
+      const tex = n.kind === 'galaxy'
+        ? this.makeGalaxyTexture(n.color)
+        : this.makeNebulaTexture(n.color);
+      const mat = new THREE.SpriteMaterial({
+        map: tex,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        depthTest: true,
+        blending: THREE.AdditiveBlending,
+        fog: false,
+        rotation: n.rotation,
+      });
+      const sprite = new THREE.Sprite(mat);
+      const radius = 4100;
+      sprite.position.set(
+        radius * Math.sin(n.phi) * Math.cos(n.theta),
+        radius * Math.cos(n.phi),
+        radius * Math.sin(n.phi) * Math.sin(n.theta),
+      );
+      sprite.scale.set(...n.scale);
+      this.spaceBackdrop.add(sprite);
+      this.spaceMaterials.push(mat);
+      this.spaceTextures.push(tex);
+    }
+  }
+
+  private buildStarLayer(count: number, radius: number, size: number, color: number, hueJitter: number, seed: number) {
+    const rand = this.seededRandom(seed);
     const geo = new THREE.BufferGeometry();
     const pos = new Float32Array(count * 3);
-    const radius = 700;
+    const colors = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      const r = radius * (0.7 + Math.random() * 0.3);
+      const theta = rand() * Math.PI * 2;
+      const phi = Math.acos(2 * rand() - 1);
+      const r = radius * (0.88 + rand() * 0.12);
       pos[i * 3]     = r * Math.sin(phi) * Math.cos(theta);
       pos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
       pos[i * 3 + 2] = r * Math.cos(phi);
+      const star = new THREE.Color(color).offsetHSL((rand() - 0.5) * hueJitter, 0, (rand() - 0.5) * 0.35);
+      colors[i * 3] = star.r;
+      colors[i * 3 + 1] = star.g;
+      colors[i * 3 + 2] = star.b;
     }
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.4, sizeAttenuation: true });
-    this.scene.add(new THREE.Points(geo, mat));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const mat = new THREE.PointsMaterial({
+      vertexColors: true,
+      size,
+      sizeAttenuation: false,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      depthTest: true,
+      fog: false,
+    });
+    this.starMaterials.push(mat);
+    this.spaceBackdrop.add(new THREE.Points(geo, mat));
+  }
+
+  private makeNebulaTexture(colorHex: number): THREE.Texture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const c = new THREE.Color(colorHex);
+    const r = Math.round(c.r * 255), g = Math.round(c.g * 255), b = Math.round(c.b * 255);
+    const grad = ctx.createRadialGradient(128, 128, 8, 128, 128, 128);
+    grad.addColorStop(0, `rgba(255,255,255,0.55)`);
+    grad.addColorStop(0.18, `rgba(${r},${g},${b},0.35)`);
+    grad.addColorStop(0.55, `rgba(${r},${g},${b},0.12)`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 256, 256);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  private makeGalaxyTexture(colorHex: number): THREE.Texture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const c = new THREE.Color(colorHex);
+    const r = Math.round(c.r * 255), g = Math.round(c.g * 255), b = Math.round(c.b * 255);
+    ctx.translate(128, 128);
+    ctx.scale(1, 0.32);
+    const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 120);
+    glow.addColorStop(0, 'rgba(255,255,255,0.9)');
+    glow.addColorStop(0.2, `rgba(${r},${g},${b},0.48)`);
+    glow.addColorStop(0.75, `rgba(${r},${g},${b},0.16)`);
+    glow.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, 120, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255,255,255,0.45)`;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      ctx.rotate(Math.PI / 2);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 78, 18 + i * 3, 0.2 + i * 0.28, 0, Math.PI * 1.45);
+      ctx.stroke();
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
   }
 
   private setupCameraControls() {
@@ -213,7 +332,7 @@ export class Renderer {
   setSky(dayHex: number, atmosphereHeight: number) {
     this.skyDay.setHex(dayHex);
     // Airless worlds read almost like open space even at the surface.
-    this.skyFade = atmosphereHeight > 0 ? atmosphereHeight : 30;
+    this.skyFade = atmosphereHeight > 0 ? Math.max(120, atmosphereHeight * 1.6) : 30;
     this.updateSky(0);
   }
 
@@ -222,13 +341,22 @@ export class Renderer {
     const t = THREE.MathUtils.clamp(altitude / this.skyFade, 0, 1);
     // Ease so the surface stays bright and it darkens nearer to space.
     const eased = t * t;
+    this.spaceVisibility = THREE.MathUtils.smoothstep(t, 0.18, 0.92);
     this.skyScratch.copy(this.skyDay).lerp(this.skySpace, eased);
     (this.scene.background as THREE.Color).copy(this.skyScratch);
     (this.scene.fog as THREE.Fog).color.copy(this.skyScratch);
     this.renderer.setClearColor(this.skyScratch);
+
+    for (const mat of this.starMaterials) {
+      mat.opacity = THREE.MathUtils.lerp(0.035, 1, this.spaceVisibility);
+    }
+    for (const mat of this.spaceMaterials) {
+      mat.opacity = 0.85 * this.spaceVisibility;
+    }
   }
 
   render() {
+    this.spaceBackdrop.position.copy(this.camera.position);
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -242,6 +370,14 @@ export class Renderer {
 
     window.removeEventListener('resize', this.handleResize);
     this.resizeObserver?.disconnect();
+    this.spaceBackdrop.traverse((obj) => {
+      if (obj instanceof THREE.Points) {
+        obj.geometry.dispose();
+      }
+    });
+    this.starMaterials.forEach((mat) => mat.dispose());
+    this.spaceMaterials.forEach((mat) => mat.dispose());
+    this.spaceTextures.forEach((tex) => tex.dispose());
     this.renderer.dispose();
     if (this.renderer.domElement.parentNode === this.container) {
       this.container.removeChild(this.renderer.domElement);

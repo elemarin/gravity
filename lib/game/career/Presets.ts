@@ -13,6 +13,20 @@ export type RocketPreset = {
   build: RocketBuild;
 };
 
+export const ROUTE_PROVER_BUILD: RocketBuild = {
+  engineId: 'engine-heavy',
+  tankIds: ['tank-xl', 'tank-xl'],
+  noseId: 'capsule-crew',
+  utilityIds: ['parachute', 'landing-legs'],
+  boosterIds: ['booster-liquid', 'booster-liquid'],
+  landerId: 'lander-heavy',
+  stages: [
+    { engineId: 'engine-heavy', tankIds: ['tank-xl', 'tank-xl', 'tank-xl'] },
+    { engineId: 'engine-heavy', tankIds: ['tank-xl', 'tank-xl'] },
+    { engineId: 'engine-vacuum', tankIds: ['tank-large', 'tank-large'] },
+  ],
+};
+
 export const ROCKET_PRESETS: RocketPreset[] = [
   {
     id: 'sounding',
@@ -49,17 +63,17 @@ export const ROCKET_PRESETS: RocketPreset[] = [
     id: 'moon-lander',
     name: 'Moon Lander',
     icon: '🌙',
-    description: 'Two-stage stack with a scout lander to touch down on another world.',
+    description: 'Two-stage heavy stack with a dedicated lander to touch down on the Moon.',
     build: {
       engineId: 'engine-heavy',
-      tankIds: ['tank-medium', 'tank-medium'],
+      tankIds: ['tank-large', 'tank-large', 'tank-large'],
       noseId: 'capsule-crew',
       utilityIds: ['landing-legs'],
-      boosterIds: ['booster-solid', 'booster-solid'],
-      landerId: 'lander-light',
+      boosterIds: ['booster-liquid', 'booster-liquid'],
+      landerId: 'lander-heavy',
       stages: [
-        { engineId: 'engine-heavy', tankIds: ['tank-medium', 'tank-medium'] },
-        { engineId: 'engine-vacuum', tankIds: ['tank-medium'] },
+        { engineId: 'engine-heavy', tankIds: ['tank-large', 'tank-large', 'tank-large'] },
+        { engineId: 'engine-vacuum', tankIds: ['tank-large', 'tank-large'] },
       ],
     },
   },
@@ -81,5 +95,12 @@ export const ROCKET_PRESETS: RocketPreset[] = [
         { engineId: 'engine-vacuum', tankIds: ['tank-large'] },
       ],
     },
+  },
+  {
+    id: 'route-prover',
+    name: 'Route Prover',
+    icon: '✅',
+    description: 'Regression-tested stack used to prove orbit, landing and return auto-plans.',
+    build: ROUTE_PROVER_BUILD,
   },
 ];
