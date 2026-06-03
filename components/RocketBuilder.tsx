@@ -174,7 +174,7 @@ export default function RocketBuilder() {
 
       {/* ── Rocket preview ── */}
       <section className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-3 px-4 py-3 md:grid md:grid-cols-[minmax(24rem,1fr)_minmax(22rem,30rem)] md:items-stretch">
-      <div className="shrink-0 flex items-start justify-center gap-6 md:gap-10"
+      <div className="shrink-0 flex items-start justify-center gap-6 md:gap-10 md:col-start-1 md:row-start-1 md:self-start"
            style={{ minHeight: '32vh', maxHeight: '42vh' }}>
         {/* Blueprint */}
         <div className="flex-1 flex flex-col items-center justify-end h-full overflow-hidden">
@@ -203,8 +203,11 @@ export default function RocketBuilder() {
         </div>
       </div>
 
+      {/* ── Right column: facility hint, category tabs, parts drawer ── */}
+      <div className="flex min-h-0 flex-1 flex-col gap-2 md:col-start-2 md:row-start-1">
+
       {/* ── Facility + stage hint ── */}
-      <div className="shrink-0 px-0 pb-1 md:col-start-2 md:row-start-1 flex flex-col gap-1">
+      <div className="shrink-0 px-0 pb-1 flex flex-col gap-1">
         <div className="rounded-lg border border-cyan/25 bg-cyan/[0.06] px-3 py-1.5 text-[11px] text-center">
           <span className="text-cyan font-black">🏭 {tier.name}</span>
           <span className="text-dim"> · up to {tier.maxMass}t · {tier.maxStages} stages</span>
@@ -216,7 +219,7 @@ export default function RocketBuilder() {
       </div>
 
       {/* ── Category tabs ── */}
-      <div className="shrink-0 flex gap-1.5 px-0 py-2 overflow-x-auto no-scrollbar md:col-start-2 md:row-start-1 md:mt-12">
+      <div className="shrink-0 flex gap-1.5 px-0 py-2 overflow-x-auto no-scrollbar">
         {CATEGORIES.map(({ type, short }) => (
           <button
             key={type}
@@ -231,7 +234,7 @@ export default function RocketBuilder() {
       </div>
 
       {/* ── Parts drawer ── */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-0 pb-1 md:col-start-2 md:row-start-1 md:mt-24 md:rounded-3xl md:border md:border-white/10 md:bg-white/[0.035] md:p-3">
+      <div className="flex-1 min-h-0 overflow-y-auto px-0 pb-1 md:rounded-3xl md:border md:border-white/10 md:bg-white/[0.035] md:p-3">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-2">
           {categoryParts.map((p) => {
             const isUnlk = unlocked.has(p.id);
@@ -270,6 +273,7 @@ export default function RocketBuilder() {
             );
           })}
         </div>
+      </div>
       </div>
       </section>
 

@@ -168,11 +168,12 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
             {/* Objective */}
             <div>
               <span className="stat-label">2 · Objective</span>
-              <div className="mt-1 grid grid-cols-2 gap-1">
+              <div className="mt-1 grid grid-cols-2 gap-1 items-stretch">
                 {missionKinds.map((k) => (
                   <button key={k}
                     onClick={() => setMissionKind(k)}
-                    className={`text-[11px] rounded-md py-1.5 px-2 border tracking-wide font-bold
+                    className={`min-h-[2.25rem] flex items-center justify-center text-center
+                      text-[11px] leading-tight rounded-md py-1.5 px-2 border tracking-wide font-bold
                       ${mission.kind === k
                         ? 'border-cyan/70 bg-cyan/20 text-cyan'
                         : 'border-white/12 bg-white/[0.05] text-dim'}`}>

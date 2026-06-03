@@ -210,6 +210,16 @@ export class Simulator {
       const speedMs = s.velocity.length() * 1000;
       const safeMs = LAND_FLOOR_MS + altitude * LAND_RATE;
       s.throttle = speedMs > safeMs ? 1 : 0;
+
+      // Stage the lander LATE: only once the upper stage has braked the bulk of
+      // the arrival speed and we're low and slow, so the lander's small tank
+      // just finishes the touchdown instead of fighting the whole descent.
+      if (this.cfg.landerIndex >= 0 && !s.deployedLander) {
+        const lowEnough = altitude < Math.max(2, body.radius * 0.35);
+        const slowEnough = speedMs < 90;
+        const onLanderStage = s.activeStage >= this.cfg.landerIndex;
+        if (lowEnough && slowEnough && !onLanderStage) this.doDeployLander();
+      }
     }
 
     // --- Powered-ascent autopilot (relaunch from a surface) ---

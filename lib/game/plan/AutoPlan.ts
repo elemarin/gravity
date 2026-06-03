@@ -99,8 +99,11 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
       addReturnLeg(nodes, launchId);
     }
   } else {
-    // Land (one-way) — powered descent + lander/parachute on arrival.
-    nodes.push(node('at-soi-entry', undefined, dest.targetId, { descend: true, deployLander: true }));
+    // Land (one-way) — brake the arrival on the upper stage with the powered
+    // descent autopilot; the lander (if fitted) auto-separates late and slow for
+    // the final touchdown, so its small tank is never asked to kill the whole
+    // arrival speed alone.
+    nodes.push(node('at-soi-entry', undefined, dest.targetId, { descend: true }));
     if (kind === 'land-return') {
       // After touchdown, fly the ascent autopilot back to orbit, then head home.
       nodes.push(node('after-touchdown', 3, undefined, { ascend: true }));
