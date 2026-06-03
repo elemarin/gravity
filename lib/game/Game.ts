@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Renderer } from './Renderer';
 import { Planet } from './entities/Planet';
 import { Rocket, ROCKET_START_ALTITUDE } from './entities/Rocket';
+import { Launchpad } from './entities/Launchpad';
 import { TrajectoryLine } from './TrajectoryLine';
 import { MilestoneManager } from './career/Milestones';
 import { Simulator, SimConfig } from './plan/Simulator';
@@ -38,6 +39,7 @@ export class Game {
   rocket: Rocket;
   private trajectory: TrajectoryLine;
   private milestones: MilestoneManager;
+  private launchpad?: Launchpad;
 
   private bodies: Body[];
   private launchBodyId: string;
@@ -74,6 +76,11 @@ export class Game {
     this.trajectory = new TrajectoryLine(this.renderer.scene);
     this.milestones = new MilestoneManager(opts.completedMilestoneIds ?? []);
     this.milestones.onComplete = (m) => this.callbacks.onMilestoneComplete?.(m.id, m.unlocks);
+
+    // Launchpad at the surface of the first/launch body
+    const lb = this.launchBody();
+    const surfacePos = lb.center.clone().add(new THREE.Vector3(0, lb.radius, 0));
+    this.launchpad = new Launchpad(this.renderer.scene, surfacePos, lb.center);
 
     this.cfg = this.buildConfig();
     this.sim = new Simulator(this.cfg, this.plan);
@@ -271,7 +278,7 @@ export class Game {
 
       this.simTrajectoryTimer -= realDt;
       if (this.simTrajectoryTimer <= 0) {
-        this.simTrajectoryTimer = 0.45;
+        this.simTrajectoryTimer = 0.1;
         this.updateSimTrajectory();
       }
     } else {
@@ -456,6 +463,7 @@ export class Game {
     this.stop();
     this.trajectory.dispose();
     this.rocket.dispose();
+    this.launchpad?.dispose();
     this.planets.forEach((p) => p.dispose());
     this.renderer.dispose();
   }

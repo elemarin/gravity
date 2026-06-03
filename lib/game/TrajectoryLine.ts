@@ -27,7 +27,7 @@ export class TrajectoryLine {
   private material: THREE.LineBasicMaterial;
   private apoMarker: THREE.Sprite;
   private periMarker: THREE.Sprite;
-  private landingMarker: THREE.Sprite;
+  private landingMarker: THREE.Mesh;
   private apoCanvas: HTMLCanvasElement;
   private periCanvas: HTMLCanvasElement;
 
@@ -53,7 +53,7 @@ export class TrajectoryLine {
     const landing = this.makeLandingMarker();
     this.apoMarker = apo.sprite;
     this.periMarker = peri.sprite;
-    this.landingMarker = landing.sprite;
+    this.landingMarker = landing.mesh;
     this.apoCanvas = apo.canvas;
     this.periCanvas = peri.canvas;
     scene.add(this.apoMarker, this.periMarker, this.landingMarker);
@@ -105,17 +105,19 @@ export class TrajectoryLine {
     canvas.width = LANDING_MARKER_DIMENSION;
     canvas.height = LANDING_MARKER_DIMENSION;
     const tex = new THREE.CanvasTexture(canvas);
-    const mat = new THREE.SpriteMaterial({
+    const geo = new THREE.CircleGeometry(LANDING_MARKER_SCALE / 2, 32);
+    const mat = new THREE.MeshBasicMaterial({
       map: tex,
       transparent: true,
       depthTest: false,
       depthWrite: false,
+      side: THREE.DoubleSide,
     });
-    const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(LANDING_MARKER_SCALE, LANDING_MARKER_SCALE, 1);
-    sprite.visible = false;
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = 1;
+    mesh.visible = false;
     this.drawLandingMarker(canvas);
-    return { sprite, canvas };
+    return { mesh, canvas };
   }
 
   private drawLabel(canvas: HTMLCanvasElement, label: string, color: string) {
@@ -198,9 +200,15 @@ export class TrajectoryLine {
       const radial = site.clone().sub(focus);
       const radialLengthSq = radial.lengthSq();
       if (radialLengthSq > MIN_RADIAL_LENGTH_SQ) {
+        const radialNorm = radial.normalize();
         this.landingMarker.position.copy(focus).addScaledVector(
-          radial.normalize(),
+          radialNorm,
           radius + LANDING_MARKER_SURFACE_OFFSET,
+        );
+        // Orient the circle disc to lie flat on the terrain surface
+        this.landingMarker.quaternion.setFromUnitVectors(
+          new THREE.Vector3(0, 0, 1),
+          radialNorm,
         );
         this.landingMarker.visible = true;
       } else {
@@ -214,10 +222,14 @@ export class TrajectoryLine {
   dispose() {
     this.geometry.dispose();
     this.material.dispose();
-    [this.apoMarker, this.periMarker, this.landingMarker].forEach((sprite) => {
+    [this.apoMarker, this.periMarker].forEach((sprite) => {
       const mat = sprite.material as THREE.SpriteMaterial;
       mat.map?.dispose();
       mat.dispose();
     });
+    const landingMat = this.landingMarker.material as THREE.MeshBasicMaterial;
+    landingMat.map?.dispose();
+    landingMat.dispose();
+    (this.landingMarker.geometry as THREE.BufferGeometry).dispose();
   }
 }

@@ -80,7 +80,7 @@ export default function HUDOverlay({
       >
         {/* Phase row */}
         <div
-          className="px-2.5 pt-2 pb-1 text-[7px] tracking-[0.2em]"
+          className="px-2.5 pt-2 pb-1 text-[12px] tracking-[0.2em]"
           style={{ color: meta.color, textShadow: `0 0 8px ${meta.color}` }}
         >
           {meta.label}
@@ -94,16 +94,16 @@ export default function HUDOverlay({
         {/* Alt + Vel values */}
         <div className="px-2.5 pb-2 grid grid-cols-2 gap-x-3">
           <div>
-            <div className="text-[6px] text-dim/60 tracking-widest mb-0.5">ALT</div>
+            <div className="text-[10px] text-dim/60 tracking-widest mb-0.5">ALT</div>
             <div
-              className="text-[13px] tabular-nums leading-none text-ink"
+              className="text-[18px] tabular-nums leading-none text-ink"
               style={{ textShadow: `0 0 10px ${meta.color}88` }}
             >{altLabel}</div>
           </div>
           <div>
-            <div className="text-[6px] text-orange/60 tracking-widest mb-0.5">VEL</div>
+            <div className="text-[10px] text-orange/60 tracking-widest mb-0.5">VEL</div>
             <div
-              className="text-[13px] tabular-nums leading-none text-ink"
+              className="text-[18px] tabular-nums leading-none text-ink"
               style={{ textShadow: '0 0 10px rgba(255,138,61,0.5)' }}
             >{spdLabel}</div>
           </div>
@@ -112,7 +112,7 @@ export default function HUDOverlay({
         {/* Orbit info */}
         {showOrbit && (
           <div
-            className="px-2.5 pb-2 flex flex-wrap gap-x-2 gap-y-1 text-[6px] leading-tight"
+            className="px-2.5 pb-2 flex flex-wrap gap-x-2 gap-y-1 text-[11px] leading-tight"
             style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}
           >
             <span>
@@ -129,7 +129,7 @@ export default function HUDOverlay({
         {/* Stage indicator */}
         {stageCount > 1 && (
           <div
-            className="px-2.5 pb-1.5 text-[6px]"
+            className="px-2.5 pb-1.5 text-[11px]"
             style={{
               borderTop: '1px solid rgba(255,255,255,0.06)',
               color: meta.color,
@@ -146,7 +146,7 @@ export default function HUDOverlay({
         <div
           className="absolute bottom-[calc(5.5rem+env(safe-area-inset-bottom))]
                      left-1/2 -translate-x-1/2
-                     px-3 py-1.5 text-[7px] text-center
+                     px-3 py-1.5 text-[12px] text-center
                      max-w-[calc(100vw-3rem)] truncate"
           style={{
             background: 'rgba(4,6,14,0.8)',

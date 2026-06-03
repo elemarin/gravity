@@ -15,10 +15,30 @@ export default function NavDrawer({ title = 'Menu' }: { title?: string }) {
 
   return (
     <>
+      {/* Desktop nav — horizontal bar, visible on md+ */}
+      <nav
+        className="hidden md:flex absolute z-50 top-[calc(0.75rem+env(safe-area-inset-top))]
+                   left-[calc(0.75rem+env(safe-area-inset-left))] items-center gap-2"
+      >
+        {MENU_ITEMS.map((item) => (
+          <Link
+            key={item.href}
+            href={item.href}
+            className="flex items-center gap-2 rounded-xl border border-white/20
+                       bg-panel/90 px-4 py-2 text-sm font-bold text-ink shadow-lg backdrop-blur
+                       transition hover:border-cyan/45 hover:text-cyan active:scale-95"
+          >
+            <span className="text-base leading-none">{item.icon}</span>
+            {item.label}
+          </Link>
+        ))}
+      </nav>
+
+      {/* Mobile hamburger — visible below md */}
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="absolute z-50 top-[calc(0.75rem+env(safe-area-inset-top))] left-[calc(0.75rem+env(safe-area-inset-left))]
+        className="md:hidden absolute z-50 top-[calc(0.75rem+env(safe-area-inset-top))] left-[calc(0.75rem+env(safe-area-inset-left))]
                    inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/20
                    bg-panel/90 text-ink shadow-lg backdrop-blur transition hover:border-cyan/45 hover:text-cyan active:scale-95"
         aria-label="Open menu"
@@ -31,12 +51,12 @@ export default function NavDrawer({ title = 'Menu' }: { title?: string }) {
           type="button"
           aria-label="Close menu"
           onClick={() => setOpen(false)}
-          className="fixed inset-0 z-40 bg-black/35 backdrop-blur-[2px]"
+          className="fixed inset-0 z-40 bg-black/35 backdrop-blur-[2px] md:hidden"
         />
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[min(20rem,82vw)] flex-col gap-4 border-r border-white/15
+        className={`md:hidden fixed inset-y-0 left-0 z-50 flex w-[min(20rem,82vw)] flex-col gap-4 border-r border-white/15
                     bg-bg/95 px-5 pb-6 pt-[calc(5rem+env(safe-area-inset-top))] shadow-2xl backdrop-blur-xl
                     transition-transform duration-200 ${open ? 'translate-x-0' : '-translate-x-full'}`}
         aria-hidden={!open}

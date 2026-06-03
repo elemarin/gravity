@@ -6,7 +6,7 @@ import { getStages } from '../BuildSpec';
 import { getPart } from '../career/Parts';
 import type { SimState } from '../plan/Simulator';
 
-export const ROCKET_START_ALTITUDE = 0.05;
+export const ROCKET_START_ALTITUDE = 0.001;
 
 /**
  * Visual rocket. In Gravity 2.0 all physics live in the deterministic
@@ -87,7 +87,8 @@ export class Rocket {
     this.updateDroppedStages(dt, upCenter);
     const fuel = s.stageFuel[s.activeStage] ?? 0;
     const { pos, dir } = this.getNozzleInfo();
-    this.exhaust.update(dt, pos, dir, fuel > 0 ? s.throttle : 0);
+    const engineId = this.build.stages?.[s.activeStage]?.engineId ?? 'engine-basic';
+    this.exhaust.update(dt, pos, dir, fuel > 0 ? s.throttle : 0, engineId);
   }
 
   emitStageBurst() {
@@ -239,7 +240,8 @@ export class Rocket {
     east.normalize();
     const rad = THREE.MathUtils.degToRad(this.angle);
     const thrustUp = up.clone().multiplyScalar(Math.cos(rad)).addScaledVector(east, Math.sin(rad)).normalize();
-    const pos = this.position.clone().addScaledVector(thrustUp, -0.55);
+    // Spawn particles above rocket center so they're visible above the terrain surface
+    const pos = this.position.clone().addScaledVector(thrustUp, 0.2);
     return { pos, dir: thrustUp.clone().negate() };
   }
 
