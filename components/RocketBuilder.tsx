@@ -37,6 +37,7 @@ export default function RocketBuilder() {
   const [activeCategory, setActiveCategory] = useState<PartType>('engine');
   const [facilityLevel, setFacilityLevel] = useState(0);
   const [presetId, setPresetId] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     setBuild(loadBuild());
@@ -146,16 +147,27 @@ export default function RocketBuilder() {
   return (
     <main className="fixed inset-0 flex flex-col bg-bg overflow-hidden"
           style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
-      <NavDrawer title="Build Menu" />
+      <NavDrawer title="Build Menu" open={menuOpen} onOpenChange={setMenuOpen} hideTrigger />
 
-      {/* ── Header ── */}
-      <header className="shrink-0 flex items-center justify-between px-4 py-2.5 pl-20 border-b border-white/10 bg-white/[0.03]">
-        <div className="w-9" />
-        <h1 className="text-sm font-black tracking-widest text-ink">ROCKET BUILDER</h1>
+      {/* ── Header — menu, title and reset sit flush inside one toolbar ── */}
+      <header className="shrink-0 flex items-center gap-2 px-3 py-2 border-b-2 border-white/12 bg-white/[0.05]">
+        <button
+          onClick={() => setMenuOpen(true)}
+          className="md:hidden h-9 w-9 shrink-0 rounded-md border border-white/15 bg-white/[0.06]
+                     flex items-center justify-center text-dim transition
+                     hover:text-cyan hover:border-cyan/45 active:scale-95"
+          aria-label="Open menu"
+        >
+          <span className="text-base font-black leading-none">≡</span>
+        </button>
+        {/* Reserve space under the desktop floating nav so the title stays centred. */}
+        <div className="hidden md:block w-44 shrink-0" />
+        <h1 className="flex-1 text-center text-sm font-black tracking-widest text-ink">ROCKET BUILDER</h1>
         <button onClick={() => { setBuild(DEFAULT_BUILD); setSelectedStage(0); setPresetId(null); }}
-                className="w-9 h-9 rounded-md border-2 border-cyan/45 bg-cyan/[0.06]
-                           flex items-center justify-center text-cyan hover:bg-cyan/15 hover:border-cyan/70 active:scale-95"
-                aria-label="Reset">↻</button>
+                className="h-9 w-9 shrink-0 rounded-md border border-white/15 bg-white/[0.06]
+                           flex items-center justify-center text-dim transition
+                           hover:text-cyan hover:border-cyan/45 active:scale-95"
+                aria-label="Reset build">↻</button>
       </header>
 
       <section className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-2 overflow-hidden px-4 py-2

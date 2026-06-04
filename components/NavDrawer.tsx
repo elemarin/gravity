@@ -10,8 +10,26 @@ const MENU_ITEMS = [
   { href: '/career', label: 'Career', icon: '★' },
 ];
 
-export default function NavDrawer({ title = 'Menu' }: { title?: string }) {
-  const [open, setOpen] = useState(false);
+export default function NavDrawer({
+  title = 'Menu',
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
+}: {
+  title?: string;
+  /** Controlled open state. When provided, the parent owns the open/close. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Hide the built-in mobile floating hamburger (e.g. when a screen renders
+      its own menu button inside a header bar). */
+  hideTrigger?: boolean;
+}) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (next: boolean) => {
+    if (onOpenChange) onOpenChange(next);
+    else setInternalOpen(next);
+  };
 
   return (
     <>
@@ -35,17 +53,19 @@ export default function NavDrawer({ title = 'Menu' }: { title?: string }) {
       </nav>
 
       {/* Mobile hamburger — retro pixel button, visible below md */}
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="md:hidden absolute z-50 top-[calc(0.75rem+env(safe-area-inset-top))] left-[calc(0.75rem+env(safe-area-inset-left))]
-                   inline-flex h-11 w-11 items-center justify-center rounded-md border-2 border-cyan/50
-                   bg-cyan/[0.08] text-cyan shadow-[0_0_12px_rgba(31,217,255,0.25)] transition
-                   hover:bg-cyan/15 hover:border-cyan/70 active:scale-95"
-        aria-label="Open menu"
-      >
-        <span className="text-lg font-black leading-none tracking-tighter">≡</span>
-      </button>
+      {!hideTrigger && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="md:hidden absolute z-50 top-[calc(0.75rem+env(safe-area-inset-top))] left-[calc(0.75rem+env(safe-area-inset-left))]
+                     inline-flex h-11 w-11 items-center justify-center rounded-md border-2 border-cyan/50
+                     bg-cyan/[0.08] text-cyan shadow-[0_0_12px_rgba(31,217,255,0.25)] transition
+                     hover:bg-cyan/15 hover:border-cyan/70 active:scale-95"
+          aria-label="Open menu"
+        >
+          <span className="text-lg font-black leading-none tracking-tighter">≡</span>
+        </button>
+      )}
 
       {open && (
         <button

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { FlightState, FlightPhase } from '@/lib/game/types';
 
 const PHASE_META: Record<FlightPhase, { label: string; color: string }> = {
@@ -32,14 +33,18 @@ function fmtOrbit(km: number): string {
 export default function HUDOverlay({
   state,
   nextTarget,
-  timeScale,
   objective,
 }: {
   state: FlightState | null;
   nextTarget: string;
-  timeScale: number;
+  /** Accepted for API compatibility; the HUD no longer shows the warp factor
+      (it's obvious from the warp button), so the value is intentionally unused. */
+  timeScale?: number;
   objective: string;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [maneuversOpen, setManeuversOpen] = useState(true);
+
   const phase    = state?.phase ?? 'prelaunch';
   const meta     = PHASE_META[phase];
   const altLabel = state ? fmtAlt(state.altitude) : '0m';
@@ -111,13 +116,16 @@ export default function HUDOverlay({
         </span>
       </div>
 
-      {/* Main HUD card */}
+      {/* Main HUD card — collapsible. The phase is conveyed by the accent
+          colour, so the textual phase/time-scale row is intentionally omitted
+          (both are obvious from context and the warp button below). */}
       <div
-        className="absolute top-[calc(0.6rem+env(safe-area-inset-top))]
+        className={`pointer-events-auto absolute top-[calc(0.6rem+env(safe-area-inset-top))]
                    left-[calc(0.6rem+env(safe-area-inset-left))]
-                   right-[calc(0.6rem+env(safe-area-inset-right))]
-                   overflow-hidden
-                   sm:left-auto sm:max-w-[calc(100vw-1.2rem)]"
+                   overflow-hidden rounded-md
+                   ${collapsed
+                     ? 'ml-12 sm:ml-0'
+                     : 'right-[calc(0.6rem+env(safe-area-inset-right))] sm:left-auto sm:max-w-[calc(100vw-1.2rem)]'}`}
         style={{
           background: 'rgba(4,6,14,0.85)',
           border: `1px solid ${meta.color}55`,
@@ -128,108 +136,112 @@ export default function HUDOverlay({
           imageRendering: 'pixelated',
         }}
       >
-        {/* Phase row */}
-        <div
-          className="pl-14 pr-2.5 sm:px-3 pt-2.5 pb-1 text-[11px] sm:text-[13px] tracking-[0.2em]"
-          style={{ color: meta.color, textShadow: `0 0 8px ${meta.color}` }}
-        >
-          {meta.label}
-          {timeScale > 1 && (
-            <span className="ml-2 text-yellow" style={{ textShadow: '0 0 8px #ffd84d' }}>
-              {timeScale}×
-            </span>
-          )}
-        </div>
-
-        <div className="pl-14 pr-2.5 sm:px-3 pb-2 text-[9px] sm:text-[10px] leading-tight text-yellow truncate">
-          <span className="text-dim/70">OBJECTIVE </span>{objective}
-        </div>
-
-        {/* Alt + Vel values */}
-        <div className="pl-14 pr-2.5 sm:px-3 pb-2.5 grid grid-cols-2 gap-x-3 sm:gap-x-4">
-          <div>
-            <div className="text-[11px] text-dim/70 tracking-widest mb-0.5">ALT</div>
-            <div
-              className="text-[16px] sm:text-[21px] tabular-nums leading-none text-ink"
-              style={{ textShadow: `0 0 10px ${meta.color}88` }}
-            >{altLabel}</div>
-          </div>
-          <div>
-            <div className="text-[11px] text-orange/80 tracking-widest mb-0.5">VEL</div>
-            <div
-              className="text-[16px] sm:text-[21px] tabular-nums leading-none text-ink"
-              style={{ textShadow: '0 0 10px rgba(255,154,69,0.5)' }}
-            >{spdLabel}</div>
-          </div>
-        </div>
-
-        {/* Orbit info */}
-        {showOrbit && (
-          <div
-            className="px-2.5 sm:px-3 pb-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] sm:text-[12px] leading-tight"
-            style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
+        {collapsed ? (
+          /* Collapsed — a tiny handle (offset to clear the hamburger). */
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] tracking-[0.15em]"
+            style={{ color: meta.color }}
+            aria-label="Show flight info"
           >
-            <span>
-              <span className="text-dim/50">AP </span>
-              <span className="text-green">{fmtOrbit(apo)}</span>
-            </span>
-            <span>
-              <span className="text-dim/50">PE </span>
-              <span className={peri < 80 ? 'text-orange' : 'text-cyan'}>{fmtOrbit(peri)}</span>
-            </span>
-          </div>
-        )}
-
-        {/* Target distance (interplanetary guidance) */}
-        {state?.targetName && state.targetDistance !== undefined && (
-          <div
-            className="px-2.5 sm:px-3 pb-1.5 text-[11px] sm:text-[12px]"
-            style={{ borderTop: '1px solid rgba(255,255,255,0.1)', color: '#bb8bff', paddingTop: 4 }}
-          >
-            → {state.targetName} {fmtOrbit(state.targetDistance)}
-          </div>
-        )}
-
-        {visibleGuidance.length > 0 && (
-          <div
-            className="px-2.5 sm:px-3 pb-2 pt-1.5 text-[9px] sm:text-[10px] leading-tight"
-            style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
-          >
-            <div className="mb-1 tracking-[0.18em] text-cyan/80">MANEUVERS</div>
-            <div className="flex flex-col gap-1">
-              {visibleGuidance.map((step) => {
-                const current = step.status === 'current';
-                const done = step.status === 'done';
-                return (
-                  <div
-                    key={step.id}
-                    className={`grid grid-cols-[1rem_1fr] gap-1 ${current ? 'text-yellow' : done ? 'text-green/80' : 'text-dim/70'}`}
-                  >
-                    <span>{done ? '✓' : current ? '▶' : '·'}</span>
-                    <span className={current ? 'text-ink' : ''}>
-                      <span className="font-black">{step.trigger}</span>
-                      <span className="text-dim/70"> → </span>
-                      {step.action}
-                    </span>
-                  </div>
-                );
-              })}
+            <span className="leading-none">▾</span>
+            <span className="tabular-nums text-ink">{altLabel}</span>
+          </button>
+        ) : (
+          <>
+            {/* Objective + collapse toggle. pl-14 clears the hamburger,
+                pr-14 keeps the toggle clear of the sound button. */}
+            <div className="flex items-center gap-2 pl-14 pr-14 sm:pl-3 pt-2 pb-1.5">
+              <div className="min-w-0 flex-1 truncate text-[9px] sm:text-[10px] leading-tight text-yellow">
+                <span className="text-dim/70">OBJECTIVE </span>{objective}
+              </div>
+              <button
+                type="button"
+                onClick={() => setCollapsed(true)}
+                className="shrink-0 leading-none text-[11px]"
+                style={{ color: meta.color }}
+                aria-label="Collapse flight info"
+              >▴</button>
             </div>
-          </div>
-        )}
 
-        {/* Stage indicator */}
-        {stageCount > 1 && (
-          <div
-            className="px-2.5 sm:px-3 pb-1.5 text-[11px] sm:text-[12px]"
-            style={{
-              borderTop: '1px solid rgba(255,255,255,0.1)',
-              color: meta.color,
-              paddingTop: 4,
-            }}
-          >
-            STG {activeStage + 1}/{stageCount}
-          </div>
+            {/* Altitude · velocity · apoapsis · periapsis — single line. */}
+            <div className="pl-14 pr-2.5 sm:px-3 pb-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5
+                            text-[12px] sm:text-[13px] leading-tight tabular-nums">
+              <span>
+                <span className="text-dim/60">ALT </span>
+                <span className="font-black text-ink">{altLabel}</span>
+              </span>
+              <span>
+                <span className="text-orange/80">VEL </span>
+                <span className="font-black text-ink">{spdLabel}</span>
+              </span>
+              {showOrbit && (
+                <span>
+                  <span className="text-dim/50">AP </span>
+                  <span className="font-black text-green">{fmtOrbit(apo)}</span>
+                </span>
+              )}
+              {showOrbit && (
+                <span>
+                  <span className="text-dim/50">PE </span>
+                  <span className={`font-black ${peri < 80 ? 'text-orange' : 'text-cyan'}`}>{fmtOrbit(peri)}</span>
+                </span>
+              )}
+              {stageCount > 1 && (
+                <span style={{ color: meta.color }}>STG {activeStage + 1}/{stageCount}</span>
+              )}
+            </div>
+
+            {/* Target distance (interplanetary guidance) */}
+            {state?.targetName && state.targetDistance !== undefined && (
+              <div
+                className="px-2.5 sm:px-3 pb-1.5 text-[11px] sm:text-[12px]"
+                style={{ borderTop: '1px solid rgba(255,255,255,0.1)', color: '#bb8bff', paddingTop: 4 }}
+              >
+                → {state.targetName} {fmtOrbit(state.targetDistance)}
+              </div>
+            )}
+
+            {/* Collapsible maneuvers list */}
+            {visibleGuidance.length > 0 && (
+              <div
+                className="px-2.5 sm:px-3 pb-2 pt-1.5 text-[9px] sm:text-[10px] leading-tight"
+                style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setManeuversOpen((o) => !o)}
+                  className="mb-1 flex w-full items-center gap-1.5 tracking-[0.18em] text-cyan/80"
+                >
+                  <span className="leading-none">{maneuversOpen ? '▾' : '▸'}</span>
+                  MANEUVERS
+                  {!maneuversOpen && <span className="text-dim/50">({visibleGuidance.length})</span>}
+                </button>
+                {maneuversOpen && (
+                  <div className="flex flex-col gap-1">
+                    {visibleGuidance.map((step) => {
+                      const current = step.status === 'current';
+                      const done = step.status === 'done';
+                      return (
+                        <div
+                          key={step.id}
+                          className={`grid grid-cols-[1rem_1fr] gap-1 ${current ? 'text-yellow' : done ? 'text-green/80' : 'text-dim/70'}`}
+                        >
+                          <span>{done ? '✓' : current ? '▶' : '·'}</span>
+                          <span className={current ? 'text-ink' : ''}>
+                            <span className="font-black">{step.trigger}</span>
+                            <span className="text-dim/70"> → </span>
+                            {step.action}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
 
