@@ -448,6 +448,7 @@ export class Game {
       canStage: s.activeStage < stageCount - 1,
       parachuteDeployed: s.deployedParachute,
       launchBodyId: this.launchBodyId,
+      currentBodyId: this.dominant().id,
       landedBodyId: s.landedBodyId,
       reachedBodyIds: Array.from(s.reachedBodyIds),
       landerDeployed: s.deployedLander,

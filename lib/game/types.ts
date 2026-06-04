@@ -28,6 +28,7 @@ export type FlightState = {
   canStage: boolean;     // true when there is a lower stage to jettison
   parachuteDeployed: boolean;
   launchBodyId?: string;        // body the flight launched from
+  currentBodyId?: string;       // body whose gravity currently dominates
   landedBodyId?: string | null; // body currently/last landed on
   reachedBodyIds?: string[];    // bodies whose vicinity has been reached
   landerDeployed?: boolean;     // a lander payload has separated

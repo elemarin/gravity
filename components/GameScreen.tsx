@@ -140,6 +140,7 @@ export default function GameScreen() {
                 altitude: s.altitude,
                 firing: isFiring(s),
                 engineId: activeEngineId(buildRef.current, s),
+                bodyId: s.currentBodyId,
               });
             }
           },
