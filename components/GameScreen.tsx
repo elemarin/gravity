@@ -127,7 +127,9 @@ export default function GameScreen() {
         callbacks: {
           onState: (s) => {
             setFlightState(s);
-            if (game.mode === 'sim') {
+            // Note: `gameRef.current` (not the local `game`) — this callback can
+            // fire from within the Game constructor, before `game` is assigned.
+            if (gameRef.current?.mode === 'sim') {
               updateFlightAudio({
                 throttle: s.throttle,
                 altitude: s.altitude,
