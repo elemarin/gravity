@@ -1,20 +1,23 @@
 /**
  * Programmatic flight audio built entirely on the Web Audio API — no sample
  * files to host or download (which matters: the app is rebuilt from scratch
- * each session). Two layers cross-fade on flight state:
+ * each session). Two layers play together:
  *
- *   • A "chill space" ambient pad (slow chord pad + sub drone + reverb bells)
- *     whose level rises with altitude — barely there on the pad, blooming once
- *     you reach space.
+ *   • A melodic "keyboard" score (gentle arpeggiated keys + a soft warm pad)
+ *     inspired by the calm, uplifting tone of Minecraft. Every world has its
+ *     own theme — key, mode and tempo — that plays while you are in its orbit
+ *     or atmosphere; the deep-space cruise between worlds drops to a sparser,
+ *     quieter version of the same idea so space stays chill but never silent.
  *   • A thruster layer (filtered noise + low rumble + optional tonal whine)
- *     driven by throttle, so it dominates near the ground and during burns.
+ *     driven by throttle, so it dominates near the ground and during burns and
+ *     gently ducks the music while you hold the throttle down.
  *
  * Each engine has its own voice, so the thruster morphs timbre when you stage.
  * Everything is gated behind a user gesture (the Play button) per browser
  * autoplay rules, and degrades silently where Web Audio is unsupported.
  */
 
-import { KARMAN_LINE } from '@/lib/game/constants';
+import { SOLAR_BODIES } from '@/lib/game/bodies';
 
 // ── Engine voices ──────────────────────────────────────────────────────────
 // Each engine maps to a thruster timbre. rumble = low oscillator tone,
@@ -59,29 +62,85 @@ export function engineVoice(id: string | undefined): EngineVoice {
   return { ...DEFAULT_VOICE, ...(id ? ENGINE_VOICES[id] : undefined) };
 }
 
-// ── Ambient music material ──────────────────────────────────────────────────
-// A calm vi–IV–I–V progression voiced in the mid register so the three pad
-// voices glide smoothly between chords.
-const CHORDS: number[][] = [
-  [220.00, 261.63, 329.63], // Am  (A3 C4 E4)
-  [174.61, 261.63, 349.23], // F   (F3 C4 F4)
-  [196.00, 261.63, 329.63], // C   (G3 C4 E4)
-  [196.00, 246.94, 293.66], // G   (G3 B3 D4)
-];
-const CHORD_DUR = 14; // seconds per chord
-// Pentatonic sparkle bells that drift in once you're up in space.
-const BELL_SCALE = [523.25, 587.33, 659.25, 783.99, 880.00];
+// ── Per-world musical themes ────────────────────────────────────────────────
+// Gentle, uplifting keyboard music in the spirit of Minecraft. Each theme is a
+// key + mode + chord progression + tempo, from which a soft arpeggiator draws a
+// flowing melody over a warm pad. Distinct roots, modes and tempos give every
+// world its own mood; the deep-space cruise uses a sparse, quiet, low variant.
+
+const MODES = {
+  major:      [0, 2, 4, 5, 7, 9, 11],
+  minor:      [0, 2, 3, 5, 7, 8, 10],
+  dorian:     [0, 2, 3, 5, 7, 9, 10],
+  lydian:     [0, 2, 4, 6, 7, 9, 11],
+  mixolydian: [0, 2, 4, 5, 7, 9, 10],
+  phrygian:   [0, 1, 3, 5, 7, 8, 10],
+};
+
+type Theme = {
+  rootMidi: number; // tonic note (MIDI; 60 = middle C)
+  mode: number[];   // scale intervals from the tonic
+  prog: number[];   // chord roots as scale-degree indices, one per bar
+  stepMs: number;   // time between arpeggio notes (tempo + spaciousness)
+  level: number;    // overall loudness (0-1)
+  bright: number;   // tone/pad brightness (0-1)
+  melOct: number;   // octaves to lift the melody above the pad
+};
+
+// Keyed by body id (plus 'deepspace' for the cruise). Worlds without a hand
+// tuned theme fall back to deep space, so new bodies still get music.
+const THEMES: Record<string, Theme> = {
+  // Home — warm, hopeful C major (I–V–vi–IV).
+  earth:    { rootMidi: 60, mode: MODES.major,      prog: [0, 4, 5, 3], stepMs: 300, level: 0.55, bright: 0.62, melOct: 1 },
+  // Lonely but pretty A-minor, slow and sparse.
+  moon:     { rootMidi: 57, mode: MODES.minor,      prog: [0, 5, 3, 4], stepMs: 420, level: 0.42, bright: 0.42, melOct: 1 },
+  // Bright, quick, shimmering lydian D.
+  mercury:  { rootMidi: 62, mode: MODES.lydian,     prog: [0, 1, 4, 0], stepMs: 250, level: 0.46, bright: 0.82, melOct: 1 },
+  // Lush, mysterious, thick lydian E♭.
+  venus:    { rootMidi: 63, mode: MODES.lydian,     prog: [0, 3, 4, 5], stepMs: 380, level: 0.5,  bright: 0.55, melOct: 1 },
+  // Adventurous dorian G.
+  mars:     { rootMidi: 55, mode: MODES.dorian,     prog: [0, 3, 4, 3], stepMs: 300, level: 0.5,  bright: 0.5,  melOct: 1 },
+  // Tiny, high, twinkling.
+  phobos:   { rootMidi: 64, mode: MODES.major,      prog: [0, 4, 5, 4], stepMs: 360, level: 0.36, bright: 0.72, melOct: 1 },
+  // Cold, distant minor.
+  ceres:    { rootMidi: 59, mode: MODES.minor,      prog: [0, 5, 6, 4], stepMs: 440, level: 0.36, bright: 0.36, melOct: 1 },
+  // Grand, broad, regal mixolydian F.
+  jupiter:  { rootMidi: 53, mode: MODES.mixolydian, prog: [0, 3, 4, 0], stepMs: 360, level: 0.52, bright: 0.46, melOct: 1 },
+  // Serene, floating lydian B♭.
+  saturn:   { rootMidi: 58, mode: MODES.lydian,     prog: [0, 4, 1, 4], stepMs: 400, level: 0.46, bright: 0.52, melOct: 1 },
+  // Hazy, exotic dorian C♯.
+  titan:    { rootMidi: 61, mode: MODES.dorian,     prog: [0, 6, 3, 4], stepMs: 360, level: 0.42, bright: 0.4,  melOct: 1 },
+  // Icy, crystalline, high lydian.
+  uranus:   { rootMidi: 68, mode: MODES.lydian,     prog: [0, 4, 5, 1], stepMs: 300, level: 0.42, bright: 0.85, melOct: 1 },
+  // Deep, vast, slow minor at the edge of the system.
+  neptune:  { rootMidi: 50, mode: MODES.minor,      prog: [0, 5, 3, 6], stepMs: 460, level: 0.44, bright: 0.4,  melOct: 2 },
+  // The cruise — quiet, sparse, low; chill but always present.
+  deepspace:{ rootMidi: 45, mode: MODES.dorian,     prog: [0, 3, 4, 0], stepMs: 620, level: 0.3,  bright: 0.32, melOct: 2 },
+};
+
+const DEFAULT_THEME_ID = 'earth';
+const STEPS_PER_BAR = 8;
+// Gentle broken-chord shape over scale degrees relative to the chord root
+// (0 root, 2 third, 4 fifth, 6 seventh, 7 octave) — flowing, never busy.
+const ARP_PATTERN = [0, 2, 4, 7, 4, 2, 6, 4];
+
+function midiToHz(m: number): number {
+  return 440 * Math.pow(2, (m - 69) / 12);
+}
+
+/** MIDI note for a scale degree of a theme (degrees beyond the mode wrap up an octave). */
+function modeMidi(t: Theme, degree: number): number {
+  const n = t.mode.length;
+  const oct = Math.floor(degree / n);
+  const idx = ((degree % n) + n) % n;
+  return t.rootMidi + 12 * oct + t.mode[idx];
+}
 
 // Overall layer ceilings, kept conservative so the mix never clips.
 const THRUSTER_LEVEL = 0.5;
 const MUSIC_LEVEL = 0.5;
 
 const SOUND_KEY = 'gravity:sound';
-
-function smoothstep(x: number): number {
-  const t = Math.max(0, Math.min(1, x));
-  return t * t * (3 - 2 * t);
-}
 
 function makeNoiseBuffer(ctx: AudioContext, seconds: number): AudioBuffer {
   const len = Math.floor(ctx.sampleRate * seconds);
@@ -108,9 +167,10 @@ type PadVoice = { oscA: OscillatorNode; oscB: OscillatorNode; gain: GainNode };
 
 export type FlightAudioParams = {
   throttle: number;   // 0-1
-  altitude: number;   // km above launch surface
+  altitude: number;   // km above the dominant body's surface
   firing: boolean;    // engine actually producing thrust (has fuel)
   engineId?: string;  // active engine, for timbre
+  bodyId?: string;    // body whose gravity currently dominates (for the theme)
 };
 
 class SpaceAudio {
@@ -119,7 +179,6 @@ class SpaceAudio {
   private running = false;
   private enabled = true;
   private loadedEnabled = false;
-  private lastAltNorm = 0;
 
   // shared
   private master!: GainNode;
@@ -130,9 +189,12 @@ class SpaceAudio {
   private musicBus!: GainNode;
   private padFilter!: BiquadFilterNode;
   private padVoices: PadVoice[] = [];
-  private chordIndex = 0;
-  private chordTimer: ReturnType<typeof setInterval> | null = null;
-  private bellTimer: ReturnType<typeof setTimeout> | null = null;
+  private theme: Theme = THEMES[DEFAULT_THEME_ID];
+  private currentThemeId = DEFAULT_THEME_ID;
+  private pendingThemeId = DEFAULT_THEME_ID;
+  private step = 0;
+  private musicDuck = 1;
+  private seqTimer: ReturnType<typeof setTimeout> | null = null;
 
   // thruster
   private thrusterBus!: GainNode;
@@ -213,53 +275,35 @@ class SpaceAudio {
     this.musicBus.gain.value = 0.0001;
     this.musicBus.connect(this.master);
 
+    // Warm sustained pad under the keys. Voices glide to the current chord.
     this.padFilter = ctx.createBiquadFilter();
     this.padFilter.type = 'lowpass';
-    this.padFilter.frequency.value = 1100;
-    this.padFilter.Q.value = 0.6;
+    this.padFilter.frequency.value = 900;
+    this.padFilter.Q.value = 0.5;
     this.padFilter.connect(this.musicBus);
 
-    // Send the pad into reverb for a spacious tail.
     const padSend = ctx.createGain();
-    padSend.gain.value = 0.6;
+    padSend.gain.value = 0.5;
     this.padFilter.connect(padSend).connect(this.reverb);
 
-    // Slow filter sweep keeps the pad gently evolving.
-    const filtLfo = ctx.createOscillator();
-    filtLfo.frequency.value = 0.05;
-    const filtLfoGain = ctx.createGain();
-    filtLfoGain.gain.value = 350;
-    filtLfo.connect(filtLfoGain).connect(this.padFilter.frequency);
-    filtLfo.start();
-
-    // Three detuned pad voices.
-    const chord = CHORDS[0];
+    const chord = this.chordTones(this.theme, 0);
     for (let i = 0; i < 3; i++) {
       const gain = ctx.createGain();
-      gain.gain.value = 0.16;
+      gain.gain.value = 0.05; // soft — the melody sits on top
       gain.connect(this.padFilter);
       const oscA = ctx.createOscillator();
       oscA.type = 'triangle';
-      oscA.frequency.value = chord[i];
+      oscA.frequency.value = midiToHz(chord[i]);
       const oscB = ctx.createOscillator();
       oscB.type = 'sine';
-      oscB.frequency.value = chord[i];
-      oscB.detune.value = 7; // subtle chorus shimmer
+      oscB.frequency.value = midiToHz(chord[i]);
+      oscB.detune.value = 6; // subtle chorus shimmer
       oscA.connect(gain);
       oscB.connect(gain);
       oscA.start();
       oscB.start();
       this.padVoices.push({ oscA, oscB, gain });
     }
-
-    // Low sub drone for warmth/depth.
-    const drone = ctx.createOscillator();
-    drone.type = 'sine';
-    drone.frequency.value = 65.41; // C2
-    const droneGain = ctx.createGain();
-    droneGain.gain.value = 0.09;
-    drone.connect(droneGain).connect(this.musicBus);
-    drone.start();
   }
 
   private buildThruster(ctx: AudioContext) {
@@ -327,73 +371,137 @@ class SpaceAudio {
     this.running = true;
     const t = ctx.currentTime;
     this.master.gain.setTargetAtTime(this.isEnabled() ? 1 : 0, t, 0.1);
-    this.musicBus.gain.setTargetAtTime(0.05 * MUSIC_LEVEL, t, 0.1);
     this.thrusterBus.gain.setTargetAtTime(0.0001, t, 0.05);
-    this.lastAltNorm = 0;
+    this.musicDuck = 1;
 
-    // Restart the chord progression and bell scheduler.
-    this.chordIndex = 0;
-    this.applyChord(0);
-    if (this.chordTimer) clearInterval(this.chordTimer);
-    this.chordTimer = setInterval(() => {
-      this.chordIndex = (this.chordIndex + 1) % CHORDS.length;
-      this.applyChord(this.chordIndex);
-    }, CHORD_DUR * 1000);
-    this.scheduleBell();
+    // Reset and start the keyboard sequencer from the top.
+    this.step = 0;
+    this.applyChord();
+    this.musicBus.gain.setTargetAtTime(this.theme.level * MUSIC_LEVEL, t, 0.6);
+    this.scheduleStep();
   }
 
-  /** End a flight: fade both layers out and pause schedulers. */
+  /** End a flight: fade both layers out and pause the sequencer. */
   stop() {
     this.running = false;
-    if (this.chordTimer) { clearInterval(this.chordTimer); this.chordTimer = null; }
-    if (this.bellTimer) { clearTimeout(this.bellTimer); this.bellTimer = null; }
+    if (this.seqTimer) { clearTimeout(this.seqTimer); this.seqTimer = null; }
     if (!this.ctx || !this.built) return;
     const t = this.ctx.currentTime;
     this.thrusterBus.gain.setTargetAtTime(0.0001, t, 0.2);
     this.musicBus.gain.setTargetAtTime(0.0001, t, 0.6);
   }
 
-  private applyChord(i: number) {
+  /** The three pad/triad tones (scale degrees) for a bar of a theme. */
+  private chordTones(t: Theme, bar: number): number[] {
+    const d = t.prog[((bar % t.prog.length) + t.prog.length) % t.prog.length];
+    return [modeMidi(t, d), modeMidi(t, d + 2), modeMidi(t, d + 4)];
+  }
+
+  /** Glide the pad to the current bar's chord and track theme brightness. */
+  private applyChord() {
     if (!this.ctx) return;
-    const chord = CHORDS[i];
-    const t = this.ctx.currentTime;
-    this.padVoices.forEach((voice, idx) => {
-      const f = chord[idx];
-      voice.oscA.frequency.setTargetAtTime(f, t, 2.2);
-      voice.oscB.frequency.setTargetAtTime(f, t, 2.2);
+    const bar = Math.floor(this.step / STEPS_PER_BAR);
+    const tones = this.chordTones(this.theme, bar);
+    const now = this.ctx.currentTime;
+    this.padVoices.forEach((v, i) => {
+      const f = midiToHz(tones[i]);
+      v.oscA.frequency.setTargetAtTime(f, now, 1.6);
+      v.oscB.frequency.setTargetAtTime(f, now, 1.6);
     });
+    this.padFilter.frequency.setTargetAtTime(600 + this.theme.bright * 1400, now, 1.5);
   }
 
-  private scheduleBell() {
-    if (this.bellTimer) clearTimeout(this.bellTimer);
-    const delay = 4 + Math.random() * 8;
-    this.bellTimer = setTimeout(() => {
-      if (this.running && this.lastAltNorm > 0.4) this.bell();
-      this.scheduleBell();
-    }, delay * 1000);
+  /** Schedule the next sequencer step on the current theme's tempo. */
+  private scheduleStep() {
+    if (this.seqTimer) clearTimeout(this.seqTimer);
+    const ms = this.theme.stepMs;
+    this.seqTimer = setTimeout(() => {
+      if (this.running) this.playStep();
+      this.scheduleStep();
+    }, ms);
   }
 
-  private bell() {
+  /** One arpeggio step: swap themes on bar lines, then voice a gentle key note. */
+  private playStep() {
+    const barPos = this.step % STEPS_PER_BAR;
+
+    if (barPos === 0) {
+      // Switch worlds on bar boundaries so the change never jars mid-phrase.
+      if (this.pendingThemeId !== this.currentThemeId && THEMES[this.pendingThemeId]) {
+        this.currentThemeId = this.pendingThemeId;
+        this.theme = THEMES[this.currentThemeId];
+        this.step = 0;
+      }
+      this.applyChord();
+    }
+
+    const t = this.theme;
+    const bar = Math.floor(this.step / STEPS_PER_BAR);
+    const d = t.prog[bar % t.prog.length];
+    // Sparser themes breathe more; busier ones still leave gaps.
+    const restChance = t.stepMs > 420 ? 0.3 : 0.13;
+    if (Math.random() >= restChance) {
+      const degree = d + t.melOct * t.mode.length + ARP_PATTERN[barPos];
+      const accent = barPos === 0 ? 1 : barPos === 4 ? 0.82 : 0.6;
+      const vel = accent * (0.7 + Math.random() * 0.3);
+      this.keyNote(modeMidi(t, degree), vel);
+    }
+    this.step++;
+  }
+
+  /** A single soft keyboard note — mellow additive tone with a ringing decay. */
+  private keyNote(midi: number, vel: number) {
     if (!this.ctx) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
-    const freq = BELL_SCALE[Math.floor(Math.random() * BELL_SCALE.length)];
-    const osc = ctx.createOscillator();
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    const gain = ctx.createGain();
-    const peak = 0.12 * this.lastAltNorm * MUSIC_LEVEL;
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), t + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 3.2);
-    const pan = ctx.createStereoPanner();
-    pan.pan.value = Math.random() * 1.6 - 0.8;
-    osc.connect(gain).connect(pan);
-    pan.connect(this.master);
-    pan.connect(this.reverb);
-    osc.start(t);
-    osc.stop(t + 3.4);
-    osc.onended = () => { osc.disconnect(); gain.disconnect(); pan.disconnect(); };
+    const f = midiToHz(midi);
+    const dur = 1.7 + Math.random() * 0.9;
+    const amp = Math.max(0.0002, vel * 0.5 * this.musicDuck);
+
+    // Per-note tone shaping + amp envelope.
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 700 + this.theme.bright * 2600;
+    lp.Q.value = 0.4;
+    const vca = ctx.createGain();
+    vca.gain.setValueAtTime(0.0001, t);
+    vca.gain.exponentialRampToValueAtTime(amp, t + 0.008);
+    vca.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    lp.connect(vca).connect(this.musicBus);
+    const send = ctx.createGain();
+    send.gain.value = 0.35;
+    vca.connect(send).connect(this.reverb);
+
+    // Additive partials: fundamental + soft octave shimmer + a little warmth.
+    const partials: Array<[OscillatorType, number, number, number]> = [
+      ['sine', 1, 1.0, dur],
+      ['sine', 2, 0.3, dur * 0.6],
+      ['triangle', 1, 0.12, dur * 0.9],
+    ];
+    const oscs: OscillatorNode[] = [];
+    const gains: GainNode[] = [];
+    for (const [type, mult, lvl, d] of partials) {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = f * mult;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(lvl, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      o.connect(g).connect(lp);
+      o.start(t);
+      o.stop(t + d + 0.05);
+      oscs.push(o);
+      gains.push(g);
+    }
+    // Tear down once the longest partial (the fundamental) has rung out.
+    oscs[0].onended = () => {
+      oscs.forEach((o) => o.disconnect());
+      gains.forEach((g) => g.disconnect());
+      lp.disconnect();
+      vca.disconnect();
+      send.disconnect();
+    };
   }
 
   /** Per-frame update driven by flight state. No-op until a flight starts. */
@@ -413,11 +521,23 @@ class SpaceAudio {
     this.whineOsc.frequency.setTargetAtTime(v.whineHz || 320, t, 0.2);
     this.whineGain.gain.setTargetAtTime(v.whineLevel, t, 0.2);
 
-    // Music blooms with altitude — faint on the pad, full in space.
-    const altNorm = smoothstep(p.altitude / (KARMAN_LINE * 0.85));
-    this.lastAltNorm = altNorm;
-    const musicTarget = (0.05 + 0.95 * altNorm) * MUSIC_LEVEL;
-    this.musicBus.gain.setTargetAtTime(musicTarget, t, 0.8);
+    // Pick the theme for where we are: a world's own music while inside its
+    // sphere of influence (orbit/atmosphere), the quiet cruise theme otherwise.
+    this.pendingThemeId = this.themeFor(p.bodyId, p.altitude);
+
+    // Keep the keys present but tuck them under the engine during burns.
+    this.musicDuck = 1 - 0.35 * thr;
+    const musicTarget = this.theme.level * MUSIC_LEVEL * this.musicDuck;
+    this.musicBus.gain.setTargetAtTime(musicTarget, t, 0.6);
+  }
+
+  /** Theme id for the current world + altitude (deep space when far out). */
+  private themeFor(bodyId: string | undefined, altitude: number): string {
+    if (!bodyId || !THEMES[bodyId]) return 'deepspace';
+    const def = SOLAR_BODIES[bodyId];
+    // Inside the body's sphere of influence ≈ in its orbit or atmosphere.
+    if (def && altitude < def.soiRadius) return bodyId;
+    return 'deepspace';
   }
 
   /** A short ignition whoosh layered over the thruster ramp. */
