@@ -7,7 +7,7 @@ import { MissionKind } from '../lib/game/plan/FlightPlan';
 import { ROCKET_PRESETS, ROUTE_PROVER_BUILD } from '../lib/game/career/Presets';
 import { buildFlightSimSetup } from '../lib/game/SimSetup';
 import { isLandable } from '../lib/game/bodies';
-import { evaluateGoals, stationGoalId } from '../lib/game/career/Progress';
+import { evaluateGoals, stationGoalId, baseGoalId } from '../lib/game/career/Progress';
 import { RocketBuild, DEFAULT_BUILD, MissionResult } from '../lib/game/types';
 import { PARTS_CATALOG } from '../lib/game/career/Parts';
 import { MILESTONES } from '../lib/game/career/Milestones';
@@ -330,24 +330,18 @@ const fakeLanded: MissionResult = {
   reachedBodies: ['earth'], landedBody: 'earth', transferCompleted: false,
   stationDeployed: false, stationBodyId: null,
 };
-// Stations are deployed in-flight, not at mission end — exposed via stationGoalId.
+// Stations + bases are deployed in-flight (DEPLOY button), exposed via the id helpers.
 expect('campaign', stationGoalId('earth') === 'station-earth', 'expected a station goal for Earth');
 expect('campaign', stationGoalId('neptune') === 'station-neptune', 'expected a station goal for Neptune');
 expect('campaign', stationGoalId('nowhere') === undefined, 'no station goal for an unknown body');
-// evaluateGoals (mission end) handles landings + bases only.
-const stationBuild: RocketBuild = { ...DEFAULT_BUILD, noseId: 'station-module' };
+expect('campaign', baseGoalId('mars') === 'base-mars', 'expected a base goal for Mars');
+expect('campaign', baseGoalId('venus') === undefined, 'no base goal for Venus (orbit/landing only)');
+// evaluateGoals (mission end) now handles landings ONLY.
 const moonLanding = evaluateGoals(
   { result: { ...fakeLanded, landedBody: 'moon', reachedBodies: ['earth', 'moon'] }, build: DEFAULT_BUILD, launchBodyId: 'earth' }, []);
 expect('campaign', moonLanding.includes('land-moon'), `expected land-moon, got [${moonLanding.join(',')}]`);
-expect('campaign', !moonLanding.includes('station-earth'), 'evaluateGoals must not award stations');
-// A base needs the Station Module on the surface; a bare lander does not earn it.
-const marsBase = evaluateGoals(
-  { result: { ...fakeLanded, landedBody: 'mars', reachedBodies: ['earth', 'mars'] }, build: stationBuild, launchBodyId: 'earth' }, []);
-expect('campaign', marsBase.includes('base-mars') && marsBase.includes('land-mars'),
-  `expected base-mars + land-mars, got [${marsBase.join(',')}]`);
-const marsNoModule = evaluateGoals(
-  { result: { ...fakeLanded, landedBody: 'mars', reachedBodies: ['earth', 'mars'] }, build: DEFAULT_BUILD, launchBodyId: 'earth' }, []);
-expect('campaign', !marsNoModule.includes('base-mars'), 'no Station Module → no base');
+expect('campaign', !moonLanding.some((id) => id.startsWith('station-') || id.startsWith('base-')),
+  'evaluateGoals must not award stations or bases (those are deployed in-flight)');
 console.log(`Campaign OK — ${CAMPAIGN_GOALS.length} goals across the system.`);
 
 // ── In-flight station deploy ─────────────────────────────────────────────────
@@ -380,6 +374,23 @@ console.log('-- Station deploy --');
   // A second deploy is a no-op (single module).
   expect('station deploy', sim.manualDeployStation() === null, 'station can only be deployed once');
   console.log('Station deploy OK — released into a stable Earth orbit.');
+}
+// And a BASE: land on the Moon carrying a module, then deploy it on the surface.
+{
+  const baseRocket: RocketBuild = { ...ROUTE_PROVER, noseId: 'station-module' };
+  const plan = autoPlan('earth', 'moon', { kind: 'land' });
+  const setup = buildFlightSimSetup(baseRocket, plan);
+  const sim = new Simulator(setup.config, plan);
+  sim.reset();
+  for (let i = 0; i < MAX_STEPS && sim.state.phase !== 'landed'; i++) sim.step(DT);
+  expect('base deploy', sim.state.phase === 'landed' && sim.state.landedBodyId === 'moon',
+    `expected to land on the Moon, got phase=${sim.state.phase} body=${sim.state.landedBodyId}`);
+  expect('base deploy', sim.stationDeployContext() === 'surface', 'expected a surface deploy zone after landing');
+  const deployed = sim.manualDeployStation();
+  expect('base deploy', deployed === 'moon' && sim.state.stationDeployedOnSurface,
+    `expected a surface base deploy on the Moon, got ${deployed}`);
+  expect('base deploy', baseGoalId(deployed!) === 'base-moon', 'expected the deploy to map to base-moon');
+  console.log('Base deploy OK — module set down on the Moon surface.');
 }
 
 console.log('All simulation regression tests passed.');

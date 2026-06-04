@@ -11,7 +11,7 @@ import {
   loadPlan, savePlan, loadBases, addBase, loadGoals, addGoal,
 } from '@/lib/storage';
 import { MILESTONES } from '@/lib/game/career/Milestones';
-import { evaluateGoals, campaignGoal, stationGoalId } from '@/lib/game/career/Progress';
+import { evaluateGoals, campaignGoal, stationGoalId, baseGoalId } from '@/lib/game/career/Progress';
 import { getPart } from '@/lib/game/career/Parts';
 import { estimateBuildDeltaV } from '@/lib/game/BuildSpec';
 import {
@@ -148,9 +148,9 @@ export default function GameScreen() {
           onThrustStart: () => { hapticThrust(); soundIgnite(); },
           onStageSeparation: () => { hapticStage(); soundStage(); },
           onLanderDeploy: () => { hapticDeploy(); soundStage(); },
-          onStationDeploy: (bodyId) => {
+          onStationDeploy: (bodyId, onSurface) => {
             hapticDeploy(); soundStage();
-            const id = stationGoalId(bodyId);
+            const id = onSurface ? baseGoalId(bodyId) : stationGoalId(bodyId);
             if (id) awardGoalById(id);
           },
           onTouchdown: (outcome) => {
@@ -277,9 +277,9 @@ export default function GameScreen() {
     });
   }, []);
 
-  const handleSkip = useCallback(() => {
+  const handleFinish = useCallback(() => {
     setTimeScale(1);
-    gameRef.current?.skipToCompletion();
+    gameRef.current?.finishMission();
   }, []);
 
   const handleStage = useCallback(() => gameRef.current?.manualStage(), []);
@@ -299,14 +299,18 @@ export default function GameScreen() {
   }, [handlePlanChange]);
 
   const phase = flightState?.phase ?? 'prelaunch';
-  const finished = phase === 'landed' || phase === 'destroyed' || !!missionResult;
-  const canSkip = mode === 'sim' && !finished && phase !== 'prelaunch';
+  // The flight is over only once the summary is shown — a soft landing no
+  // longer ends it; the player keeps control (deploy a base, finish manually).
+  const finished = !!missionResult;
+  const landed = phase === 'landed';
+  // The Finish button ends the flight and shows the score at any point in sim.
+  const canFinish = mode === 'sim' && !finished && phase !== 'prelaunch';
   const canStage = flightState?.canStage ?? false;
   const landerDeployed = flightState?.landerDeployed ?? false;
   // Offer the de-orbit/land button once the craft is actually in a stable orbit.
   const canLand = mode === 'sim' && !finished && phase === 'orbit';
   const stationDeployed = flightState?.stationDeployed ?? false;
-  // Offer the deploy-station button when parked in a valid orbit with a module.
+  // Deploy a station (in orbit) or a base (on the surface) when a module is aboard.
   const canDeployStation = mode === 'sim' && !finished && hasStation &&
     !stationDeployed && (flightState?.canDeployStation ?? false);
 
@@ -374,8 +378,9 @@ export default function GameScreen() {
         <SimControls
           finished={finished}
           phase={phase}
+          landed={landed}
           timeScale={timeScale}
-          canSkip={canSkip}
+          canFinish={canFinish}
           canStage={canStage}
           hasLander={hasLander}
           hasParachute={hasParachute}
@@ -389,7 +394,7 @@ export default function GameScreen() {
           onWarp={handleWarp}
           onWarpUp={handleWarpUp}
           onWarpDown={handleWarpDown}
-          onSkip={handleSkip}
+          onFinish={handleFinish}
           onStage={handleStage}
           onLander={handleLander}
           onLand={handleLand}

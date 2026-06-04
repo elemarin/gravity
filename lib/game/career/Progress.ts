@@ -101,35 +101,32 @@ export type GoalContext = {
   launchBodyId: string;
 };
 
-function carriesStation(build: RocketBuild): boolean {
-  return build.noseId === 'station-module' ||
-    (build.utilityIds ?? []).includes('station-module');
-}
-
 /**
- * Campaign goals satisfied at the END of a flight: landings (touch down) and
- * bases (deliver a Station Module to the surface). Orbital *stations* are not
- * awarded here — they are released in-flight with the DEPLOY button and granted
- * the moment they separate (see {@link stationGoalId}).
+ * Campaign goals satisfied at the END of a flight: landings (touching a world's
+ * surface). Stations and bases are deployed in-flight with the DEPLOY button —
+ * in orbit (a station) or on the surface (a base) — and granted the moment the
+ * module separates (see {@link stationGoalId} / {@link baseGoalId}).
  */
 export function evaluateGoals(ctx: GoalContext, alreadyDone: string[]): string[] {
   const done = new Set(alreadyDone);
-  const station = carriesStation(ctx.build);
   const landedOn = (body: string) =>
     ctx.result.outcome === 'landed' && ctx.result.landedBody === body;
   const out: string[] = [];
   for (const g of CAMPAIGN_GOALS) {
     if (done.has(g.id)) continue;
-    let ok = false;
-    if (g.kind === 'landing') ok = landedOn(g.body);
-    else if (g.kind === 'base') ok = station && landedOn(g.body);
-    if (ok) { out.push(g.id); done.add(g.id); }
+    if (g.kind === 'landing' && landedOn(g.body)) { out.push(g.id); done.add(g.id); }
   }
   return out;
 }
 
-/** The campaign goal id for deploying a station around `body`, if one exists. */
+/** The campaign goal id for deploying a station in orbit of `body`, if any. */
 export function stationGoalId(body: string): string | undefined {
   const id = `station-${body}`;
+  return CAMPAIGN_GOALS.some((g) => g.id === id) ? id : undefined;
+}
+
+/** The campaign goal id for deploying a base on the surface of `body`, if any. */
+export function baseGoalId(body: string): string | undefined {
+  const id = `base-${body}`;
   return CAMPAIGN_GOALS.some((g) => g.id === id) ? id : undefined;
 }

@@ -5,8 +5,9 @@ import { FlightPhase } from '@/lib/game/types';
 type Props = {
   finished: boolean;
   phase: FlightPhase;
+  landed: boolean;
   timeScale: number;
-  canSkip: boolean;
+  canFinish: boolean;
   canStage: boolean;
   hasParachute: boolean;
   parachuteDeployed: boolean;
@@ -20,7 +21,7 @@ type Props = {
   onWarp: () => void;
   onWarpUp: () => void;
   onWarpDown: () => void;
-  onSkip: () => void;
+  onFinish: () => void;
   onStage: () => void;
   onLander: () => void;
   onLand: () => void;
@@ -59,10 +60,10 @@ function hexToRgb(hex: string): string {
 }
 
 export default function SimControls({
-  finished, phase, timeScale, canSkip,
+  finished, phase, landed, timeScale, canFinish,
   canStage, hasParachute, parachuteDeployed,
   hasLander, landerDeployed, canLand, canDeployStation, stationDeployed,
-  onEdit, onReplay, onWarp, onWarpUp, onWarpDown, onSkip, onStage, onLander, onLand, onDeployStation,
+  onEdit, onReplay, onWarp, onWarpUp, onWarpDown, onFinish, onStage, onLander, onLand, onDeployStation,
 }: Props) {
   const active = !finished && phase !== 'prelaunch';
   const inFlight = phase !== 'prelaunch' && phase !== 'landed' && phase !== 'destroyed';
@@ -87,7 +88,10 @@ export default function SimControls({
           <PixelBtn label="↓ LAND" color="#39e9a6" onClick={onLand} glow />
         )}
         {active && canDeployStation && (
-          <PixelBtn label="🛰 DEPLOY" color="#1fd9ff" onClick={onDeployStation} glow large />
+          <PixelBtn
+            label={landed ? '🚩 BASE' : '🛰 DEPLOY'}
+            color="#1fd9ff" onClick={onDeployStation} glow large
+          />
         )}
         {active && stationDeployed && (
           <div
@@ -119,7 +123,7 @@ export default function SimControls({
       <div className="flex flex-col items-end gap-1.5 sm:flex-row sm:items-center">
         {!finished && (
           <>
-            {canSkip && <PixelBtn label="SKIP" color="#c4d6f0" onClick={onSkip} />}
+            {canFinish && <PixelBtn label="🏁 FINISH" color="#ffd84d" onClick={onFinish} glow />}
             <div className="flex items-center gap-1">
               <PixelBtn label="−" color="#c4d6f0" onClick={onWarpDown} />
               <PixelBtn

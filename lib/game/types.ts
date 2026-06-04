@@ -116,7 +116,7 @@ export type GameCallbacks = {
   onThrustStart?:       () => void;
   onStageSeparation?:   () => void;
   onLanderDeploy?:      () => void;
-  onStationDeploy?:     (bodyId: string) => void;
+  onStationDeploy?:     (bodyId: string, onSurface: boolean) => void;
   onTouchdown?:         (outcome: 'landed' | 'crashed', vSpeed: number) => void;
   onMissionEnd?:        (result: MissionResult) => void;
 };

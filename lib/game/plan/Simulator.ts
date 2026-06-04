@@ -45,8 +45,9 @@ export type SimState = {
   stageFuel: number[];      // 0..100 per stage
   deployedLander: boolean;
   deployedParachute: boolean;
-  deployedStation: boolean;       // station module released into orbit
+  deployedStation: boolean;       // station module released
   stationBodyId: string | null;   // body the station was deployed around
+  stationDeployedOnSurface: boolean; // true = base on the surface, false = orbit
   landingAssist: boolean;   // powered-descent autopilot engaged
   landAfterCapture: boolean; // after an arrival capture, auto de-orbit and land
   ascentAssist: boolean;    // powered-ascent autopilot engaged (relaunch)
@@ -110,6 +111,7 @@ export class Simulator {
       deployedParachute: false,
       deployedStation: false,
       stationBodyId: null,
+      stationDeployedOnSurface: false,
       landingAssist: false,
       landAfterCapture: false,
       ascentAssist: false,
@@ -698,28 +700,36 @@ export class Simulator {
   }
 
   /**
-   * True when the craft is parked in a stable orbit clear of the surface — the
-   * "available zone" where a station module can be released. Defined off the
-   * orbital elements (bound, periapsis above the atmosphere/surface, well above
-   * the surface) so it works the same around any world, big or small.
+   * Where a station module can currently be released, or null:
+   *  - 'orbit'   parked in a stable orbit clear of the surface (a space station)
+   *  - 'surface' sitting on a solid surface after a soft landing (a base)
+   * The orbit test is defined off the orbital elements (bound, periapsis above
+   * the atmosphere/surface, well clear of the ground) so it works the same
+   * around any world, big or small.
    */
-  canDeployStation(): boolean {
-    if (!this.cfg.hasStation || this.state.deployedStation) return false;
-    if (this.state.phase === 'landed' || this.state.phase === 'destroyed') return false;
+  stationDeployContext(): 'orbit' | 'surface' | null {
+    if (!this.cfg.hasStation || this.state.deployedStation) return null;
+    if (this.state.phase === 'destroyed') return null;
+    if (this.state.phase === 'landed') return 'surface';
     const body = this.body();
     const ap = this.apsides(body);
     const floor = Math.max(1, body.atmosphereHeight * 0.5);
-    return Number.isFinite(ap.apo) && ap.peri >= floor &&
-      this.altitude() >= Math.max(2, body.radius * 0.1);
+    if (Number.isFinite(ap.apo) && ap.peri >= floor &&
+        this.altitude() >= Math.max(2, body.radius * 0.1)) return 'orbit';
+    return null;
   }
+
+  canDeployStation(): boolean { return this.stationDeployContext() !== null; }
 
   /** Real-time user-initiated station deployment. Returns the body, or null. */
   manualDeployStation(): string | null {
-    if (!this.canDeployStation()) return null;
+    const ctx = this.stationDeployContext();
+    if (!ctx) return null;
     const s = this.state;
     s.deployedStation = true;
     s.justDeployedStation = true;
     s.stationBodyId = this.body().id;
+    s.stationDeployedOnSurface = ctx === 'surface';
     return s.stationBodyId;
   }
 

@@ -18,6 +18,13 @@ export default function MissionSummary({
   onRestart: () => void;
 }) {
   const crashed = result.outcome === 'crashed';
+  const inOrbit = !crashed && !result.landedBody && result.reachedOrbit;
+  const icon = crashed ? '💥' : result.stationDeployed ? '🛰' : inOrbit ? '🛰' : '🚀';
+  const headline = crashed
+    ? 'Hard Impact'
+    : result.landedBody ? 'Safe Landing'
+    : inOrbit ? 'In Orbit'
+    : 'Flight Ended';
   const ratingColor = RATING_COLOR[result.rating] ?? '#e8f4ff';
 
   return (
@@ -27,13 +34,14 @@ export default function MissionSummary({
              borderColor: crashed ? 'rgba(255,85,119,0.4)' : 'rgba(46,229,157,0.4)',
              boxShadow: `0 0 0 4px ${crashed ? 'rgba(255,85,119,0.08)' : 'rgba(46,229,157,0.08)'}, 0 20px 50px rgba(0,0,0,0.5)`,
            }}>
-        <div className="text-5xl mb-2">{crashed ? '💥' : '🚀'}</div>
+        <div className="text-5xl mb-2">{icon}</div>
         <div className={`text-xs font-black tracking-[0.3em] uppercase mb-1 ${crashed ? 'text-red' : 'text-green'}`}>
           {crashed ? 'Vehicle Lost' : 'Mission Complete'}
         </div>
-        <h2 className="text-2xl font-black text-ink mb-4">
-          {crashed ? 'Hard Impact' : 'Safe Landing'}
-        </h2>
+        <h2 className="text-2xl font-black text-ink mb-4">{headline}</h2>
+        {result.stationDeployed && !crashed && (
+          <div className="-mt-2 mb-3 text-[11px] font-bold text-cyan">🛰 Station deployed</div>
+        )}
 
         {/* Rating */}
         <div className="flex items-center justify-center gap-4 mb-5">
