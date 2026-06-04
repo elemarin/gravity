@@ -9,7 +9,9 @@ import { buildFlightSimSetup } from '../lib/game/SimSetup';
 import { RocketBuild, DEFAULT_BUILD } from '../lib/game/types';
 import { PARTS_CATALOG } from '../lib/game/career/Parts';
 import { MILESTONES } from '../lib/game/career/Milestones';
-import { buildPartIds } from '../lib/game/BuildSpec';
+import { CAMPAIGN_GOALS } from '../lib/game/career/Progress';
+import { requiredDeltaV } from '../lib/game/career/Requirements';
+import { buildPartIds, estimateBuildDeltaV } from '../lib/game/BuildSpec';
 
 const DT = 1 / 60;
 const MAX_STEPS = 4_000_000;
@@ -255,10 +257,18 @@ assertLanding(run('Venus land', 'earth', 'venus', 'land'), 'venus');
 // silently locked every advanced preset.)
 const unlockable = new Set<string>(PARTS_CATALOG.filter((p) => p.unlockedByDefault).map((p) => p.id));
 for (const m of MILESTONES) for (const id of m.unlocks) unlockable.add(id);
+for (const g of CAMPAIGN_GOALS) for (const id of g.partUnlocks ?? []) unlockable.add(id);
 for (const preset of ROCKET_PRESETS) {
   for (const id of buildPartIds(preset.build)) {
-    expect(`preset ${preset.id}`, unlockable.has(id), `part '${id}' is not unlocked by default or any milestone`);
+    expect(`preset ${preset.id}`, unlockable.has(id), `part '${id}' is not unlocked by default, any milestone, or any campaign goal`);
   }
+}
+
+// Every catalog part must be reachable through career progress (no orphans the
+// player can never unlock).
+for (const p of PARTS_CATALOG) {
+  expect('part reachability', unlockable.has(p.id),
+    `part '${p.id}' is never unlocked by default, a milestone, or a campaign goal`);
 }
 
 // The new mission-themed presets must actually fly their headline route.
@@ -267,5 +277,42 @@ assertStableOrbit(run('Heavy Orbiter Earth orbit', 'earth', 'orbit', 'orbit', 30
 assertLanding(run('Lunar Express Moon return', 'earth', 'moon', 'orbit-return', undefined, presetBuild('lunar-express')), 'earth');
 assertLanding(run('Mars Pioneer Mars land', 'earth', 'mars', 'land', undefined, presetBuild('mars-pioneer')), 'mars');
 assertOrbit(run('Grand Voyager Saturn orbit', 'earth', 'saturn', 'orbit', undefined, presetBuild('grand-voyager')), 'saturn');
+
+// ── Extended destination ladder (new outer-system + small-body targets) ──────
+// Each must be reachable and hold a real orbit; the solid worlds also land.
+const grandVoyager = presetBuild('grand-voyager');
+const outerCruiser = presetBuild('outer-cruiser');
+assertOrbit(run('Phobos orbit', 'earth', 'phobos', 'orbit', undefined, grandVoyager), 'phobos');
+assertOrbit(run('Ceres orbit', 'earth', 'ceres', 'orbit', undefined, grandVoyager), 'ceres');
+assertLanding(run('Ceres land', 'earth', 'ceres', 'land', undefined, grandVoyager), 'ceres');
+assertLanding(run('Titan land', 'earth', 'titan', 'land', undefined, grandVoyager), 'titan');
+assertOrbit(run('Outer Cruiser Uranus orbit', 'earth', 'uranus', 'orbit', undefined, outerCruiser), 'uranus');
+assertOrbit(run('Outer Cruiser Neptune orbit', 'earth', 'neptune', 'orbit', undefined, outerCruiser), 'neptune');
+
+// ── Δv-budget progression gate ───────────────────────────────────────────────
+// The career's "reach further → bigger rocket" gate. The budget must climb
+// monotonically along the destination ladder, and each rocket tier must clear
+// the budget for its headline mission while the tier below falls short.
+console.log('-- Δv budget gate --');
+const LADDER = ['orbit', 'moon', 'mercury', 'venus', 'mars', 'phobos', 'ceres', 'jupiter', 'saturn', 'titan', 'uranus', 'neptune'];
+let prevDv = 0;
+for (const dest of LADDER) {
+  const dv = requiredDeltaV('earth', dest, 'orbit');
+  expect('Δv ladder', dv >= prevDv, `budget for ${dest} (${dv}) should be >= previous (${prevDv})`);
+  prevDv = dv;
+}
+const dvOf = (id: string) => Math.round(estimateBuildDeltaV(presetBuild(id)));
+const meets = (id: string, dest: string, kind: any) => dvOf(id) >= requiredDeltaV('earth', dest, kind);
+const starterDv = Math.round(estimateBuildDeltaV(DEFAULT_BUILD));
+// Starter reaches orbit but NOT the Moon — the player must build up first.
+expect('gate: starter orbits', starterDv >= requiredDeltaV('earth', 'orbit', 'orbit'), `starter Δv ${starterDv} should clear Earth orbit`);
+expect('gate: starter can\'t Moon', starterDv < requiredDeltaV('earth', 'moon', 'orbit'), `starter Δv ${starterDv} should NOT clear the Moon budget`);
+expect('gate: orbiter Moon', meets('orbiter', 'moon', 'orbit'), 'orbiter should clear the Moon budget');
+expect('gate: orbiter can\'t Neptune', !meets('orbiter', 'neptune', 'orbit'), 'orbiter should NOT clear the Neptune budget');
+expect('gate: mars-pioneer Mars land', meets('mars-pioneer', 'mars', 'land'), 'mars-pioneer should clear the Mars-landing budget');
+expect('gate: grand-voyager Saturn', meets('grand-voyager', 'saturn', 'orbit'), 'grand-voyager should clear the Saturn budget');
+expect('gate: grand-voyager can\'t Neptune', !meets('grand-voyager', 'neptune', 'orbit'), 'grand-voyager should NOT clear the Neptune budget (needs station-tier parts)');
+expect('gate: outer-cruiser Neptune', meets('outer-cruiser', 'neptune', 'orbit'), 'outer-cruiser should clear the Neptune budget');
+console.log(`Δv gate OK — starter=${starterDv}, orbiter=${dvOf('orbiter')}, grand-voyager=${dvOf('grand-voyager')}, outer-cruiser=${dvOf('outer-cruiser')} m/s`);
 
 console.log('All simulation regression tests passed.');

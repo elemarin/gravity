@@ -134,11 +134,24 @@ export default function CareerView() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className={`font-bold text-sm ${done ? 'text-green' : 'text-ink'}`}>{g.name}</div>
-                  <div className="text-xs text-dim truncate">{g.description}</div>
+                  <div className="text-xs text-dim">{g.description}</div>
+                  {(g.partUnlocks?.length || g.baseUnlock) && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {g.baseUnlock && (
+                        <span className="pill text-[9px] px-1.5 py-0.5 text-cyan">🚩 {bodyDef(g.baseUnlock).name} base</span>
+                      )}
+                      {(g.partUnlocks ?? []).map((id) => {
+                        const p = PARTS_CATALOG.find((x) => x.id === id);
+                        if (!p) return null;
+                        return (
+                          <span key={id} className="pill text-[9px] px-1.5 py-0.5 text-purple">
+                            🔓 {p.icon} {p.name}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-                {g.baseUnlock && (
-                  <span className="shrink-0 pill text-[10px] px-2 py-0.5">🚩 {bodyDef(g.baseUnlock).name} base</span>
-                )}
               </li>
             );
           })}

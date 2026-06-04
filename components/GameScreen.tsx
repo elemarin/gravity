@@ -12,6 +12,8 @@ import {
 } from '@/lib/storage';
 import { MILESTONES } from '@/lib/game/career/Milestones';
 import { evaluateGoals, campaignGoal } from '@/lib/game/career/Progress';
+import { getPart } from '@/lib/game/career/Parts';
+import { estimateBuildDeltaV } from '@/lib/game/BuildSpec';
 import {
   hapticThrust, hapticStage, hapticDeploy, hapticLanding, hapticCrash,
 } from '@/lib/haptics';
@@ -91,6 +93,7 @@ export default function GameScreen() {
   const [timeScale, setTimeScale] = useState(1);
   const [toast, setToast] = useState<ToastInfo | null>(null);
   const [bases, setBases] = useState<string[]>(['earth']);
+  const [buildDeltaV, setBuildDeltaV] = useState(0);
   const toastId = useRef(0);
 
   const setPlan = useCallback((p: FlightPlan | null) => {
@@ -111,6 +114,7 @@ export default function GameScreen() {
     const build = loadBuild();
     buildRef.current = build;
     setPlan(initialPlan);
+    setBuildDeltaV(estimateBuildDeltaV(build));
     setHasLander(!!build.landerId);
     setBases(loadBases());
     setMode('plan');
@@ -196,7 +200,13 @@ export default function GameScreen() {
       addGoal(id);
       const g = campaignGoal(id);
       if (g?.baseUnlock) { addBase(g.baseUnlock); setBases(loadBases()); }
-      if (g) pushToast(`🏆 ${g.name}`, g.baseUnlock ? 'New launch site unlocked!' : g.description);
+      if (g?.partUnlocks?.length) addUnlockedParts(g.partUnlocks);
+      if (g) {
+        const subtitle = g.partUnlocks?.length
+          ? `Unlocked: ${g.partUnlocks.map((p) => getPart(p)?.name ?? p).join(', ')}`
+          : g.baseUnlock ? 'New launch site unlocked!' : g.description;
+        pushToast(`🏆 ${g.name}`, subtitle);
+      }
     }
   }, [pushToast]);
 
@@ -340,6 +350,7 @@ export default function GameScreen() {
           bodies={bodies}
           hasLander={hasLander}
           preview={preview}
+          buildDeltaV={buildDeltaV}
           onChange={handlePlanChange}
           onPlay={handlePlay}
         />

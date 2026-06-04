@@ -1,6 +1,13 @@
 export type PartType =
   | 'engine' | 'booster' | 'tank' | 'nose' | 'capsule' | 'utility' | 'lander';
 
+/** Surface pattern hint shared by the 2D blueprint and the 3D launch mesh. */
+export type PartStyle =
+  | 'plain' | 'banded' | 'striped' | 'ribbed' | 'checkered' | 'panelled' | 'metallic';
+
+/** Engine bell silhouette — drives both the blueprint nozzle and the 3D bell. */
+export type BellShape = 'standard' | 'wide' | 'compact' | 'long' | 'cluster' | 'ring';
+
 export type RocketPart = {
   id: string;
   name: string;
@@ -12,7 +19,14 @@ export type RocketPart = {
   unlockedByDefault: boolean;
   description: string;
   icon: string;          // single emoji or short symbol for UI
-  color: number;         // hex color for 3D mesh
+  color: number;         // hex color for 3D mesh + blueprint fill
+  // ── Cosmetics (all optional; sensible defaults applied by the renderers) ──
+  accent?: number;       // secondary hex for bands / stripes / fins / nozzles
+  style?: PartStyle;     // surface pattern for tanks / boosters / capsules
+  finish?: 'matte' | 'satin' | 'glossy' | 'metallic'; // 3D shininess
+  bell?: BellShape;      // engine / booster nozzle silhouette
+  /** Career tier (0 = starter, higher = later) — purely informational for UI. */
+  tier?: number;
 };
 
 /**
@@ -21,6 +35,12 @@ export type RocketPart = {
  * basic stack should comfortably reach orbit. Engines are deliberately light
  * relative to their thrust so staging and side-boosters always help rather
  * than hurt.
+ *
+ * The catalog is laid out as a ladder: starter parts get you to orbit and the
+ * Moon, mid-tier parts open the inner planets, and the heavy/top-tier parts
+ * (several gated behind space-station campaign goals) carry the delta-v needed
+ * for the outer system. Each tier looks visibly different — colour, accent,
+ * surface pattern and silhouette — so a bigger rocket also reads as one.
  */
 export const PARTS_CATALOG: RocketPart[] = [
   // ── ENGINES ────────────────────────────────────────────────────────────
@@ -36,6 +56,10 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Reliable first-stage engine. Punchy and forgiving.',
     icon: '🜂',
     color: 0x9aa3b8,
+    accent: 0xff7a3c,
+    finish: 'satin',
+    bell: 'standard',
+    tier: 0,
   },
   {
     id: 'engine-vacuum',
@@ -49,6 +73,27 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'High-efficiency upper-stage engine. Loves the vacuum.',
     icon: '◉',
     color: 0xc2c8de,
+    accent: 0x6cd0ff,
+    finish: 'glossy',
+    bell: 'long',
+    tier: 1,
+  },
+  {
+    id: 'engine-aerospike',
+    name: 'Aerospike',
+    type: 'engine',
+    mass: 0.9,
+    thrust: 185,
+    burnRate: 13,
+    fuelCapacity: 0,
+    unlockedByDefault: false,
+    description: 'Wedge nozzle that stays efficient from the pad to vacuum.',
+    icon: '⧖',
+    color: 0xb0b6c6,
+    accent: 0xffd54a,
+    finish: 'metallic',
+    bell: 'ring',
+    tier: 2,
   },
   {
     id: 'engine-heavy',
@@ -62,6 +107,10 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Brute-force core engine for heavy lifters.',
     icon: '🜨',
     color: 0x7d8496,
+    accent: 0xff5577,
+    finish: 'matte',
+    bell: 'wide',
+    tier: 2,
   },
   {
     id: 'engine-nuclear',
@@ -75,6 +124,27 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Nuclear thermal — extreme efficiency for long burns.',
     icon: '☢',
     color: 0x6effa6,
+    accent: 0x1fff8f,
+    finish: 'glossy',
+    bell: 'long',
+    tier: 3,
+  },
+  {
+    id: 'engine-mammoth',
+    name: 'Mammoth Cluster',
+    type: 'engine',
+    mass: 3.0,
+    thrust: 660,
+    burnRate: 44,
+    fuelCapacity: 0,
+    unlockedByDefault: false,
+    description: 'Seven-chamber super-heavy cluster. The backbone of an interplanetary lifter.',
+    icon: '⛁',
+    color: 0x5f6678,
+    accent: 0xffa033,
+    finish: 'metallic',
+    bell: 'cluster',
+    tier: 4,
   },
   {
     id: 'engine-ion',
@@ -88,6 +158,27 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Tiny thrust, enormous efficiency. Deep space only.',
     icon: '✦',
     color: 0x6cd0ff,
+    accent: 0xb06cff,
+    finish: 'glossy',
+    bell: 'compact',
+    tier: 3,
+  },
+  {
+    id: 'engine-plasma',
+    name: 'Plasma Drive',
+    type: 'engine',
+    mass: 0.6,
+    thrust: 46,
+    burnRate: 1.1,
+    fuelCapacity: 0,
+    unlockedByDefault: false,
+    description: 'Magnetoplasma cruiser engine — ion efficiency with real push for the outer system.',
+    icon: '✺',
+    color: 0xb06cff,
+    accent: 0x6cd0ff,
+    finish: 'glossy',
+    bell: 'ring',
+    tier: 4,
   },
 
   // ── SIDE BOOSTERS ──────────────────────────────────────────────────────
@@ -103,6 +194,10 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Strap-on solid booster. Big shove off the pad, drops with stage 1.',
     icon: '🚀',
     color: 0xf2f2f5,
+    accent: 0xff7a3c,
+    style: 'banded',
+    finish: 'satin',
+    tier: 0,
   },
   {
     id: 'booster-liquid',
@@ -116,6 +211,44 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Liquid-fuel strap-on. Heavy lift for big payloads.',
     icon: '🛢',
     color: 0xffd27a,
+    accent: 0xff7a3c,
+    style: 'striped',
+    finish: 'glossy',
+    tier: 2,
+  },
+  {
+    id: 'booster-srb-heavy',
+    name: 'Mammoth SRB',
+    type: 'booster',
+    mass: 0.9,
+    thrust: 330,
+    burnRate: 27,
+    fuelCapacity: 470,
+    unlockedByDefault: false,
+    description: 'Segmented heavy solid. A pair clears the pad with serious payload.',
+    icon: '🧨',
+    color: 0xe8e2d2,
+    accent: 0xc0392b,
+    style: 'checkered',
+    finish: 'matte',
+    tier: 3,
+  },
+  {
+    id: 'booster-liquid-xl',
+    name: 'Quad Liquid',
+    type: 'booster',
+    mass: 1.4,
+    thrust: 470,
+    burnRate: 33,
+    fuelCapacity: 780,
+    unlockedByDefault: false,
+    description: 'Four-chamber liquid strap-on — the muscle behind an outer-system departure.',
+    icon: '🔋',
+    color: 0xbfe0ff,
+    accent: 0x2b5cff,
+    style: 'striped',
+    finish: 'glossy',
+    tier: 4,
   },
 
   // ── TANKS ──────────────────────────────────────────────────────────────
@@ -131,6 +264,10 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Tiny tank for trims and upper stages.',
     icon: '▫',
     color: 0xffc04d,
+    accent: 0xffffff,
+    style: 'banded',
+    finish: 'satin',
+    tier: 0,
   },
   {
     id: 'tank-basic',
@@ -144,6 +281,10 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Dependable workhorse tank.',
     icon: '▭',
     color: 0xff9a3c,
+    accent: 0xffffff,
+    style: 'banded',
+    finish: 'satin',
+    tier: 0,
   },
   {
     id: 'tank-medium',
@@ -157,6 +298,10 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Doubled capacity for orbital insertions.',
     icon: '▮',
     color: 0xffab52,
+    accent: 0x2b3550,
+    style: 'striped',
+    finish: 'satin',
+    tier: 1,
   },
   {
     id: 'tank-large',
@@ -170,6 +315,10 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Heavy but holds a lot of fuel.',
     icon: '▯',
     color: 0xffbd6b,
+    accent: 0x2b3550,
+    style: 'ribbed',
+    finish: 'satin',
+    tier: 2,
   },
   {
     id: 'tank-xl',
@@ -183,6 +332,27 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'For interplanetary missions.',
     icon: '⬛',
     color: 0xffce85,
+    accent: 0x9ad0ff,
+    style: 'panelled',
+    finish: 'glossy',
+    tier: 3,
+  },
+  {
+    id: 'tank-mega',
+    name: 'Mega Tank',
+    type: 'tank',
+    mass: 1.6,
+    thrust: 0,
+    burnRate: 0,
+    fuelCapacity: 1900,
+    unlockedByDefault: false,
+    description: 'Orbital-yard fuel drum. Enough propellant to cross the solar system.',
+    icon: '⬢',
+    color: 0xe6f0ff,
+    accent: 0x2b5cff,
+    style: 'panelled',
+    finish: 'metallic',
+    tier: 4,
   },
 
   // ── NOSES / PAYLOADS ───────────────────────────────────────────────────
@@ -198,6 +368,42 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Aerodynamic nose. Cheap and light.',
     icon: '▲',
     color: 0xf3f6ff,
+    accent: 0xff5577,
+    finish: 'glossy',
+    tier: 0,
+  },
+  {
+    id: 'nose-fairing',
+    name: 'Payload Fairing',
+    type: 'nose',
+    mass: 0.22,
+    thrust: 0,
+    burnRate: 0,
+    fuelCapacity: 0,
+    unlockedByDefault: false,
+    description: 'Wide aerodynamic shell for bulky payloads. Sleek and tall.',
+    icon: '⬙',
+    color: 0xdfe6f5,
+    accent: 0x2b5cff,
+    style: 'striped',
+    finish: 'glossy',
+    tier: 1,
+  },
+  {
+    id: 'probe-core',
+    name: 'Probe Core',
+    type: 'capsule',
+    mass: 0.2,
+    thrust: 0,
+    burnRate: 0,
+    fuelCapacity: 0,
+    unlockedByDefault: false,
+    description: 'Lightweight robotic probe — cheap science with a dish antenna.',
+    icon: '📡',
+    color: 0xc9d6e8,
+    accent: 0x6cd0ff,
+    finish: 'glossy',
+    tier: 1,
   },
   {
     id: 'capsule-crew',
@@ -211,6 +417,26 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Carries astronauts. Required for crewed missions.',
     icon: '◐',
     color: 0xe6ecff,
+    accent: 0x2b3550,
+    finish: 'glossy',
+    tier: 2,
+  },
+  {
+    id: 'capsule-command',
+    name: 'Command Pod',
+    type: 'capsule',
+    mass: 1.1,
+    thrust: 0,
+    burnRate: 0,
+    fuelCapacity: 0,
+    unlockedByDefault: false,
+    description: 'Roomy multi-crew command module for long-haul interplanetary trips.',
+    icon: '⬮',
+    color: 0xeef2ff,
+    accent: 0x1fd9ff,
+    style: 'panelled',
+    finish: 'metallic',
+    tier: 4,
   },
   {
     id: 'satellite-bus',
@@ -224,6 +450,9 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Deployable satellite payload.',
     icon: '🛰',
     color: 0xffd866,
+    accent: 0x2b5cff,
+    finish: 'glossy',
+    tier: 2,
   },
   {
     id: 'station-module',
@@ -237,6 +466,9 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Heavy outpost module. Deliver it to build a base or station.',
     icon: '🏗',
     color: 0x9ad0ff,
+    accent: 0x2b5cff,
+    finish: 'glossy',
+    tier: 3,
   },
 
   // ── UTILITY ────────────────────────────────────────────────────────────
@@ -252,6 +484,8 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Auto-opens on descent in atmosphere for a soft landing.',
     icon: '☂',
     color: 0xffffff,
+    accent: 0xff8f4a,
+    tier: 1,
   },
   {
     id: 'heat-shield',
@@ -265,6 +499,9 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Protects from reentry heating.',
     icon: '⛨',
     color: 0xb5703a,
+    accent: 0x3a2a1a,
+    finish: 'matte',
+    tier: 2,
   },
   {
     id: 'landing-legs',
@@ -278,6 +515,41 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Stable touchdown on flat ground.',
     icon: '⎍',
     color: 0xc8ccd6,
+    accent: 0x2b3550,
+    finish: 'metallic',
+    tier: 2,
+  },
+  {
+    id: 'solar-array',
+    name: 'Solar Array',
+    type: 'utility',
+    mass: 0.1,
+    thrust: 0,
+    burnRate: 0,
+    fuelCapacity: 0,
+    unlockedByDefault: false,
+    description: 'Deployable wings — power for long cruises (and a striking silhouette).',
+    icon: '🔆',
+    color: 0x2b5cff,
+    accent: 0x1fd9ff,
+    finish: 'glossy',
+    tier: 3,
+  },
+  {
+    id: 'rcs-pack',
+    name: 'RCS Pack',
+    type: 'utility',
+    mass: 0.12,
+    thrust: 0,
+    burnRate: 0,
+    fuelCapacity: 0,
+    unlockedByDefault: false,
+    description: 'Cold-gas thruster ring for fine control and a tidy docking look.',
+    icon: '✛',
+    color: 0xd0d6e2,
+    accent: 0x6cd0ff,
+    finish: 'satin',
+    tier: 3,
   },
 
   // ── LANDERS — separable descent payload with their own engine + fuel ────
@@ -293,6 +565,9 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Light descent stage with its own tank. Separates late for a soft touchdown.',
     icon: '🛬',
     color: 0xd6e0ee,
+    accent: 0xb8bcc8,
+    finish: 'satin',
+    tier: 0,
   },
   {
     id: 'lander-heavy',
@@ -306,6 +581,26 @@ export const PARTS_CATALOG: RocketPart[] = [
     description: 'Heavy lander with deep descent tanks — enough fuel to brake and even fly home.',
     icon: '🛸',
     color: 0xf0d98a,
+    accent: 0xffa033,
+    finish: 'glossy',
+    tier: 2,
+  },
+  {
+    id: 'lander-titan',
+    name: 'Titan Lander',
+    type: 'lander',
+    mass: 1.8,
+    thrust: 190,
+    burnRate: 15,
+    fuelCapacity: 900,
+    unlockedByDefault: false,
+    description: 'Wide-gear heavy lander built to set a base module down on a distant world.',
+    icon: '🛰',
+    color: 0xcfe0d6,
+    accent: 0x1fff8f,
+    style: 'panelled',
+    finish: 'metallic',
+    tier: 4,
   },
 ];
 

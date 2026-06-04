@@ -32,6 +32,16 @@ type BodyDef = {
   id: string; name: string; radius: number; surfaceG: number;
   atmosphereHeight: number; soiRadius: number; color: number; skyDay: number;
   gas?: boolean;
+  /**
+   * Distance multiplier applied when this body is the transfer destination.
+   * Higher = placed proportionally farther from the launch world, so the
+   * outbound + capture burns cost more delta-v. Defaults to 1; the farther
+   * a body sits in the real solar system, the higher its reach — this is the
+   * knob that makes "reach further → need a bigger rocket" actually bite.
+   */
+  reach?: number;
+  /** True for icy/rocky dwarf worlds (decorative; used for sky/landing rules). */
+  dwarf?: boolean;
 };
 
 /** Arcade-scaled solar system. Radii are compressed for playability but
@@ -42,9 +52,13 @@ const DEFS: BodyDef[] = [
   { id: 'earth',   name: 'Earth',   radius: EARTH_RADIUS, surfaceG: 9.81, atmosphereHeight: ATMOSPHERE_HEIGHT, soiRadius: 1600, color: 0x2e74e8, skyDay: 0x8ec9ff },
   { id: 'moon',    name: 'Moon',    radius: 17.4, surfaceG: 1.62, atmosphereHeight: 0,   soiRadius: 120, color: 0xc2c7d2, skyDay: 0x0a0a12 },
   { id: 'mars',    name: 'Mars',    radius: 33.9, surfaceG: 3.71, atmosphereHeight: 60,  soiRadius: 400, color: 0xd06a44, skyDay: 0xe0a07a },
-  { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 30,  color: 0x9a8f84, skyDay: 0x07070a },
+  { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 30,  color: 0x9a8f84, skyDay: 0x07070a, reach: 1.35 },
+  { id: 'ceres',   name: 'Ceres',   radius: 13.5, surfaceG: 0.27, atmosphereHeight: 0,   soiRadius: 55,  color: 0x8d8a82, skyDay: 0x06060a, dwarf: true, reach: 1.55 },
   { id: 'jupiter', name: 'Jupiter', radius: 120,  surfaceG: 24.79,atmosphereHeight: 240, soiRadius: 1400,color: 0xd7b58a, skyDay: 0xc9a878, gas: true },
   { id: 'saturn',  name: 'Saturn',  radius: 105,  surfaceG: 10.44,atmosphereHeight: 220, soiRadius: 1200,color: 0xe6d6a8, skyDay: 0xd8c790, gas: true },
+  { id: 'titan',   name: 'Titan',   radius: 25.8, surfaceG: 1.35, atmosphereHeight: 120, soiRadius: 110, color: 0xd2a24c, skyDay: 0xc88a3a, reach: 1.85 },
+  { id: 'uranus',  name: 'Uranus',  radius: 72,   surfaceG: 8.69, atmosphereHeight: 200, soiRadius: 900, color: 0x9fe0e6, skyDay: 0x7fb8c4, gas: true, reach: 2.1 },
+  { id: 'neptune', name: 'Neptune', radius: 70,   surfaceG: 11.15,atmosphereHeight: 200, soiRadius: 850, color: 0x3f63d8, skyDay: 0x2a3f9c, gas: true, reach: 2.4 },
 ];
 
 function makeBody(def: BodyDef, center: THREE.Vector3): Body {
@@ -61,6 +75,11 @@ function makeBody(def: BodyDef, center: THREE.Vector3): Body {
     gravityScale: def.surfaceG / 9.81,
     gas: def.gas,
   };
+}
+
+/** Placement reach multiplier for a destination body (1 = baseline). */
+function bodyReach(id: string): number {
+  return SOLAR_BODIES[id]?.reach ?? 1;
 }
 
 export const SOLAR_BODIES: Record<string, BodyDef> =
@@ -93,7 +112,7 @@ export function buildFlightBodies(launchId: string, destId: string | null): Body
   const gap = Math.max(
     (launchDef.radius + destDef.radius) * 5 + 380,
     destDef.soiRadius * 1.3 + launchDef.radius,
-  );
+  ) * bodyReach(destId);
   const destCenter = launchCenter.clone().add(new THREE.Vector3(gap * 0.82, gap * 0.57, 0));
   const dest = makeBody(destDef, destCenter);
   return [launch, dest];
@@ -115,8 +134,13 @@ export const DESTINATIONS: Destination[] = [
   { id: 'mercury', name: 'Mercury', targetId: 'mercury', objective: 'Cross to scorched, airless Mercury.' },
   { id: 'venus',   name: 'Venus',   targetId: 'venus',   objective: 'Brave the thick skies of Venus.' },
   { id: 'mars',    name: 'Mars',    targetId: 'mars',    objective: 'Transfer to Mars — the red planet awaits.' },
+  { id: 'phobos',  name: 'Phobos',  targetId: 'phobos',  objective: 'Rendezvous with Phobos — a tiny, low-gravity moon far out by Mars.' },
+  { id: 'ceres',   name: 'Ceres',   targetId: 'ceres',   objective: 'Reach Ceres, the dwarf world in the asteroid belt.' },
   { id: 'jupiter', name: 'Jupiter', targetId: 'jupiter', objective: 'Orbit the king of planets — a gas giant, no surface to land on.' },
   { id: 'saturn',  name: 'Saturn',  targetId: 'saturn',  objective: 'Orbit the ringed giant — a gas world with no surface.' },
+  { id: 'titan',   name: 'Titan',   targetId: 'titan',   objective: 'Descend through the orange haze of Titan, Saturn’s giant moon.' },
+  { id: 'uranus',  name: 'Uranus',  targetId: 'uranus',  objective: 'Orbit the tilted ice giant — a long, cold cruise.' },
+  { id: 'neptune', name: 'Neptune', targetId: 'neptune', objective: 'Reach Neptune at the edge of the system — the ultimate voyage.' },
 ];
 
 export function getDestination(id: string): Destination {

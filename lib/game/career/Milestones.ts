@@ -15,21 +15,21 @@ export const MILESTONES: Milestone[] = [
     name: 'First Flight',
     description: 'Reach 1 km altitude',
     check: (s) => s.altitude >= 1,
-    unlocks: ['tank-medium'],
+    unlocks: ['tank-medium', 'nose-fairing'],
   },
   {
     id: 'high-altitude',
     name: 'High Altitude',
     description: 'Reach 25 km altitude',
     check: (s) => s.altitude >= 25,
-    unlocks: ['tank-large'],
+    unlocks: ['tank-large', 'probe-core'],
   },
   {
     id: 'staging',
     name: 'Stage Separation',
     description: 'Separate a spent stage in flight',
     check: (s) => s.activeStage >= 1 && s.altitude >= 1,
-    unlocks: ['parachute', 'engine-heavy'],
+    unlocks: ['parachute', 'engine-heavy', 'engine-aerospike'],
   },
   {
     id: 'karman',
@@ -53,21 +53,21 @@ export const MILESTONES: Milestone[] = [
       s.phase === 'orbit' &&
       s.altitude >= 100 &&
       (s.periapsis ?? 0) >= 80,
-    unlocks: ['tank-xl'],
+    unlocks: ['tank-xl', 'satellite-bus', 'solar-array', 'station-module'],
   },
   {
     id: 'high-orbit',
     name: 'High Orbit',
     description: 'Raise your orbit above 400 km',
     check: (s) => s.phase === 'orbit' && (s.periapsis ?? 0) >= 400,
-    unlocks: ['engine-nuclear'],
+    unlocks: ['engine-nuclear', 'booster-srb-heavy'],
   },
   {
     id: 'lander-deploy',
     name: 'Lander Away',
     description: 'Deploy a separable lander payload in flight',
     check: (s) => !!s.landerDeployed && s.altitude >= 50,
-    unlocks: ['lander-heavy'],
+    unlocks: ['lander-heavy', 'rcs-pack'],
   },
   {
     id: 'transfer',
@@ -89,13 +89,6 @@ export const MILESTONES: Milestone[] = [
     unlocks: ['lander-heavy', 'engine-ion'],
   },
   {
-    id: 'satellite-deploy',
-    name: 'Satellite Deployed',
-    description: 'Deploy a satellite from orbit',
-    check: () => false, // requires satellite mechanic
-    unlocks: ['satellite-bus'],
-  },
-  {
     id: 'crewed',
     name: 'Crewed Mission',
     description: 'Reach orbital speed and return safely',
@@ -113,7 +106,7 @@ export const MILESTONES: Milestone[] = [
       const vEsc = Math.sqrt((2 * GM) / r); // km/s
       return s.speed >= vEsc;
     },
-    unlocks: ['engine-ion'],
+    unlocks: ['engine-ion', 'engine-plasma'],
   },
 ];
 

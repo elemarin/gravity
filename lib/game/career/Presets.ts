@@ -170,6 +170,26 @@ export const ROCKET_PRESETS: RocketPreset[] = [
     },
   },
   {
+    id: 'outer-cruiser',
+    name: 'Outer Cruiser',
+    icon: '🛰',
+    description: 'Four-stage super-heavy on station-grade hardware — carries the delta-v to orbit the ice giants.',
+    build: {
+      engineId: 'engine-mammoth',
+      tankIds: ['tank-mega'],
+      noseId: 'capsule-crew',
+      utilityIds: ['parachute', 'landing-legs'],
+      boosterIds: ['booster-liquid-xl', 'booster-liquid-xl'],
+      landerId: 'lander-heavy',
+      stages: [
+        { engineId: 'engine-mammoth', tankIds: ['tank-mega', 'tank-mega', 'tank-mega'] },
+        { engineId: 'engine-heavy',   tankIds: ['tank-xl', 'tank-xl', 'tank-xl'] },
+        { engineId: 'engine-vacuum',  tankIds: ['tank-xl', 'tank-xl'] },
+        { engineId: 'engine-plasma',  tankIds: ['tank-large', 'tank-large'] },
+      ],
+    },
+  },
+  {
     id: 'route-prover',
     name: 'Route Prover',
     icon: '✅',

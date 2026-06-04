@@ -43,14 +43,26 @@ export type CampaignGoal = {
   description: string;
   /** Body id unlocked as a launch base when this goal completes. */
   baseUnlock?: string;
+  /**
+   * Parts unlocked when this goal completes. Building a space station or a
+   * surface base is how the heaviest, most capable hardware is earned — so the
+   * orbital/base goals hand out the top-tier engines, tanks and landers that
+   * carry the delta-v needed for the outer solar system.
+   */
+  partUnlocks?: string[];
 };
 
 export const CAMPAIGN_GOALS: CampaignGoal[] = [
-  { id: 'moon-landing', name: 'Moon Landing',  description: 'Land a craft safely on the Moon.' },
-  { id: 'iss',          name: 'Space Station',  description: 'Carry a Station Module to Earth orbit.' },
-  { id: 'moon-base',    name: 'Moon Base',      description: 'Deliver a Station Module to the Moon surface.', baseUnlock: 'moon' },
-  { id: 'mars-landing', name: 'Mars Landing',   description: 'Land a craft safely on Mars.' },
-  { id: 'mars-base',    name: 'Mars Base',      description: 'Deliver a Station Module to the Mars surface.', baseUnlock: 'mars' },
+  { id: 'moon-landing', name: 'Moon Landing',  description: 'Land a craft safely on the Moon.',
+    partUnlocks: ['booster-srb-heavy'] },
+  { id: 'iss',          name: 'Space Station',  description: 'Carry a Station Module to Earth orbit.',
+    partUnlocks: ['tank-mega', 'capsule-command'] },
+  { id: 'moon-base',    name: 'Moon Base',      description: 'Deliver a Station Module to the Moon surface.',
+    baseUnlock: 'moon', partUnlocks: ['engine-mammoth', 'booster-liquid-xl'] },
+  { id: 'mars-landing', name: 'Mars Landing',   description: 'Land a craft safely on Mars.',
+    partUnlocks: ['lander-titan'] },
+  { id: 'mars-base',    name: 'Mars Base',      description: 'Deliver a Station Module to the Mars surface.',
+    baseUnlock: 'mars', partUnlocks: ['engine-plasma'] },
 ];
 
 export function campaignGoal(id: string): CampaignGoal | undefined {

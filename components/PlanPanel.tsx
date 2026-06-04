@@ -8,12 +8,15 @@ import {
 } from '@/lib/game/plan/FlightPlan';
 import { Body, DESTINATIONS, destinationTargetId, isLandable } from '@/lib/game/bodies';
 import { autoPlan, defaultOrbitKm, minimumOrbitKm } from '@/lib/game/plan/AutoPlan';
+import { requiredDeltaV } from '@/lib/game/career/Requirements';
 
 type Props = {
   plan: FlightPlan;
   bodies: Body[];
   hasLander: boolean;
   preview: { apoapsis: number; periapsis: number; impact: boolean } | null;
+  /** Estimated Δv (m/s) of the loaded rocket — gates the launch by budget. */
+  buildDeltaV: number;
   onChange: (plan: FlightPlan) => void;
   onPlay: () => void;
 };
@@ -45,7 +48,7 @@ function fmtKm(km: number): string {
   return `${Math.round(km)} km`;
 }
 
-export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, onPlay }: Props) {
+export default function PlanPanel({ plan, bodies, hasLander, preview, buildDeltaV, onChange, onPlay }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [open, setOpen] = useState(true);
 
@@ -91,6 +94,12 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
     ? (canLand ? ['orbit', 'orbit-return', 'land', 'land-return'] : ['orbit', 'orbit-return'])
     : (canLand ? ['orbit', 'land'] : ['orbit']);
   const showOrbitKm = mission.kind === 'orbit' || mission.kind === 'orbit-return';
+
+  // Δv budget gate — the rocket must carry enough delta-v for the chosen mission.
+  const requiredDv = requiredDeltaV(plan.launchBodyId, plan.destinationId, mission.kind);
+  const haveDv = Math.round(buildDeltaV);
+  const dvShort = haveDv < requiredDv;
+  const dvShortfall = requiredDv - haveDv;
   // Orbit slider range scales to the body being orbited (the target, if any).
   const orbitBody = (targetId ? bodies.find((b) => b.id === targetId) : bodies[0]) ?? bodies[0];
   const orbitMin = orbitBody ? minimumOrbitKm(orbitBody.id) : 20;
@@ -208,6 +217,25 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                   />
                 </div>
               )}
+              {/* Δv budget — the progression gate. */}
+              <div className={`mt-2 rounded-md border px-2.5 py-1.5 text-[10px] leading-snug
+                ${dvShort ? 'border-red/45 bg-red/[0.08]' : 'border-green/40 bg-green/[0.06]'}`}>
+                <div className="flex items-center justify-between tabular-nums font-bold">
+                  <span className={dvShort ? 'text-red' : 'text-green'}>
+                    {dvShort ? '⚠ Δv SHORT' : '✓ Δv BUDGET MET'}
+                  </span>
+                  <span className="text-dim">
+                    <span className={dvShort ? 'text-red' : 'text-green'}>{haveDv}</span>
+                    {' / '}{requiredDv} m/s
+                  </span>
+                </div>
+                {dvShort && (
+                  <div className="mt-0.5 text-red/90">
+                    Short by {dvShortfall} m/s — build a bigger rocket (more stages, bigger tanks
+                    or stronger engines) to reach {DESTINATIONS.find((d) => d.id === plan.destinationId)?.name ?? 'here'}.
+                  </div>
+                )}
+              </div>
               {(mission.kind === 'land-return' || mission.kind === 'orbit-return') && (
                 <div className="mt-1 text-[10px] text-orange/90 leading-snug">
                   ↩ Return trips are ambitious — pack extra fuel{mission.kind === 'land-return' ? ' and a lander that can fly back up' : ''}. Launch, then warp.
@@ -380,7 +408,17 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
 
         {/* Play */}
         <div className="shrink-0 px-3 pb-3 pt-1 border-t border-white/10">
-          <button onClick={onPlay} className="btn btn-primary w-full py-3.5" style={{ fontSize: 13 }}>▶ LAUNCH</button>
+          {dvShort && (
+            <div className="mb-1.5 text-center text-[10px] text-red font-bold">
+              Δv short by {dvShortfall} m/s — open the Builder for a bigger rocket.
+            </div>
+          )}
+          <button
+            onClick={onPlay}
+            disabled={dvShort}
+            className={`btn w-full py-3.5 ${dvShort ? 'btn-secondary opacity-50 cursor-not-allowed' : 'btn-primary'}`}
+            style={{ fontSize: 13 }}
+          >{dvShort ? '🔒 Δv TOO LOW' : '▶ LAUNCH'}</button>
         </div>
       </div>
     </div>
