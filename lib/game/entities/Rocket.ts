@@ -39,6 +39,11 @@ export class Rocket {
   private fx: FxBursts;
   private upCenter = EARTH_CENTER.clone();
   private parachute?: THREE.Group;
+  /** Payload group (nose / capsule / station module) — detaches on deploy. */
+  private payloadGroup?: THREE.Group;
+  private stationDeployed = false;
+  /** Station modules left behind in orbit; kept for disposal on reset. */
+  private deployedStations: THREE.Group[] = [];
   private droppedStages: { group: THREE.Group; velocity: THREE.Vector3; spin: THREE.Vector3; age: number }[] = [];
 
   constructor(scene: THREE.Scene, build: RocketBuild) {
@@ -55,6 +60,7 @@ export class Rocket {
   setBuild(build: RocketBuild) {
     this.scene.remove(this.mesh);
     this.disposeMesh();
+    this.clearDeployedStations();
     this.build = build;
     this.meshActiveStage = 0;
     this.mesh = this.buildMesh(build);
@@ -73,6 +79,7 @@ export class Rocket {
     this.mesh = this.buildMesh(this.build);
     this.scene.add(this.mesh);
     this.clearDroppedStages();
+    this.clearDeployedStations();
     this.syncMesh();
   }
 
@@ -120,6 +127,37 @@ export class Rocket {
   emitParachuteBurst() {
     const up = new THREE.Vector3().subVectors(this.position, this.upCenter).normalize();
     this.fx.burst(this.position.clone().addScaledVector(up, 1.0), up, 6, 0x9effd0, 0.7);
+  }
+
+  /**
+   * Release the payload (Station Module) into orbit: detach its group into the
+   * world so it stays parked where it separated while the rocket flies on.
+   */
+  deployStation() {
+    const g = this.payloadGroup;
+    if (!g || this.stationDeployed) return;
+    this.stationDeployed = true;
+    g.updateWorldMatrix(true, true);
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const scl = new THREE.Vector3();
+    g.matrixWorld.decompose(pos, quat, scl);
+    this.mesh.remove(g);
+    g.position.copy(pos);
+    g.quaternion.copy(quat);
+    g.scale.copy(scl);
+    this.scene.add(g);
+    this.deployedStations.push(g);
+    this.payloadGroup = undefined;
+    // A bright separation puff so the deploy reads clearly.
+    const up = new THREE.Vector3().subVectors(this.position, this.upCenter).normalize();
+    this.fx.burst(this.position.clone().addScaledVector(up, 0.6), up, 10, 0x6cd0ff, 0.9);
+  }
+
+  private clearDeployedStations() {
+    this.deployedStations.forEach((g) => { this.scene.remove(g); this.disposeGroup(g); });
+    this.deployedStations = [];
+    this.stationDeployed = false;
   }
 
   // ── Mesh construction (bottom-up from y = 0) ──────────────────────────────
@@ -218,9 +256,12 @@ export class Rocket {
       }
     }
 
-    // Nose / payload
+    // Nose / payload — wrapped in its own group so a Station Module can detach
+    // cleanly when deployed into orbit.
+    this.payloadGroup = undefined;
     const nose = getPart(build.noseId);
     if (nose) {
+      const payload = new THREE.Group();
       const accent = nose.accent ?? 0x2b5cff;
       if (nose.type === 'capsule') {
         const capH = nose.id === 'capsule-command' ? 0.5 : nose.id === 'probe-core' ? 0.26 : 0.4;
@@ -229,11 +270,11 @@ export class Rocket {
           mat(nose.color, shininessFor(nose.finish, 30)),
         );
         cap.position.y = y + capH / 2;
-        group.add(cap);
+        payload.add(cap);
         // Accent collar band where the capsule meets the stack.
         const collar = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R * 1.01, BODY_R * 1.01, 0.05, 12), mat(accent, 40));
         collar.position.y = y + 0.03;
-        group.add(collar);
+        payload.add(collar);
         // Deployable solar wings on the array-bearing payloads.
         const hasWings = nose.id === 'station-module' || nose.id === 'satellite-bus' ||
           nose.id === 'capsule-command' || build.utilityIds?.includes('solar-array');
@@ -241,32 +282,34 @@ export class Rocket {
           for (const sgn of [-1, 1]) {
             const panel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.01), mat(0x2b5cff, 70));
             panel.position.set(sgn * 0.36, y + capH / 2, 0);
-            group.add(panel);
+            payload.add(panel);
           }
         }
         // Probe core gets a dish; command pod gets a docking ring on top.
         if (nose.id === 'probe-core') {
           const dish = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.02, 0.04, 12), mat(accent, 70));
           dish.position.set(0.28, y + capH / 2, 0); dish.rotation.z = Math.PI / 2.4;
-          group.add(dish);
+          payload.add(dish);
         } else if (nose.id === 'capsule-command') {
           const dock = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R * 0.34, BODY_R * 0.34, 0.08, 12), mat(accent, 60));
-          dock.position.y = y + capH + 0.04; group.add(dock);
+          dock.position.y = y + capH + 0.04; payload.add(dock);
         }
         y += capH;
       } else if (nose.id === 'nose-fairing') {
         // Tall, slightly bulged aerodynamic fairing.
         const cone = new THREE.Mesh(new THREE.ConeGeometry(BODY_R * 1.05, 0.62, 14), mat(nose.color, shininessFor(nose.finish, 36)));
-        cone.position.y = y + 0.31; group.add(cone);
+        cone.position.y = y + 0.31; payload.add(cone);
         const seam = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R * 1.02, BODY_R * 1.02, 0.04, 14), mat(accent, 40));
-        seam.position.y = y + 0.02; group.add(seam);
+        seam.position.y = y + 0.02; payload.add(seam);
         y += 0.62;
       } else {
         const cone = new THREE.Mesh(new THREE.ConeGeometry(BODY_R, 0.42, 12), mat(nose.color, shininessFor(nose.finish, 36)));
         cone.position.y = y + 0.21;
-        group.add(cone);
+        payload.add(cone);
         y += 0.42;
       }
+      group.add(payload);
+      this.payloadGroup = payload;
     }
 
     if (build.utilityIds?.includes('parachute')) {
@@ -520,6 +563,7 @@ export class Rocket {
     this.flame.dispose();
     this.fx.dispose();
     this.clearDroppedStages();
+    this.clearDeployedStations();
     this.disposeMesh();
   }
 }

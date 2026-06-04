@@ -169,7 +169,18 @@ export type SimStages = {
   payloadMass: number;
   hasParachute: boolean;
   hasLegs: boolean;
+  /** True when the build carries a deployable Station Module. */
+  hasStation: boolean;
+  /** Mass (t) of the station module, shed from the payload once deployed. */
+  stationMass: number;
 };
+
+/** The station module the build carries (as payload or utility), if any. */
+export function stationPart(build: RocketBuild): RocketPart | undefined {
+  if (build.noseId === 'station-module') return partById('station-module');
+  if ((build.utilityIds ?? []).includes('station-module')) return partById('station-module');
+  return undefined;
+}
 
 /**
  * Flattens a build into the ordered stage list the deterministic Simulator
@@ -186,11 +197,14 @@ export function buildSimStages(build: RocketBuild): SimStages {
     landerIndex = stages.length;
     stages.push(lander);
   }
+  const station = stationPart(build);
   return {
     stages,
     landerIndex,
     payloadMass: payloadDryMass(build),
     hasParachute: build.utilityIds.includes('parachute'),
     hasLegs:      build.utilityIds.includes('landing-legs'),
+    hasStation:   !!station,
+    stationMass:  station?.mass ?? 0,
   };
 }

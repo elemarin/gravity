@@ -11,7 +11,7 @@ import {
   loadPlan, savePlan, loadBases, addBase, loadGoals, addGoal,
 } from '@/lib/storage';
 import { MILESTONES } from '@/lib/game/career/Milestones';
-import { evaluateGoals, campaignGoal } from '@/lib/game/career/Progress';
+import { evaluateGoals, campaignGoal, stationGoalId } from '@/lib/game/career/Progress';
 import { getPart } from '@/lib/game/career/Parts';
 import { estimateBuildDeltaV } from '@/lib/game/BuildSpec';
 import {
@@ -86,6 +86,7 @@ export default function GameScreen() {
   const [plan, setPlanState] = useState<FlightPlan | null>(null);
   const [hasLander, setHasLander] = useState(false);
   const [hasParachute, setHasParachute] = useState(false);
+  const [hasStation, setHasStation] = useState(false);
   const [flightState, setFlightState] = useState<FlightState | null>(null);
   const [preview, setPreview] = useState<PreviewInfo | null>(null);
   const [missionResult, setMissionResult] = useState<MissionResult | null>(null);
@@ -147,6 +148,11 @@ export default function GameScreen() {
           onThrustStart: () => { hapticThrust(); soundIgnite(); },
           onStageSeparation: () => { hapticStage(); soundStage(); },
           onLanderDeploy: () => { hapticDeploy(); soundStage(); },
+          onStationDeploy: (bodyId) => {
+            hapticDeploy(); soundStage();
+            const id = stationGoalId(bodyId);
+            if (id) awardGoalById(id);
+          },
           onTouchdown: (outcome) => {
             soundTouchdown(outcome === 'landed');
             outcome === 'landed' ? hapticLanding() : hapticCrash();
@@ -169,6 +175,7 @@ export default function GameScreen() {
 
       gameRef.current = game;
       setHasParachute(game.hasParachute);
+      setHasStation(game.hasStation);
       const first = game.getNextMilestone();
       if (first) setNextTarget(first.description);
       game.start();
@@ -187,32 +194,29 @@ export default function GameScreen() {
     if (gameRef.current) gameRef.current.timeScale = timeScale;
   }, [timeScale]);
 
-  /** Award campaign goals (Moon landing, ISS, bases, Mars…) on mission end. */
+  /** Grant a single campaign goal (base + part unlocks + toast), if new. */
+  const awardGoalById = useCallback((id: string) => {
+    if (loadGoals().includes(id)) return;
+    addGoal(id);
+    const g = campaignGoal(id);
+    if (g?.baseUnlock) { addBase(g.baseUnlock); setBases(loadBases()); }
+    if (g?.partUnlocks?.length) addUnlockedParts(g.partUnlocks);
+    if (g) {
+      const subtitle = g.partUnlocks?.length
+        ? `Unlocked: ${g.partUnlocks.map((p) => getPart(p)?.name ?? p).join(', ')}`
+        : g.baseUnlock ? 'New launch site unlocked!' : g.description;
+      pushToast(`🏆 ${g.name}`, subtitle);
+    }
+  }, [pushToast]);
+
+  /** Award landing/base campaign goals at mission end. */
   const awardGoals = useCallback((result: MissionResult) => {
     const build = buildRef.current;
     const p = planRef.current;
     if (!build || !p) return;
-    const newly = evaluateGoals(
-      {
-        result, build,
-        launchBodyId: p.launchBodyId,
-        targetBodyId: destinationTargetId(p.destinationId, p.launchBodyId),
-      },
-      loadGoals(),
-    );
-    for (const id of newly) {
-      addGoal(id);
-      const g = campaignGoal(id);
-      if (g?.baseUnlock) { addBase(g.baseUnlock); setBases(loadBases()); }
-      if (g?.partUnlocks?.length) addUnlockedParts(g.partUnlocks);
-      if (g) {
-        const subtitle = g.partUnlocks?.length
-          ? `Unlocked: ${g.partUnlocks.map((p) => getPart(p)?.name ?? p).join(', ')}`
-          : g.baseUnlock ? 'New launch site unlocked!' : g.description;
-        pushToast(`🏆 ${g.name}`, subtitle);
-      }
-    }
-  }, [pushToast]);
+    const newly = evaluateGoals({ result, build, launchBodyId: p.launchBodyId }, loadGoals());
+    newly.forEach(awardGoalById);
+  }, [awardGoalById]);
 
   const handlePlanChange = useCallback((next: FlightPlan) => {
     const prev = planRef.current;
@@ -281,6 +285,7 @@ export default function GameScreen() {
   const handleStage = useCallback(() => gameRef.current?.manualStage(), []);
   const handleLander = useCallback(() => gameRef.current?.manualLander(), []);
   const handleLand = useCallback(() => gameRef.current?.manualLand(), []);
+  const handleDeployStation = useCallback(() => gameRef.current?.manualDeployStation(), []);
 
   const handleLaunchSite = useCallback((id: string) => {
     const cur = planRef.current;
@@ -300,6 +305,10 @@ export default function GameScreen() {
   const landerDeployed = flightState?.landerDeployed ?? false;
   // Offer the de-orbit/land button once the craft is actually in a stable orbit.
   const canLand = mode === 'sim' && !finished && phase === 'orbit';
+  const stationDeployed = flightState?.stationDeployed ?? false;
+  // Offer the deploy-station button when parked in a valid orbit with a module.
+  const canDeployStation = mode === 'sim' && !finished && hasStation &&
+    !stationDeployed && (flightState?.canDeployStation ?? false);
 
   const bodies = plan
     ? buildFlightBodies(plan.launchBodyId, destinationTargetId(plan.destinationId, plan.launchBodyId))
@@ -372,6 +381,8 @@ export default function GameScreen() {
           hasParachute={hasParachute}
           landerDeployed={landerDeployed}
           canLand={canLand}
+          canDeployStation={canDeployStation}
+          stationDeployed={stationDeployed}
           parachuteDeployed={flightState?.parachuteDeployed ?? false}
           onEdit={handleEdit}
           onReplay={handleReplay}
@@ -382,6 +393,7 @@ export default function GameScreen() {
           onStage={handleStage}
           onLander={handleLander}
           onLand={handleLand}
+          onDeployStation={handleDeployStation}
         />
       )}
 

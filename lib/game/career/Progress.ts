@@ -99,8 +99,6 @@ export type GoalContext = {
   result: MissionResult;
   build: RocketBuild;
   launchBodyId: string;
-  /** Destination's orbit/landing target, or null when orbiting the launch body. */
-  targetBodyId: string | null;
 };
 
 function carriesStation(build: RocketBuild): boolean {
@@ -108,14 +106,12 @@ function carriesStation(build: RocketBuild): boolean {
     (build.utilityIds ?? []).includes('station-module');
 }
 
-/** Did this flight establish an orbit around `body`? */
-function orbitedBody(ctx: GoalContext, body: string): boolean {
-  if (!ctx.result.reachedOrbit) return false;
-  if (ctx.targetBodyId) return ctx.targetBodyId === body;
-  return ctx.launchBodyId === body; // orbiting the launch world itself
-}
-
-/** Returns campaign goal ids newly satisfied by a finished flight. */
+/**
+ * Campaign goals satisfied at the END of a flight: landings (touch down) and
+ * bases (deliver a Station Module to the surface). Orbital *stations* are not
+ * awarded here — they are released in-flight with the DEPLOY button and granted
+ * the moment they separate (see {@link stationGoalId}).
+ */
 export function evaluateGoals(ctx: GoalContext, alreadyDone: string[]): string[] {
   const done = new Set(alreadyDone);
   const station = carriesStation(ctx.build);
@@ -125,10 +121,15 @@ export function evaluateGoals(ctx: GoalContext, alreadyDone: string[]): string[]
   for (const g of CAMPAIGN_GOALS) {
     if (done.has(g.id)) continue;
     let ok = false;
-    if (g.kind === 'station') ok = station && orbitedBody(ctx, g.body);
-    else if (g.kind === 'landing') ok = landedOn(g.body);
+    if (g.kind === 'landing') ok = landedOn(g.body);
     else if (g.kind === 'base') ok = station && landedOn(g.body);
     if (ok) { out.push(g.id); done.add(g.id); }
   }
   return out;
+}
+
+/** The campaign goal id for deploying a station around `body`, if one exists. */
+export function stationGoalId(body: string): string | undefined {
+  const id = `station-${body}`;
+  return CAMPAIGN_GOALS.some((g) => g.id === id) ? id : undefined;
 }

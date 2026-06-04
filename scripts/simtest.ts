@@ -7,7 +7,7 @@ import { MissionKind } from '../lib/game/plan/FlightPlan';
 import { ROCKET_PRESETS, ROUTE_PROVER_BUILD } from '../lib/game/career/Presets';
 import { buildFlightSimSetup } from '../lib/game/SimSetup';
 import { isLandable } from '../lib/game/bodies';
-import { evaluateGoals } from '../lib/game/career/Progress';
+import { evaluateGoals, stationGoalId } from '../lib/game/career/Progress';
 import { RocketBuild, DEFAULT_BUILD, MissionResult } from '../lib/game/types';
 import { PARTS_CATALOG } from '../lib/game/career/Parts';
 import { MILESTONES } from '../lib/game/career/Milestones';
@@ -324,27 +324,62 @@ for (const g of CAMPAIGN_GOALS) {
     expect('goal landable', isLandable(g.body), `goal '${g.id}' targets non-landable body '${g.body}'`);
   }
 }
-const stationBuild: RocketBuild = { ...DEFAULT_BUILD, noseId: 'station-module' };
-const fakeOrbit: MissionResult = {
+const fakeLanded: MissionResult = {
   outcome: 'landed', maxAltitude: 200, maxSpeed: 0.8, landingSpeed: 0,
   reachedSpace: true, reachedOrbit: true, rating: 'A', score: 0,
   reachedBodies: ['earth'], landedBody: 'earth', transferCompleted: false,
+  stationDeployed: false, stationBodyId: null,
 };
-const earthStation = evaluateGoals({ result: fakeOrbit, build: stationBuild, launchBodyId: 'earth', targetBodyId: null }, []);
-expect('campaign', earthStation.includes('station-earth'), `expected station-earth, got [${earthStation.join(',')}]`);
-const saturnStation = evaluateGoals(
-  { result: { ...fakeOrbit, reachedBodies: ['earth', 'saturn'] }, build: stationBuild, launchBodyId: 'earth', targetBodyId: 'saturn' }, []);
-expect('campaign', saturnStation.includes('station-saturn'), `expected station-saturn, got [${saturnStation.join(',')}]`);
-expect('campaign', !saturnStation.includes('station-earth'), 'a Saturn flight must not award the Earth station');
-// A bare flight (no station module) earns no station, even in orbit.
-const noStation = evaluateGoals({ result: fakeOrbit, build: DEFAULT_BUILD, launchBodyId: 'earth', targetBodyId: null }, []);
-expect('campaign', !noStation.includes('station-earth'), 'no Station Module → no station goal');
-// Landing a base requires the module too.
-const marsBaseBuild: RocketBuild = { ...DEFAULT_BUILD, noseId: 'station-module' };
+// Stations are deployed in-flight, not at mission end — exposed via stationGoalId.
+expect('campaign', stationGoalId('earth') === 'station-earth', 'expected a station goal for Earth');
+expect('campaign', stationGoalId('neptune') === 'station-neptune', 'expected a station goal for Neptune');
+expect('campaign', stationGoalId('nowhere') === undefined, 'no station goal for an unknown body');
+// evaluateGoals (mission end) handles landings + bases only.
+const stationBuild: RocketBuild = { ...DEFAULT_BUILD, noseId: 'station-module' };
+const moonLanding = evaluateGoals(
+  { result: { ...fakeLanded, landedBody: 'moon', reachedBodies: ['earth', 'moon'] }, build: DEFAULT_BUILD, launchBodyId: 'earth' }, []);
+expect('campaign', moonLanding.includes('land-moon'), `expected land-moon, got [${moonLanding.join(',')}]`);
+expect('campaign', !moonLanding.includes('station-earth'), 'evaluateGoals must not award stations');
+// A base needs the Station Module on the surface; a bare lander does not earn it.
 const marsBase = evaluateGoals(
-  { result: { ...fakeOrbit, landedBody: 'mars', reachedBodies: ['earth', 'mars'] }, build: marsBaseBuild, launchBodyId: 'earth', targetBodyId: 'mars' }, []);
+  { result: { ...fakeLanded, landedBody: 'mars', reachedBodies: ['earth', 'mars'] }, build: stationBuild, launchBodyId: 'earth' }, []);
 expect('campaign', marsBase.includes('base-mars') && marsBase.includes('land-mars'),
   `expected base-mars + land-mars, got [${marsBase.join(',')}]`);
+const marsNoModule = evaluateGoals(
+  { result: { ...fakeLanded, landedBody: 'mars', reachedBodies: ['earth', 'mars'] }, build: DEFAULT_BUILD, launchBodyId: 'earth' }, []);
+expect('campaign', !marsNoModule.includes('base-mars'), 'no Station Module → no base');
 console.log(`Campaign OK — ${CAMPAIGN_GOALS.length} goals across the system.`);
+
+// ── In-flight station deploy ─────────────────────────────────────────────────
+// Fly a Station-Module rocket to Earth orbit and release the station with the
+// in-flight deploy action — the mechanic behind every station campaign goal.
+console.log('-- Station deploy --');
+{
+  const stationRocket: RocketBuild = {
+    ...ROCKET_PRESETS.find((p) => p.id === 'moon-lander')!.build,
+    noseId: 'station-module',
+  };
+  const plan = autoPlan('earth', 'orbit', { kind: 'orbit', orbitKm: 300 });
+  const setup = buildFlightSimSetup(stationRocket, plan);
+  expect('station setup', setup.config.hasStation, 'expected the build to carry a station');
+  const sim = new Simulator(setup.config, plan);
+  sim.reset();
+  let deployedAround: string | null = null;
+  let everInZone = false;
+  for (let i = 0; i < ORBIT_STEPS && !deployedAround; i++) {
+    sim.step(DT);
+    if (sim.canDeployStation()) {
+      everInZone = true;
+      deployedAround = sim.manualDeployStation();
+    }
+  }
+  expect('station deploy', everInZone, 'craft never reached a valid deploy zone (stable orbit)');
+  expect('station deploy', deployedAround === 'earth', `expected to deploy around earth, got ${deployedAround}`);
+  expect('station deploy', sim.state.deployedStation && stationGoalId(deployedAround!) === 'station-earth',
+    'expected the deploy to map to the Earth station goal');
+  // A second deploy is a no-op (single module).
+  expect('station deploy', sim.manualDeployStation() === null, 'station can only be deployed once');
+  console.log('Station deploy OK — released into a stable Earth orbit.');
+}
 
 console.log('All simulation regression tests passed.');

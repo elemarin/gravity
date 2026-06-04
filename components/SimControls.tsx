@@ -13,6 +13,8 @@ type Props = {
   hasLander: boolean;
   landerDeployed: boolean;
   canLand: boolean;
+  canDeployStation: boolean;
+  stationDeployed: boolean;
   onEdit: () => void;
   onReplay: () => void;
   onWarp: () => void;
@@ -22,6 +24,7 @@ type Props = {
   onStage: () => void;
   onLander: () => void;
   onLand: () => void;
+  onDeployStation: () => void;
 };
 
 function PixelBtn({
@@ -58,8 +61,8 @@ function hexToRgb(hex: string): string {
 export default function SimControls({
   finished, phase, timeScale, canSkip,
   canStage, hasParachute, parachuteDeployed,
-  hasLander, landerDeployed, canLand,
-  onEdit, onReplay, onWarp, onWarpUp, onWarpDown, onSkip, onStage, onLander, onLand,
+  hasLander, landerDeployed, canLand, canDeployStation, stationDeployed,
+  onEdit, onReplay, onWarp, onWarpUp, onWarpDown, onSkip, onStage, onLander, onLand, onDeployStation,
 }: Props) {
   const active = !finished && phase !== 'prelaunch';
   const inFlight = phase !== 'prelaunch' && phase !== 'landed' && phase !== 'destroyed';
@@ -82,6 +85,16 @@ export default function SimControls({
         )}
         {active && canLand && (
           <PixelBtn label="↓ LAND" color="#39e9a6" onClick={onLand} glow />
+        )}
+        {active && canDeployStation && (
+          <PixelBtn label="🛰 DEPLOY" color="#1fd9ff" onClick={onDeployStation} glow large />
+        )}
+        {active && stationDeployed && (
+          <div
+            className="min-w-[4.75rem] rounded-lg border-2 px-2.5 py-2.5 text-center font-pixel uppercase tracking-wide"
+            style={{ fontSize: 10, borderColor: '#1fd9ff', color: '#1fd9ff', background: 'rgba(31,217,255,0.12)' }}
+            title="Station deployed"
+          >🛰 ✓</div>
         )}
         {active && hasParachute && (
           <div

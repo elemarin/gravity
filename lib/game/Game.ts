@@ -397,6 +397,8 @@ export class Game {
       reachedBodies,
       landedBody: s.landedBodyId,
       transferCompleted,
+      stationDeployed: s.deployedStation,
+      stationBodyId: s.stationBodyId,
     };
   }
 
@@ -442,6 +444,8 @@ export class Game {
       landedBodyId: s.landedBodyId,
       reachedBodyIds: Array.from(s.reachedBodyIds),
       landerDeployed: s.deployedLander,
+      stationDeployed: s.deployedStation,
+      canDeployStation: this.sim.canDeployStation(),
       targetName: target?.name,
       targetDistance,
       guidanceSteps,
@@ -474,6 +478,18 @@ export class Game {
       this.callbacks.onLanderDeploy?.();
     }
   }
+
+  /** Release the station module into the current orbit (the DEPLOY button). */
+  manualDeployStation() {
+    if (this.mode !== 'sim' || this.sim.finished) return;
+    const bodyId = this.sim.manualDeployStation();
+    if (bodyId) {
+      this.rocket.deployStation();
+      this.callbacks.onStationDeploy?.(bodyId);
+    }
+  }
+
+  get hasStation(): boolean { return this.cfg.hasStation; }
 
   /** De-orbit + land from the current orbit (the LAND button). */
   manualLand() {

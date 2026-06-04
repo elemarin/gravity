@@ -16,7 +16,7 @@ const CATEGORIES: { type: PartType; label: string; short: string }[] = [
   { type: 'engine',  label: 'Engines',  short: 'ENG'   },
   { type: 'booster', label: 'Boosters', short: 'BOOST' },
   { type: 'tank',    label: 'Tanks',    short: 'TANK'  },
-  { type: 'nose',    label: 'Nose',     short: 'NOSE'  },
+  { type: 'nose',    label: 'Payload',  short: 'PAYLOAD' },
   { type: 'lander',  label: 'Landers',  short: 'LAND'  },
   { type: 'utility', label: 'Utility',  short: 'UTIL'  },
 ];
@@ -63,7 +63,10 @@ export default function RocketBuilder() {
   const totalBoosters = (build.boosterIds ?? []).length;
 
   const categoryParts = useMemo(
-    () => PARTS_CATALOG.filter((p) => p.type === activeCategory),
+    // The "Payload" tab gathers nose cones AND capsule-type payloads (crew pods,
+    // satellites, the Station Module, …) — both occupy the top of the stack.
+    () => PARTS_CATALOG.filter((p) =>
+      activeCategory === 'nose' ? (p.type === 'nose' || p.type === 'capsule') : p.type === activeCategory),
     [activeCategory],
   );
 
