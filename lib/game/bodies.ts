@@ -86,8 +86,14 @@ export function buildFlightBodies(launchId: string, destId: string | null): Body
 
   const destDef = bodyDef(destId);
   // Place the destination up-and-out, scaled by both radii so larger worlds
-  // sit proportionally farther away but always within camera range.
-  const gap = (launchDef.radius + destDef.radius) * 5 + 380;
+  // sit proportionally farther away but always within camera range. The
+  // destination must also sit clear of its OWN sphere of influence — a big
+  // body like Jupiter has an SOI wide enough to otherwise swallow the launch
+  // pad, firing the arrival capture at t=0 and hijacking the ascent.
+  const gap = Math.max(
+    (launchDef.radius + destDef.radius) * 5 + 380,
+    destDef.soiRadius * 1.3 + launchDef.radius,
+  );
   const destCenter = launchCenter.clone().add(new THREE.Vector3(gap * 0.82, gap * 0.57, 0));
   const dest = makeBody(destDef, destCenter);
   return [launch, dest];
@@ -104,15 +110,22 @@ export type Destination = {
 };
 
 export const DESTINATIONS: Destination[] = [
-  { id: 'orbit', name: 'Orbit',   targetId: null,    objective: 'Reach a stable orbit above the Kármán line.' },
-  { id: 'earth', name: 'Earth',   targetId: 'earth', objective: 'Transfer to Earth for orbit or landing.' },
-  { id: 'moon',  name: 'Moon',    targetId: 'moon',  objective: 'Transfer to the Moon and reach it.' },
-  { id: 'mars',  name: 'Mars',    targetId: 'mars',  objective: 'Transfer to Mars — the red planet awaits.' },
-  { id: 'venus', name: 'Venus',   targetId: 'venus', objective: 'Brave the thick skies of Venus.' },
+  { id: 'orbit',   name: 'Orbit',   targetId: null,      objective: 'Reach a stable orbit above the Kármán line.' },
+  { id: 'moon',    name: 'Moon',    targetId: 'moon',    objective: 'Transfer to the Moon and reach it.' },
+  { id: 'mercury', name: 'Mercury', targetId: 'mercury', objective: 'Cross to scorched, airless Mercury.' },
+  { id: 'venus',   name: 'Venus',   targetId: 'venus',   objective: 'Brave the thick skies of Venus.' },
+  { id: 'mars',    name: 'Mars',    targetId: 'mars',    objective: 'Transfer to Mars — the red planet awaits.' },
+  { id: 'jupiter', name: 'Jupiter', targetId: 'jupiter', objective: 'Orbit the king of planets — a gas giant, no surface to land on.' },
+  { id: 'saturn',  name: 'Saturn',  targetId: 'saturn',  objective: 'Orbit the ringed giant — a gas world with no surface.' },
 ];
 
 export function getDestination(id: string): Destination {
   return DESTINATIONS.find((d) => d.id === id) ?? DESTINATIONS[0];
+}
+
+/** A solid world can be landed on; gas giants can only be orbited. */
+export function isLandable(bodyId: string): boolean {
+  return !bodyDef(bodyId).gas;
 }
 
 /** Returns the transfer target, or null when the destination is the launch body itself. */

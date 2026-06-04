@@ -95,13 +95,16 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
   const orbitKm = Math.max(minimumOrbitKm(orbitBodyId), opts.orbitKm ?? defaultOrbitKm(orbitBodyId));
 
   // Parking orbit for transfers stays low to save delta-v; orbitKm is the
-  // *target* orbit at the destination body. Direct orbit missions get the
-  // closed-loop circularization; transfer parking orbits keep the open-loop
-  // burn their intercept timing is tuned around.
+  // *target* orbit at the destination body. Both direct-orbit and transfer
+  // ascents use the closed-loop circularization: it steers the velocity
+  // correction and only ever asks for circular speed, so it reaches a stable
+  // parking orbit on ANY capable build instead of escaping (a powerful engine)
+  // or stalling suborbital (a weak one) the way the old open-loop apoapsis burn
+  // did. The transfer-window burn then departs from that circular orbit.
   const parkingKm = targetId ? defaultOrbitKm(launchId) : orbitKm;
   const nodes = needsAscentAssist(launchId)
     ? [node('at-time', 0, undefined, { ascend: true })]
-    : ascentNodes(launchId, parkingKm, !targetId);
+    : ascentNodes(launchId, parkingKm, true);
 
   if (!targetId) {
     // Orbiting (or de-orbiting onto) the launch world itself.
