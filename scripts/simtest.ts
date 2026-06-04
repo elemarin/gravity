@@ -197,6 +197,23 @@ const moonOrbit = run('Moon orbit', 'earth', 'moon', 'orbit', 60);
 assertOrbit(moonOrbit, 'moon');
 expectReached(moonOrbit, 'earth');
 
+// ── Transfer-ascent robustness across builds ─────────────────────────────────
+// The lunar transfer used to fly an open-loop apoapsis burn that, off the
+// overpowered route-prover, either escaped Earth entirely (a strong build —
+// "shot into space") or stalled suborbital (a weak one), so the craft never
+// reached the Moon. These fly the player-facing presets to the Moon and require
+// a real, sustained lunar orbit — the closed-loop circularization ascent now
+// gets every capable build there.
+const orbiterBuild = ROCKET_PRESETS.find((p) => p.id === 'orbiter')!.build;
+const orbiterMoonOrbit = run('Orbiter Moon orbit', 'earth', 'moon', 'orbit', 60, orbiterBuild);
+assertOrbit(orbiterMoonOrbit, 'moon');
+expect(orbiterMoonOrbit.label, orbiterMoonOrbit.maxAlt <= 5000,
+  `expected the ascent not to escape Earth, got maxAlt=${orbiterMoonOrbit.maxAlt.toFixed(0)}km`);
+
+const interBuild = ROCKET_PRESETS.find((p) => p.id === 'interplanetary')!.build;
+assertOrbit(run('Interplanetary Moon orbit', 'earth', 'moon', 'orbit', 60, interBuild), 'moon');
+assertLanding(run('Interplanetary Moon land', 'earth', 'moon', 'land', undefined, interBuild), 'moon');
+
 const moonOrbitReturn = run('Moon orbit & return', 'earth', 'moon', 'orbit-return', 60);
 assertLanding(moonOrbitReturn, 'earth');
 expectReached(moonOrbitReturn, 'moon');
