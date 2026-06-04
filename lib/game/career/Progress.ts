@@ -37,32 +37,57 @@ export function canUpgradeFacility(level: number, milestonesDone: number): boole
 
 // ── Campaign goal chain (the end game) ─────────────────────────────────────
 
+export type GoalKind = 'station' | 'landing' | 'base';
+
 export type CampaignGoal = {
   id: string;
   name: string;
   description: string;
+  /** What the goal asks for: orbit a station, land, or land a base module. */
+  kind: GoalKind;
+  /** Body the goal happens at. */
+  body: string;
   /** Body id unlocked as a launch base when this goal completes. */
   baseUnlock?: string;
   /**
-   * Parts unlocked when this goal completes. Building a space station or a
-   * surface base is how the heaviest, most capable hardware is earned — so the
-   * orbital/base goals hand out the top-tier engines, tanks and landers that
-   * carry the delta-v needed for the outer solar system.
+   * Parts unlocked when this goal completes. The campaign — not the quick
+   * flight-skill milestones — is the long game: every station, landing and
+   * base across the solar system hands out a new part, so progression is paced
+   * across many distinct missions instead of a handful of early flights.
    */
   partUnlocks?: string[];
 };
 
+const station = (body: string, name: string, description: string, partUnlocks: string[]): CampaignGoal =>
+  ({ id: `station-${body}`, kind: 'station', body, name, description, partUnlocks });
+const landing = (body: string, name: string, description: string, partUnlocks: string[]): CampaignGoal =>
+  ({ id: `land-${body}`, kind: 'landing', body, name, description, partUnlocks });
+const base = (body: string, name: string, description: string, partUnlocks: string[]): CampaignGoal =>
+  ({ id: `base-${body}`, kind: 'base', body, name, description, baseUnlock: body, partUnlocks });
+
+/**
+ * The campaign, ordered roughly by difficulty (delta-v). Stations only need an
+ * orbit + a Station Module, so every world — even the gas giants you can't land
+ * on — can host one. Landings and bases are reserved for the solid worlds.
+ */
 export const CAMPAIGN_GOALS: CampaignGoal[] = [
-  { id: 'moon-landing', name: 'Moon Landing',  description: 'Land a craft safely on the Moon.',
-    partUnlocks: ['booster-srb-heavy'] },
-  { id: 'iss',          name: 'Space Station',  description: 'Carry a Station Module to Earth orbit.',
-    partUnlocks: ['tank-mega', 'capsule-command'] },
-  { id: 'moon-base',    name: 'Moon Base',      description: 'Deliver a Station Module to the Moon surface.',
-    baseUnlock: 'moon', partUnlocks: ['engine-mammoth', 'booster-liquid-xl'] },
-  { id: 'mars-landing', name: 'Mars Landing',   description: 'Land a craft safely on Mars.',
-    partUnlocks: ['lander-titan'] },
-  { id: 'mars-base',    name: 'Mars Base',      description: 'Deliver a Station Module to the Mars surface.',
-    baseUnlock: 'mars', partUnlocks: ['engine-plasma'] },
+  station('earth',   'Earth Station',    'Carry a Station Module to Earth orbit.',            ['probe-core']),
+  landing('moon',    'Moon Landing',     'Land a craft safely on the Moon.',                  ['satellite-bus']),
+  station('moon',    'Lunar Station',    'Establish a station in orbit around the Moon.',     ['nose-fairing']),
+  station('mercury', 'Mercury Station',  'Orbit a station around scorched Mercury.',          ['engine-aerospike']),
+  station('venus',   'Venus Station',    'Orbit a station above the clouds of Venus.',        ['solar-array']),
+  landing('venus',   'Venus Landing',    'Survive a landing on the surface of Venus.',        ['rcs-pack']),
+  landing('mercury', 'Mercury Landing',  'Touch down on airless Mercury.',                    ['tank-jumbo']),
+  station('mars',    'Mars Station',     'Orbit a station around Mars.',                      ['engine-vector']),
+  landing('mars',    'Mars Landing',     'Land a craft safely on Mars.',                      ['lander-rover']),
+  base('moon',       'Moon Base',        'Deliver a Station Module to the Moon surface.',     ['engine-mammoth']),
+  landing('ceres',   'Ceres Landing',    'Set down on the dwarf world Ceres.',                ['booster-srb-heavy']),
+  base('mars',       'Mars Base',        'Deliver a Station Module to the Mars surface.',     ['tank-mega']),
+  landing('titan',   'Titan Landing',    'Descend through Titan’s haze to its surface.',      ['booster-liquid-xl']),
+  station('jupiter', 'Jupiter Station',  'Hold a station in orbit around mighty Jupiter.',    ['capsule-command']),
+  station('saturn',  'Saturn Station',   'Orbit a station among Saturn’s rings.',             ['capsule-cupola']),
+  station('uranus',  'Uranus Station',   'Reach a station orbit around distant Uranus.',      ['engine-plasma']),
+  station('neptune', 'Neptune Station',  'The final frontier — a station orbiting Neptune.',  ['lander-titan']),
 ];
 
 export function campaignGoal(id: string): CampaignGoal | undefined {
@@ -74,6 +99,8 @@ export type GoalContext = {
   result: MissionResult;
   build: RocketBuild;
   launchBodyId: string;
+  /** Destination's orbit/landing target, or null when orbiting the launch body. */
+  targetBodyId: string | null;
 };
 
 function carriesStation(build: RocketBuild): boolean {
@@ -81,23 +108,27 @@ function carriesStation(build: RocketBuild): boolean {
     (build.utilityIds ?? []).includes('station-module');
 }
 
+/** Did this flight establish an orbit around `body`? */
+function orbitedBody(ctx: GoalContext, body: string): boolean {
+  if (!ctx.result.reachedOrbit) return false;
+  if (ctx.targetBodyId) return ctx.targetBodyId === body;
+  return ctx.launchBodyId === body; // orbiting the launch world itself
+}
+
 /** Returns campaign goal ids newly satisfied by a finished flight. */
 export function evaluateGoals(ctx: GoalContext, alreadyDone: string[]): string[] {
-  const { result, build } = ctx;
   const done = new Set(alreadyDone);
-  const station = carriesStation(build);
-  const out: string[] = [];
-  const award = (id: string, ok: boolean) => {
-    if (ok && !done.has(id)) { out.push(id); done.add(id); }
-  };
-
+  const station = carriesStation(ctx.build);
   const landedOn = (body: string) =>
-    result.outcome === 'landed' && result.landedBody === body;
-
-  award('moon-landing', landedOn('moon'));
-  award('iss', station && result.reachedOrbit && ctx.launchBodyId === 'earth');
-  award('moon-base', station && landedOn('moon'));
-  award('mars-landing', landedOn('mars'));
-  award('mars-base', station && landedOn('mars'));
+    ctx.result.outcome === 'landed' && ctx.result.landedBody === body;
+  const out: string[] = [];
+  for (const g of CAMPAIGN_GOALS) {
+    if (done.has(g.id)) continue;
+    let ok = false;
+    if (g.kind === 'station') ok = station && orbitedBody(ctx, g.body);
+    else if (g.kind === 'landing') ok = landedOn(g.body);
+    else if (g.kind === 'base') ok = station && landedOn(g.body);
+    if (ok) { out.push(g.id); done.add(g.id); }
+  }
   return out;
 }

@@ -6,7 +6,9 @@ import { autoPlan } from '../lib/game/plan/AutoPlan';
 import { MissionKind } from '../lib/game/plan/FlightPlan';
 import { ROCKET_PRESETS, ROUTE_PROVER_BUILD } from '../lib/game/career/Presets';
 import { buildFlightSimSetup } from '../lib/game/SimSetup';
-import { RocketBuild, DEFAULT_BUILD } from '../lib/game/types';
+import { isLandable } from '../lib/game/bodies';
+import { evaluateGoals } from '../lib/game/career/Progress';
+import { RocketBuild, DEFAULT_BUILD, MissionResult } from '../lib/game/types';
 import { PARTS_CATALOG } from '../lib/game/career/Parts';
 import { MILESTONES } from '../lib/game/career/Milestones';
 import { CAMPAIGN_GOALS } from '../lib/game/career/Progress';
@@ -314,5 +316,35 @@ expect('gate: grand-voyager Saturn', meets('grand-voyager', 'saturn', 'orbit'), 
 expect('gate: grand-voyager can\'t Neptune', !meets('grand-voyager', 'neptune', 'orbit'), 'grand-voyager should NOT clear the Neptune budget (needs station-tier parts)');
 expect('gate: outer-cruiser Neptune', meets('outer-cruiser', 'neptune', 'orbit'), 'outer-cruiser should clear the Neptune budget');
 console.log(`Δv gate OK — starter=${starterDv}, orbiter=${dvOf('orbiter')}, grand-voyager=${dvOf('grand-voyager')}, outer-cruiser=${dvOf('outer-cruiser')} m/s`);
+
+// ── Campaign goals (stations / landings / bases across the system) ───────────
+console.log('-- Campaign goals --');
+for (const g of CAMPAIGN_GOALS) {
+  if (g.kind === 'landing' || g.kind === 'base') {
+    expect('goal landable', isLandable(g.body), `goal '${g.id}' targets non-landable body '${g.body}'`);
+  }
+}
+const stationBuild: RocketBuild = { ...DEFAULT_BUILD, noseId: 'station-module' };
+const fakeOrbit: MissionResult = {
+  outcome: 'landed', maxAltitude: 200, maxSpeed: 0.8, landingSpeed: 0,
+  reachedSpace: true, reachedOrbit: true, rating: 'A', score: 0,
+  reachedBodies: ['earth'], landedBody: 'earth', transferCompleted: false,
+};
+const earthStation = evaluateGoals({ result: fakeOrbit, build: stationBuild, launchBodyId: 'earth', targetBodyId: null }, []);
+expect('campaign', earthStation.includes('station-earth'), `expected station-earth, got [${earthStation.join(',')}]`);
+const saturnStation = evaluateGoals(
+  { result: { ...fakeOrbit, reachedBodies: ['earth', 'saturn'] }, build: stationBuild, launchBodyId: 'earth', targetBodyId: 'saturn' }, []);
+expect('campaign', saturnStation.includes('station-saturn'), `expected station-saturn, got [${saturnStation.join(',')}]`);
+expect('campaign', !saturnStation.includes('station-earth'), 'a Saturn flight must not award the Earth station');
+// A bare flight (no station module) earns no station, even in orbit.
+const noStation = evaluateGoals({ result: fakeOrbit, build: DEFAULT_BUILD, launchBodyId: 'earth', targetBodyId: null }, []);
+expect('campaign', !noStation.includes('station-earth'), 'no Station Module → no station goal');
+// Landing a base requires the module too.
+const marsBaseBuild: RocketBuild = { ...DEFAULT_BUILD, noseId: 'station-module' };
+const marsBase = evaluateGoals(
+  { result: { ...fakeOrbit, landedBody: 'mars', reachedBodies: ['earth', 'mars'] }, build: marsBaseBuild, launchBodyId: 'earth', targetBodyId: 'mars' }, []);
+expect('campaign', marsBase.includes('base-mars') && marsBase.includes('land-mars'),
+  `expected base-mars + land-mars, got [${marsBase.join(',')}]`);
+console.log(`Campaign OK — ${CAMPAIGN_GOALS.length} goals across the system.`);
 
 console.log('All simulation regression tests passed.');

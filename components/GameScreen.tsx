@@ -193,7 +193,11 @@ export default function GameScreen() {
     const p = planRef.current;
     if (!build || !p) return;
     const newly = evaluateGoals(
-      { result, build, launchBodyId: p.launchBodyId },
+      {
+        result, build,
+        launchBodyId: p.launchBodyId,
+        targetBodyId: destinationTargetId(p.destinationId, p.launchBodyId),
+      },
       loadGoals(),
     );
     for (const id of newly) {

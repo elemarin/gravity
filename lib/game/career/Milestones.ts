@@ -15,21 +15,21 @@ export const MILESTONES: Milestone[] = [
     name: 'First Flight',
     description: 'Reach 1 km altitude',
     check: (s) => s.altitude >= 1,
-    unlocks: ['tank-medium', 'nose-fairing'],
+    unlocks: ['tank-medium'],
   },
   {
     id: 'high-altitude',
     name: 'High Altitude',
     description: 'Reach 25 km altitude',
     check: (s) => s.altitude >= 25,
-    unlocks: ['tank-large', 'probe-core'],
+    unlocks: ['tank-large'],
   },
   {
     id: 'staging',
     name: 'Stage Separation',
     description: 'Separate a spent stage in flight',
     check: (s) => s.activeStage >= 1 && s.altitude >= 1,
-    unlocks: ['parachute', 'engine-heavy', 'engine-aerospike'],
+    unlocks: ['parachute', 'engine-heavy'],
   },
   {
     id: 'karman',
@@ -53,21 +53,21 @@ export const MILESTONES: Milestone[] = [
       s.phase === 'orbit' &&
       s.altitude >= 100 &&
       (s.periapsis ?? 0) >= 80,
-    unlocks: ['tank-xl', 'satellite-bus', 'solar-array', 'station-module'],
+    unlocks: ['tank-xl', 'station-module'],
   },
   {
     id: 'high-orbit',
     name: 'High Orbit',
     description: 'Raise your orbit above 400 km',
     check: (s) => s.phase === 'orbit' && (s.periapsis ?? 0) >= 400,
-    unlocks: ['engine-nuclear', 'booster-srb-heavy'],
+    unlocks: ['engine-nuclear'],
   },
   {
     id: 'lander-deploy',
     name: 'Lander Away',
     description: 'Deploy a separable lander payload in flight',
     check: (s) => !!s.landerDeployed && s.altitude >= 50,
-    unlocks: ['lander-heavy', 'rcs-pack'],
+    unlocks: ['lander-heavy'],
   },
   {
     id: 'transfer',
@@ -76,7 +76,7 @@ export const MILESTONES: Milestone[] = [
     check: (s) =>
       !!s.reachedBodyIds &&
       s.reachedBodyIds.some((id) => id !== (s.launchBodyId ?? '')),
-    unlocks: ['engine-nuclear'],
+    unlocks: ['engine-ion'],
   },
   {
     id: 'soft-landing',
@@ -86,7 +86,8 @@ export const MILESTONES: Milestone[] = [
       s.phase === 'landed' &&
       s.landedBodyId != null &&
       s.landedBodyId !== (s.launchBodyId ?? ''),
-    unlocks: ['lander-heavy', 'engine-ion'],
+    // A flight-skill checkpoint; the matching world's campaign goal grants parts.
+    unlocks: [],
   },
   {
     id: 'crewed',
@@ -106,7 +107,7 @@ export const MILESTONES: Milestone[] = [
       const vEsc = Math.sqrt((2 * GM) / r); // km/s
       return s.speed >= vEsc;
     },
-    unlocks: ['engine-ion', 'engine-plasma'],
+    unlocks: [],
   },
 ];
 
