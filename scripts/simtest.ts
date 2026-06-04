@@ -236,4 +236,13 @@ const marsLand = run('Mars land', 'earth', 'mars', 'land');
 assertLanding(marsLand, 'mars');
 expectReached(marsLand, 'earth');
 
+// ── Solar-system destinations ────────────────────────────────────────────────
+// Every planet/moon must be reachable and hold a real orbit (gas giants are
+// orbit-only — no surface). Landing is covered for the solid inner worlds the
+// route-prover can set down on.
+for (const dest of ['mercury', 'venus', 'mars', 'jupiter', 'saturn']) {
+  assertOrbit(run(`${dest} orbit`, 'earth', dest, 'orbit'), dest);
+}
+assertLanding(run('Venus land', 'earth', 'venus', 'land'), 'venus');
+
 console.log('All simulation regression tests passed.');

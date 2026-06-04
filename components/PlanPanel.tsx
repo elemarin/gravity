@@ -6,7 +6,7 @@ import {
   MissionKind, MissionSpec, MISSION_LABELS,
   describeTrigger, describeActions, newNodeId,
 } from '@/lib/game/plan/FlightPlan';
-import { Body, DESTINATIONS, destinationTargetId } from '@/lib/game/bodies';
+import { Body, DESTINATIONS, destinationTargetId, isLandable } from '@/lib/game/bodies';
 import { autoPlan, defaultOrbitKm, minimumOrbitKm } from '@/lib/game/plan/AutoPlan';
 
 type Props = {
@@ -84,10 +84,12 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
 
   // Mission objective + target orbit drive the auto-planner.
   const mission: MissionSpec = plan.mission ?? { kind: 'orbit', orbitKm: defaultOrbitKm(plan.launchBodyId) };
-  // Which objectives make sense for the chosen destination.
+  // Which objectives make sense for the chosen destination. Gas giants have no
+  // surface, so they only offer orbit objectives.
+  const canLand = targetId ? isLandable(targetId) : isLandable(plan.launchBodyId);
   const missionKinds: MissionKind[] = targetId
-    ? ['orbit', 'orbit-return', 'land', 'land-return']
-    : ['orbit', 'land'];
+    ? (canLand ? ['orbit', 'orbit-return', 'land', 'land-return'] : ['orbit', 'orbit-return'])
+    : (canLand ? ['orbit', 'land'] : ['orbit']);
   const showOrbitKm = mission.kind === 'orbit' || mission.kind === 'orbit-return';
   // Orbit slider range scales to the body being orbited (the target, if any).
   const orbitBody = (targetId ? bodies.find((b) => b.id === targetId) : bodies[0]) ?? bodies[0];
@@ -101,9 +103,12 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
   // Switching destination keeps the objective if still valid, else falls back.
   const setDestination = (id: string) => {
     const nextTargetId = destinationTargetId(id, plan.launchBodyId);
-    const valid = nextTargetId
-      ? mission.kind
-      : (mission.kind === 'land' || mission.kind === 'land-return' ? 'land' : 'orbit');
+    const landable = nextTargetId ? isLandable(nextTargetId) : isLandable(plan.launchBodyId);
+    const isLand = mission.kind === 'land' || mission.kind === 'land-return';
+    let valid: MissionKind = mission.kind;
+    if (!nextTargetId && isLand) valid = 'land';           // orbiting the launch world
+    if (isLand && !landable) valid = nextTargetId ? 'orbit-return' : 'orbit';
+    if (!isLand && !nextTargetId) valid = 'orbit';
     regen(id, { ...mission, kind: valid });
   };
   const setMissionKind = (kind: MissionKind) => regen(plan.destinationId, { ...mission, kind });

@@ -336,7 +336,14 @@ export class Simulator {
       // into the surface from whatever orbit the capture achieved. (A weaker
       // build often captures into a higher orbit than the safe band, so waiting
       // for the full circularization would loop forever.)
-      const captured = this.body().id === tgt.id && Number.isFinite(apoR) && apoR <= tgt.soiRadius;
+      // For a landing arrival, hand off to the de-orbit autopilot once the orbit
+      // is bound with a safe periapsis AND it is either down in the low band (a
+      // light world like the Moon — keeps the descent cheap so a return leg has
+      // fuel) or has been circularized as low as the capture can get it (a heavy
+      // world that settles in a high orbit and can't reach the band — deorbit
+      // from there rather than loop forever).
+      const captured = this.body().id === tgt.id && Number.isFinite(apoR) && periR >= minR &&
+        (apoR <= tgt.soiRadius || nearCircular);
       if (s.landAfterCapture && captured) {
         s.throttle = 0;
         s.captureAssist = false;
@@ -548,7 +555,13 @@ export class Simulator {
       case 'at-soi-entry': {
         const tgt = this.cfg.bodies.find((b) => b.id === t.targetBodyId);
         if (!tgt) return false;
-        return this.state.position.distanceTo(tgt.center) <= tgt.soiRadius;
+        // Arrive when inside the authored SOI OR once the target's gravity
+        // actually dominates. The hand-authored SOI radii don't track each
+        // body's true dominance region (a massive world like Venus dominates
+        // far beyond its small SOI), so keying purely off the SOI lets the
+        // craft sail past and escape. Dominance is self-scaling per body.
+        if (this.state.position.distanceTo(tgt.center) <= tgt.soiRadius) return true;
+        return dominantBody(this.cfg.bodies, this.state.position).id === tgt.id;
       }
       case 'after-orbit': {
         const current = this.body();
@@ -596,12 +609,18 @@ export class Simulator {
     if (a.descend) {
       const tgtId = node.trigger.targetBodyId;
       const tgt = tgtId ? this.cfg.bodies.find((b) => b.id === tgtId) : undefined;
-      if (tgt && this.body().id !== tgt.id) {
-        // Arriving from a transfer: capture into a low orbit first (braking
-        // relative to the target is robust even before it gravitationally
-        // dominates), then de-orbit and land. This is both far cheaper than a
-        // powered descent from high altitude and far more reliable than needing
-        // the transfer to physically reach the target's narrow dominance region.
+      // Arriving (not yet captured) if the orbit relative to the target is
+      // unbound or still high — capture into a low orbit first, then de-orbit
+      // and land. Decided from the orbit shape, not gravitational dominance: a
+      // massive target dominates far outside the altitude a powered descent
+      // could ever brake from, so a direct descent there just sails past.
+      const arrivalAp = tgt ? this.apsides(tgt) : null;
+      const notYetCaptured = !!tgt && (!Number.isFinite(arrivalAp!.apo) ||
+        arrivalAp!.apo + tgt.radius > this.safeMaxOrbitR(tgt) * 1.5);
+      if (tgt && notYetCaptured) {
+        // Capture into a low orbit first (braking relative to the target is
+        // robust), then de-orbit and land — cheaper and more reliable than a
+        // powered descent from high altitude.
         s.captureAssist = true; s.captureTargetId = tgt.id; s.captureOrbitSign = 0;
         s.landAfterCapture = true;
         s.landingAssist = false; s.ascentAssist = false; s.circularizeAssist = false; s.deorbitAssist = false; s.departAssist = false; s.departTargetId = null;
