@@ -120,6 +120,11 @@ const THEMES: Record<string, Theme> = {
 
 const DEFAULT_THEME_ID = 'earth';
 const STEPS_PER_BAR = 8;
+// A world's music covers its surface, atmosphere and orbit, then hands off to
+// the deep-space cruise ~100 km above the orbital band. Using the full sphere
+// of influence is far too wide — Earth's SOI is 1600 km, which would bleed its
+// theme right across interplanetary space.
+const MUSIC_NEAR_MARGIN = 100; // km of headroom above the orbit band
 // Gentle broken-chord shape over scale degrees relative to the chord root
 // (0 root, 2 third, 4 fifth, 6 seventh, 7 octave) — flowing, never busy.
 const ARP_PATTERN = [0, 2, 4, 7, 4, 2, 6, 4];
@@ -535,9 +540,13 @@ class SpaceAudio {
   private themeFor(bodyId: string | undefined, altitude: number): string {
     if (!bodyId || !THEMES[bodyId]) return 'deepspace';
     const def = SOLAR_BODIES[bodyId];
-    // Inside the body's sphere of influence ≈ in its orbit or atmosphere.
-    if (def && altitude < def.soiRadius) return bodyId;
-    return 'deepspace';
+    if (!def) return 'deepspace';
+    // Orbit band mirrors the auto-plan's default orbit altitude per world, so
+    // the theme holds through ascent and orbit before fading to the cruise.
+    const orbitBand = def.atmosphereHeight > 0
+      ? def.atmosphereHeight * 1.6
+      : def.radius * 1.4;
+    return altitude < orbitBand + MUSIC_NEAR_MARGIN ? bodyId : 'deepspace';
   }
 
   /** A short ignition whoosh layered over the thruster ramp. */
