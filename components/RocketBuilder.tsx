@@ -173,11 +173,10 @@ export default function RocketBuilder() {
       </div>
 
       {/* ── Rocket preview ── */}
-      <section className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-3 overflow-y-auto px-4 py-3 md:grid md:grid-cols-[minmax(24rem,1fr)_minmax(22rem,30rem)] md:items-stretch md:overflow-hidden">
-      <div className="shrink-0 flex items-start justify-center gap-6 md:gap-10 md:col-start-1 md:row-start-1 md:self-start"
-           style={{ minHeight: '32vh', maxHeight: '42vh' }}>
+      <section className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-2 overflow-hidden px-4 py-2 md:grid md:grid-cols-[minmax(24rem,1fr)_minmax(22rem,30rem)] md:gap-3 md:items-stretch md:py-3 md:overflow-hidden">
+      <div className="shrink-0 flex flex-col items-stretch justify-start gap-2 [max-height:28vh] md:flex-row md:items-start md:justify-center md:gap-10 md:col-start-1 md:row-start-1 md:self-start md:[max-height:42vh] md:[min-height:32vh]">
         {/* Blueprint */}
-        <div className="flex-1 flex flex-col items-center justify-start h-full overflow-y-auto overflow-x-visible py-1">
+        <div className="min-h-0 flex-1 flex flex-col items-center justify-start overflow-y-auto overflow-x-visible py-1 md:h-full">
           <BlueprintRocket
             stages={stages}
             noseId={build.noseId}
@@ -193,8 +192,8 @@ export default function RocketBuilder() {
           />
         </div>
 
-        {/* Stats column */}
-        <div className="shrink-0 flex flex-col gap-2 justify-center h-full py-2" style={{ minWidth: 116 }}>
+        {/* Stats — compact horizontal row on mobile, vertical column on desktop */}
+        <div className="shrink-0 flex flex-row gap-1.5 overflow-x-auto no-scrollbar md:flex-col md:gap-2 md:justify-center md:h-full md:py-2 md:overflow-visible md:min-w-[116px]">
           <StatCard label={`MASS / ${tier.maxMass}t`} value={`${stats.wetMass.toFixed(1)} t`} warn={overMass} />
           <StatCard label="THRUST" value={`${stats.thrust.toFixed(0)} kN`} />
           <StatCard label="TWR" value={twr.toFixed(2)} warn={twr < 1.1} highlight={twr >= 1.1} />
@@ -204,15 +203,15 @@ export default function RocketBuilder() {
       </div>
 
       {/* ── Right column: facility hint, category tabs, parts drawer ── */}
-      <div className="flex min-h-0 flex-1 flex-col gap-2 md:col-start-2 md:row-start-1">
+      <div className="flex min-h-0 flex-1 flex-col gap-1.5 md:gap-2 md:col-start-2 md:row-start-1">
 
       {/* ── Facility + stage hint ── */}
-      <div className="shrink-0 px-0 pb-1 flex flex-col gap-1">
-        <div className="rounded-lg border border-cyan/25 bg-cyan/[0.06] px-3 py-1.5 text-[11px] text-center">
+      <div className="shrink-0 px-0 flex flex-col gap-1">
+        <div className="rounded-lg border border-cyan/25 bg-cyan/[0.06] px-3 py-1 md:py-1.5 text-[10px] md:text-[11px] text-center">
           <span className="text-cyan font-black">🏭 {tier.name}</span>
           <span className="text-dim"> · up to {tier.maxMass}t · {tier.maxStages} stages</span>
         </div>
-        <div className="rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 py-1.5 text-[11px] text-dim text-center">
+        <div className="rounded-lg border border-white/[0.1] bg-white/[0.04] px-3 py-1 md:py-1.5 text-[10px] md:text-[11px] text-dim text-center">
           Editing <span className="text-cyan font-bold">Stage {activeStage + 1}</span>
           {' '}— tap a part below to add it
         </div>
@@ -298,9 +297,9 @@ export default function RocketBuilder() {
 
 function StatCard({ label, value, highlight, warn }: { label: string; value: string; highlight?: boolean; warn?: boolean }) {
   return (
-    <div className={`rounded-lg border px-2.5 py-1.5 ${warn ? 'border-red/40 bg-red/[0.08]' : 'border-white/[0.1] bg-white/[0.04]'}`}>
-      <div className="text-[9px] font-bold tracking-[0.12em] uppercase text-dim">{label}</div>
-      <div className={`text-[14px] font-bold tabular-nums leading-tight ${warn ? 'text-red' : highlight ? 'text-cyan' : 'text-ink'}`}>
+    <div className={`shrink-0 min-w-[84px] md:min-w-0 md:w-full rounded-lg border px-2 py-1 md:px-2.5 md:py-1.5 ${warn ? 'border-red/40 bg-red/[0.08]' : 'border-white/[0.1] bg-white/[0.04]'}`}>
+      <div className="text-[8px] md:text-[9px] font-bold tracking-[0.1em] md:tracking-[0.12em] uppercase text-dim leading-none">{label}</div>
+      <div className={`text-[13px] md:text-[14px] font-bold tabular-nums leading-tight ${warn ? 'text-red' : highlight ? 'text-cyan' : 'text-ink'}`}>
         {value}
       </div>
     </div>
