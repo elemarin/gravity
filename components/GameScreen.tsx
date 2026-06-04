@@ -15,6 +15,10 @@ import { evaluateGoals, campaignGoal } from '@/lib/game/career/Progress';
 import {
   hapticThrust, hapticStage, hapticDeploy, hapticLanding, hapticCrash,
 } from '@/lib/haptics';
+import {
+  startFlightAudio, stopFlightAudio, updateFlightAudio,
+  soundIgnite, soundStage, soundTouchdown,
+} from '@/lib/audio/AudioEngine';
 import HUDOverlay from './HUDOverlay';
 import PlanPanel from './PlanPanel';
 import SimControls from './SimControls';
@@ -22,8 +26,26 @@ import StageStack from './StageStack';
 import MissionSummary from './MissionSummary';
 import MilestoneToast from './MilestoneToast';
 import NavDrawer from './NavDrawer';
+import SoundToggle from './SoundToggle';
 
 type ToastInfo = { id: number; title: string; subtitle: string };
+
+/** The engine driving the current thruster sound (active stage, or lander). */
+function activeEngineId(build: RocketBuild | null, state: FlightState): string | undefined {
+  if (!build) return undefined;
+  if (state.landerDeployed && build.landerId) return build.landerId;
+  const stages = build.stages && build.stages.length > 0
+    ? build.stages
+    : [{ engineId: build.engineId, tankIds: build.tankIds }];
+  const idx = Math.min(Math.max(0, state.activeStage), stages.length - 1);
+  return stages[idx]?.engineId ?? build.engineId;
+}
+
+/** True while the active engine is actually producing thrust. */
+function isFiring(state: FlightState): boolean {
+  return state.throttle > 0.001 && state.fuel > 0.001 &&
+    state.phase !== 'landed' && state.phase !== 'destroyed';
+}
 type PreviewInfo = { apoapsis: number; periapsis: number; impact: boolean };
 
 // Time-warp ladder. Long interplanetary coasts need the high multipliers.
@@ -103,13 +125,26 @@ export default function GameScreen() {
         plan: initialPlan,
         completedMilestoneIds: loadCompletedMilestones(),
         callbacks: {
-          onState: (s) => setFlightState(s),
+          onState: (s) => {
+            setFlightState(s);
+            if (game.mode === 'sim') {
+              updateFlightAudio({
+                throttle: s.throttle,
+                altitude: s.altitude,
+                firing: isFiring(s),
+                engineId: activeEngineId(buildRef.current, s),
+              });
+            }
+          },
           onPreview: (info) => setPreview(info),
           onModeChange: (m) => setMode(m),
-          onThrustStart: () => hapticThrust(),
-          onStageSeparation: () => hapticStage(),
-          onLanderDeploy: () => hapticDeploy(),
-          onTouchdown: (outcome) => (outcome === 'landed' ? hapticLanding() : hapticCrash()),
+          onThrustStart: () => { hapticThrust(); soundIgnite(); },
+          onStageSeparation: () => { hapticStage(); soundStage(); },
+          onLanderDeploy: () => { hapticDeploy(); soundStage(); },
+          onTouchdown: (outcome) => {
+            soundTouchdown(outcome === 'landed');
+            outcome === 'landed' ? hapticLanding() : hapticCrash();
+          },
           onMilestoneComplete: (id, unlocks) => {
             const m = MILESTONES.find((x) => x.id === id);
             if (!m) return;
@@ -135,6 +170,7 @@ export default function GameScreen() {
 
     return () => {
       mounted = false;
+      stopFlightAudio();
       gameRef.current?.destroy();
       gameRef.current = null;
     };
@@ -179,18 +215,22 @@ export default function GameScreen() {
   const handlePlay = useCallback(() => {
     setMissionResult(null);
     setTimeScale(1);
+    // Called from a click, so this satisfies the browser's autoplay gesture rule.
+    startFlightAudio();
     gameRef.current?.play();
   }, []);
 
   const handleEdit = useCallback(() => {
     setMissionResult(null);
     setTimeScale(1);
+    stopFlightAudio();
     gameRef.current?.edit();
   }, []);
 
   const handleReplay = useCallback(() => {
     setMissionResult(null);
     setTimeScale(1);
+    stopFlightAudio();
     gameRef.current?.edit();
   }, []);
 
@@ -271,6 +311,7 @@ export default function GameScreen() {
       )}
 
       <NavDrawer title="Flight Menu" />
+      <SoundToggle />
 
       {/* Launch-site chip (replaces the old scenario banner) */}
       {mode === 'plan' && plan && bases.length > 1 && (
