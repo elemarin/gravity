@@ -13,6 +13,7 @@ const MAX_STEPS = 4_000_000;
 
 type RunResult = {
   label: string;
+  launchId: string;
   finished: boolean;
   everOrbit: boolean;
   phase: SimPhase;
@@ -21,6 +22,8 @@ type RunResult = {
   touchdowns: number;
   maxAlt: number;
   reached: string[];
+  /** Sim seconds spent in 'orbit' phase, keyed by the body being orbited. */
+  orbitSecsByBody: Record<string, number>;
   plannedOrbitKm: number | undefined;
   steps: number;
 };
@@ -54,11 +57,22 @@ function run(
   let touchdowns = 0;
   let prevLanded = false;
   let maxAlt = 0;
+  const orbitSecsByBody: Record<string, number> = {};
   for (; steps < maxSteps; steps++) {
     sim.step(DT);
     const s = sim.state;
     everOrbit = everOrbit || s.everOrbit;
     maxAlt = Math.max(maxAlt, sim.altitude());
+    // Credit orbit time to the body actually being orbited. This is what
+    // distinguishes a real lunar orbit from just grazing the Moon on a fly-by
+    // that falls back to Earth (the bug this suite must catch). We test the
+    // orbit body-relative — bound (finite apoapsis), periapsis clear of the
+    // surface, comfortably above the surface — rather than via `phase==='orbit'`,
+    // whose 50 km floor is Earth-scaled and never trips for a low Moon orbit.
+    const b = sim.body();
+    if (Number.isFinite(s.apoapsis) && s.periapsis > 0.5 && sim.altitude() > Math.max(2, b.radius * 0.1)) {
+      orbitSecsByBody[b.id] = (orbitSecsByBody[b.id] ?? 0) + DT;
+    }
     const landedNow = s.phase === 'landed';
     if (landedNow && !prevLanded) touchdowns++;
     prevLanded = landedNow;
@@ -68,6 +82,7 @@ function run(
   const s = sim.state;
   const result: RunResult = {
     label,
+    launchId,
     finished: sim.finished,
     everOrbit,
     phase: s.phase,
@@ -76,6 +91,7 @@ function run(
     touchdowns,
     maxAlt,
     reached: Array.from(s.reachedBodyIds),
+    orbitSecsByBody,
     plannedOrbitKm: plan.mission?.orbitKm,
     steps,
   };
@@ -94,12 +110,30 @@ function assertFinished(result: RunResult) {
   expect(result.label, result.finished, `expected mission to finish within ${MAX_STEPS} steps`);
 }
 
+/** Minimum sustained orbit time (sim seconds) that counts as "actually orbited"
+ *  the body — comfortably more than one low orbital period, so a brief graze on
+ *  a fly-by that escapes back home does not qualify. */
+const MIN_ORBIT_SECS = 1000;
+
 function assertOrbit(result: RunResult, bodyId: string) {
   // Orbit missions don't auto-finish — the sim runs until the step limit or
-  // perturbations cause a natural reentry. We verify the craft reached a
-  // stable orbit around the correct body at some point during the run.
+  // perturbations cause a natural reentry. We verify the craft actually held an
+  // orbit AROUND THE CORRECT BODY for a meaningful span — not merely that it was
+  // ever in some orbit (the Earth parking orbit counts for that) or that it
+  // grazed the target on a fly-by. The Moon-orbit bug passed the old, weaker
+  // check because the craft reached a brief lunar orbit and then fell back to
+  // Earth; these assertions fail on exactly that behaviour.
   expect(result.label, result.everOrbit, 'expected everOrbit=true');
   expectReached(result, bodyId);
+  const orbitSecs = result.orbitSecsByBody[bodyId] ?? 0;
+  expect(result.label, orbitSecs >= MIN_ORBIT_SECS,
+    `expected a sustained orbit around ${bodyId} (>= ${MIN_ORBIT_SECS}s), got ${orbitSecs.toFixed(0)}s`);
+  // A non-return orbit mission must not end up crashed back onto the launch
+  // world — the signature of the "shoots into space / falls home" regression.
+  if (bodyId !== result.launchId) {
+    expect(result.label, result.landedBodyId !== result.launchId,
+      `expected craft to stay at ${bodyId}, but it ended up back on ${result.launchId}`);
+  }
 }
 
 /**
