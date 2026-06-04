@@ -42,6 +42,7 @@ export type SimState = {
   deployedLander: boolean;
   deployedParachute: boolean;
   landingAssist: boolean;   // powered-descent autopilot engaged
+  landAfterCapture: boolean; // after an arrival capture, auto de-orbit and land
   ascentAssist: boolean;    // powered-ascent autopilot engaged (relaunch)
   captureAssist: boolean;   // orbital-capture autopilot engaged (brake to circular)
   circularizeAssist: boolean; // ascent circularization autopilot engaged
@@ -101,6 +102,7 @@ export class Simulator {
       deployedLander: false,
       deployedParachute: false,
       landingAssist: false,
+      landAfterCapture: false,
       ascentAssist: false,
       captureAssist: false,
       circularizeAssist: false,
@@ -212,6 +214,10 @@ export class Simulator {
     // Holds retrograde and throttles bang-bang to keep speed under a safe
     // altitude-scaled limit, producing a soft touchdown on the target world.
     if (s.landingAssist) {
+      // Reached here already orbiting the body we're landing on — either a
+      // de-orbit from the launch world or the hand-off after a transfer-arrival
+      // capture lowered periapsis (see the `descend` action). So the dominant
+      // body IS the landing body and its altitude is the right reference.
       s.attitude = 'retrograde';
       const speedMs = s.velocity.length() * 1000;
       const safeMs = LAND_FLOOR_MS + altitude * LAND_RATE;
@@ -247,11 +253,19 @@ export class Simulator {
         s.throttle = 0;             // coasting up to apoapsis
       } else {
         s.attitude = 'prograde';    // circularize at the top
-        if (s.periapsis < targetApo * 0.6) {
-          s.throttle = 1;
-        } else {
+        // Hand control back once the orbit is circular enough — OR once the
+        // craft is out of fuel and already bounded above the surface. Without
+        // the fuel check the autopilot would burn forever against an empty tank
+        // (e.g. a small lander that just barely reached apoapsis), never
+        // releasing, so the plan's departure node could never fire.
+        const circular = s.periapsis >= targetApo * 0.6;
+        const stuckButOrbiting = !this.hasThrust() &&
+          Number.isFinite(s.apoapsis) && s.periapsis >= this.minStableOrbitKm(body);
+        if (circular || stuckButOrbiting) {
           s.throttle = 0;
           s.ascentAssist = false;   // in orbit — let the plan take over
+        } else {
+          s.throttle = 1;
         }
       }
     }
@@ -306,8 +320,8 @@ export class Simulator {
       const sign = s.captureOrbitSign;
 
       const minR = tgt.radius + this.minStableOrbitKm(tgt);
-      const safeMaxR = Math.max(minR + 1, tgt.soiRadius * 0.22);
-      const targetR = THREE.MathUtils.clamp(tgt.radius + this.captureOrbitKm(tgt), minR, safeMaxR);
+      const safeMaxR = this.safeMaxOrbitR(tgt);
+      const targetR = tgt.radius + this.captureTargetAltKm(tgt);
 
       const ap = this.apsides(tgt);
       const apoR = Number.isFinite(ap.apo) ? ap.apo + tgt.radius : Infinity;
@@ -317,7 +331,21 @@ export class Simulator {
       const nearCircular = Math.abs(radialVel) <= tol &&
         Math.abs(Math.abs(tangentialVel) - vCirc) <= tol;
 
-      if (bounded && nearCircular && periR >= minR) {
+      // A landing arrival only needs to be BOUND around the target, not settled
+      // into the tight safe band — the de-orbit autopilot then lowers periapsis
+      // into the surface from whatever orbit the capture achieved. (A weaker
+      // build often captures into a higher orbit than the safe band, so waiting
+      // for the full circularization would loop forever.)
+      const captured = this.body().id === tgt.id && Number.isFinite(apoR) && apoR <= tgt.soiRadius;
+      if (s.landAfterCapture && captured) {
+        s.throttle = 0;
+        s.captureAssist = false;
+        s.captureTargetId = null;
+        s.captureOrbitSign = 0;
+        s.landAfterCapture = false;
+        s.deorbitAssist = true;
+        s.attitude = 'retrograde';
+      } else if (bounded && nearCircular && periR >= minR) {
         // Holding a bounded, near-circular, safe orbit — capture complete.
         s.throttle = 0;
         s.captureAssist = false;
@@ -346,22 +374,37 @@ export class Simulator {
     }
 
     // --- Departure autopilot (the return-home burn) ---
-    // Burns toward the home body until the home-body conic intersects its
-    // atmosphere/surface. A plain prograde escape can point away from home and
-    // waste the entire return stage.
+    // Two phases:
+    //  1. While another body still dominates (e.g. parked in a low Moon orbit),
+    //     burn PROGRADE to raise apoapsis and climb out of its SOI. Aiming
+    //     straight at the target from a low orbit would point the burn down
+    //     through the body and crash — prograde always lifts the orbit instead.
+    //  2. Once the target body dominates, aim homeward and burn to drop the
+    //     conic into its atmosphere/surface. A plain prograde escape can point
+    //     away from home and waste the entire return stage.
     if (s.departAssist) {
       const target = this.cfg.bodies.find((b) => b.id === s.departTargetId) ?? this.cfg.bodies[0];
-      const targetApsides = this.apsides(target);
-      const returnPeriapsis = target.atmosphereHeight > 0 ? target.atmosphereHeight * 0.65 : target.radius * 0.08;
-      if (body.id === target.id && targetApsides.peri <= returnPeriapsis) {
-        s.throttle = 0;
-        s.departAssist = false;
-        s.departFromId = null;
-        s.departTargetId = null;
+      if (body.id !== target.id) {
+        // Raise apoapsis just past the SOI, then coast out under the target's
+        // pull. Burning all the way to escape velocity flings the craft into a
+        // huge orbit around the target it can't then drop home from.
+        s.attitude = 'prograde';
+        const ap = this.apsides(body);
+        const apoR = Number.isFinite(ap.apo) ? ap.apo + body.radius : Infinity;
+        s.throttle = apoR < body.soiRadius ? 1 : 0;
       } else {
-        const homeward = target.center.clone().sub(s.position);
-        if (homeward.lengthSq() > 1e-10) this.aimToward(homeward, up);
-        s.throttle = 1;
+        const targetApsides = this.apsides(target);
+        const returnPeriapsis = target.atmosphereHeight > 0 ? target.atmosphereHeight * 0.65 : target.radius * 0.08;
+        if (targetApsides.peri <= returnPeriapsis) {
+          s.throttle = 0;
+          s.departAssist = false;
+          s.departFromId = null;
+          s.departTargetId = null;
+        } else {
+          const homeward = target.center.clone().sub(s.position);
+          if (homeward.lengthSq() > 1e-10) this.aimToward(homeward, up);
+          s.throttle = 1;
+        }
       }
     }
 
@@ -510,9 +553,16 @@ export class Simulator {
       case 'after-orbit': {
         const current = this.body();
         if (current.id === t.targetBodyId) return false;
+        // Wait until the arrival/relaunch autopilot has finished settling the
+        // orbit. Firing the departure burn mid-capture (while still braking
+        // down toward periapsis) aims the burn into the body and crashes.
+        if (this.state.captureAssist || this.state.ascentAssist) return false;
         const altitudeNow = Math.max(0, this.state.position.distanceTo(current.center) - current.radius);
         const apsides = this.apsides(current);
-        const periFloor = Math.max(this.minStableOrbitKm(current), this.captureOrbitKm(current) * 0.55);
+        // Floor keyed off the orbit the SOI can actually hold, not the (often
+        // higher) requested altitude — otherwise a tight SOI like the Moon's can
+        // never satisfy it and the return-leg departure burn never fires.
+        const periFloor = Math.max(this.minStableOrbitKm(current), this.captureTargetAltKm(current) * 0.5);
         return altitudeNow >= this.minStableOrbitKm(current) &&
           Number.isFinite(apsides.apo) &&
           apsides.peri >= periFloor;
@@ -543,7 +593,22 @@ export class Simulator {
   private applyActions(node: Maneuver) {
     const s = this.state;
     const a = node.actions;
-    if (a.descend) { s.landingAssist = true; s.ascentAssist = false; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.attitude = 'retrograde'; }
+    if (a.descend) {
+      const tgtId = node.trigger.targetBodyId;
+      const tgt = tgtId ? this.cfg.bodies.find((b) => b.id === tgtId) : undefined;
+      if (tgt && this.body().id !== tgt.id) {
+        // Arriving from a transfer: capture into a low orbit first (braking
+        // relative to the target is robust even before it gravitationally
+        // dominates), then de-orbit and land. This is both far cheaper than a
+        // powered descent from high altitude and far more reliable than needing
+        // the transfer to physically reach the target's narrow dominance region.
+        s.captureAssist = true; s.captureTargetId = tgt.id; s.captureOrbitSign = 0;
+        s.landAfterCapture = true;
+        s.landingAssist = false; s.ascentAssist = false; s.circularizeAssist = false; s.deorbitAssist = false; s.departAssist = false; s.departTargetId = null;
+      } else {
+        s.landingAssist = true; s.landAfterCapture = false; s.ascentAssist = false; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.attitude = 'retrograde';
+      }
+    }
     if (a.ascend)  { s.ascentAssist = true; s.landingAssist = false; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.relaunchStart = s.elapsed; }
     if (a.capture) { s.captureAssist = true; s.captureTargetId = node.trigger.targetBodyId ?? null; s.captureOrbitSign = 0; s.circularizeAssist = false; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; }
     if (a.circularize) { s.circularizeAssist = true; s.captureAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; s.attitude = 'prograde'; }
@@ -632,6 +697,35 @@ export class Simulator {
       const dist = Math.max(toC.length(), b.radius + 0.001);
       acc.addScaledVector(toC.normalize(), b.GM / (dist * dist));
     }
+
+    // Indirect (tidal) term. The bodies are static — they never accelerate
+    // toward one another — so a craft orbiting a secondary (e.g. the Moon) would
+    // otherwise feel the primary's FULL pull as an unbalanced, uniform force.
+    // A constant force on a Keplerian orbit pumps its eccentricity without bound
+    // (the "Stark" effect), so the craft's Moon orbit decays until it crashes or
+    // is flung back toward Earth — the moon-orbit "shoots into space" bug.
+    //
+    // In reality the secondary falls toward the primary alongside the craft, so
+    // only the DIFFERENCE in pull across the orbit (the tide) perturbs it. We
+    // recover that by working in the freely-falling frame of the dominant body:
+    // subtract the acceleration the other bodies impart to that body itself.
+    // Earth orbits are unaffected (the Moon's pull on Earth is negligible), and
+    // Moon orbits become physically stable.
+    if (this.cfg.bodies.length > 1) {
+      const central = dominantBody(this.cfg.bodies, pos);
+      for (const b of this.cfg.bodies) {
+        // Only correct for a MORE massive perturber (e.g. Earth's pull on the
+        // Moon). The reverse — a light secondary's pull on the primary — is
+        // negligible, and applying it during the interplanetary cruise would
+        // nudge the finely-tuned transfer enough to miss the target's narrow
+        // dominance region. Gating on mass keeps Earth cruise identical while
+        // still cancelling the dominant Stark force inside the Moon's SOI.
+        if (b.id === central.id || b.GM <= central.GM) continue;
+        const toC = new THREE.Vector3().subVectors(b.center, central.center);
+        const dist = Math.max(toC.length(), b.radius + 0.001);
+        acc.addScaledVector(toC.normalize(), -b.GM / (dist * dist));
+      }
+    }
     return acc;
   }
 
@@ -669,6 +763,32 @@ export class Simulator {
       ? Math.max(KARMAN_LINE, body.atmosphereHeight * 1.6)
       : Math.max(20, body.radius * 1.4);
     return Math.max(this.minStableOrbitKm(body), requested ?? fallback);
+  }
+
+  /**
+   * Highest orbital radius (from body centre) the sphere of influence can hold
+   * stably. A small SOI only keeps a near-circular orbit well inside it; braking
+   * nearer the edge leaves an apoapsis the body can't retain. Capped to a safe
+   * fraction of the SOI so the captured orbit stays bounded against the tidal
+   * pull of the primary.
+   */
+  private safeMaxOrbitR(body: Body): number {
+    const minR = body.radius + this.minStableOrbitKm(body);
+    return Math.max(minR + 1, body.soiRadius * 0.22);
+  }
+
+  /**
+   * Altitude (km) the capture autopilot can actually settle into around a body:
+   * the requested orbit, clamped to the floor the body can hold and the ceiling
+   * its SOI can retain. For a tight SOI (e.g. the Moon) this is far lower than a
+   * naively requested altitude — and it is the same figure the return-leg
+   * `after-orbit` trigger keys off, so the two never disagree.
+   */
+  private captureTargetAltKm(body: Body): number {
+    const minR = body.radius + this.minStableOrbitKm(body);
+    const targetR = THREE.MathUtils.clamp(
+      body.radius + this.captureOrbitKm(body), minR, this.safeMaxOrbitR(body));
+    return targetR - body.radius;
   }
 
   private thrustAccel(up: THREE.Vector3, _body: Body): THREE.Vector3 {
