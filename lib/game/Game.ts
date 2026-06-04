@@ -17,9 +17,6 @@ import {
 import { KARMAN_LINE } from './constants';
 
 const FIXED_DT = 1 / 60;
-// Generous cap so a full interplanetary coast + descent can fast-forward to
-// completion in one call.
-const SKIP_MAX_STEPS = 3_000_000;
 
 // Preview: forward-run the plan to draw the predicted arc.
 const PREVIEW_DT = 0.25;
@@ -64,7 +61,9 @@ export class Game {
   private rafHandle = 0;
   private running = false;
   private missionEnded = false;
-  private fastForwarding = false;
+  /** The flight is over (summary shown) — set by a crash or a manual Finish. */
+  private ended = false;
+  private prevSimPhase = 'prelaunch';
   private simTrajectoryTimer = 0;
   private previewHandle = 0;
 
@@ -145,6 +144,8 @@ export class Game {
   play() {
     this.mode = 'sim';
     this.missionEnded = false;
+    this.ended = false;
+    this.prevSimPhase = 'prelaunch';
     this.timeScale = 1;
     this.sim.reset();
     this.rocket.reset(this.startPosition());
@@ -160,6 +161,8 @@ export class Game {
   edit() {
     this.mode = 'plan';
     this.missionEnded = false;
+    this.ended = false;
+    this.prevSimPhase = 'prelaunch';
     this.timeScale = 1;
     this.sim.reset();
     this.rocket.reset(this.startPosition());
@@ -274,23 +277,6 @@ export class Game {
     this.callbacks.onState?.(this.flightState);
   }
 
-  /** Fast-forward the watched flight to its end. */
-  skipToCompletion() {
-    if (this.mode !== 'sim' || this.sim.finished) return;
-    this.fastForwarding = true;
-    for (let i = 0; i < SKIP_MAX_STEPS; i++) {
-      this.sim.step(FIXED_DT);
-      this.afterStep(FIXED_DT, false);
-      if (this.sim.finished) break;
-    }
-    this.fastForwarding = false;
-
-    this.rocket.applyState(this.sim.state, this.dominant().center, FIXED_DT);
-    this.flightState = this.buildFlightState();
-    this.callbacks.onState?.(this.flightState);
-    this.renderer.render();
-  }
-
   private dominant(): Body { return dominantBody(this.bodies, this.sim.state.position); }
 
   private loop = (time: number) => {
@@ -301,7 +287,7 @@ export class Game {
     let rawDt = realDt;
     this.lastTime = time;
 
-    if (this.mode === 'sim' && !this.sim.finished) {
+    if (this.mode === 'sim' && !this.ended) {
       rawDt *= this.timeScale;
       this.accumulator += rawDt;
       while (this.accumulator >= FIXED_DT) {
@@ -309,7 +295,9 @@ export class Game {
         this.afterStep(FIXED_DT, true);
         this.trail.push(this.sim.state.position);
         this.accumulator -= FIXED_DT;
-        if (this.sim.finished) break;
+        // Only a crash is terminal; a soft landing keeps simulating so the
+        // player can deploy a base, relaunch, or finish the mission manually.
+        if (this.sim.state.phase === 'destroyed') break;
       }
       const center = this.dominant().center;
       this.rocket.applyState(this.sim.state, center, FIXED_DT);
@@ -356,14 +344,33 @@ export class Game {
     this.flightState = this.buildFlightState();
     this.milestones.check(this.flightState);
 
-    if (this.sim.finished && !this.missionEnded) {
-      this.missionEnded = true;
-      const outcome = s.phase === 'destroyed' ? 'crashed' : 'landed';
-      if (fireEvents && (s.phase === 'landed' || s.phase === 'destroyed')) {
-        this.callbacks.onTouchdown?.(outcome, s.lastImpactSpeedMs);
-      }
-      this.callbacks.onMissionEnd?.(this.buildMissionResult(outcome));
+    // Touchdown feedback fires on the first landing/crash (sound + haptics),
+    // but a soft landing no longer ENDS the flight — only a crash does that
+    // automatically; otherwise the player ends it with the Finish button.
+    const justLanded = this.prevSimPhase !== 'landed' && s.phase === 'landed';
+    const justDestroyed = this.prevSimPhase !== 'destroyed' && s.phase === 'destroyed';
+    this.prevSimPhase = s.phase;
+    if (fireEvents && (justLanded || justDestroyed)) {
+      this.callbacks.onTouchdown?.(justDestroyed ? 'crashed' : 'landed', s.lastImpactSpeedMs);
     }
+    if (s.phase === 'destroyed' && !this.missionEnded) {
+      this.missionEnded = true;
+      this.ended = true;
+      this.callbacks.onMissionEnd?.(this.buildMissionResult('crashed'));
+    }
+  }
+
+  /**
+   * Manually end the flight and report the result (the Finish button). Works at
+   * any point — a safe craft (in orbit or landed) ends as a completed mission,
+   * a destroyed one as a loss.
+   */
+  finishMission() {
+    if (this.mode !== 'sim' || this.ended) return;
+    this.ended = true;
+    this.missionEnded = true;
+    const outcome = this.sim.state.phase === 'destroyed' ? 'crashed' : 'landed';
+    this.callbacks.onMissionEnd?.(this.buildMissionResult(outcome));
   }
 
   private buildMissionResult(outcome: 'landed' | 'crashed'): MissionResult {
@@ -397,6 +404,8 @@ export class Game {
       reachedBodies,
       landedBody: s.landedBodyId,
       transferCompleted,
+      stationDeployed: s.deployedStation,
+      stationBodyId: s.stationBodyId,
     };
   }
 
@@ -442,6 +451,8 @@ export class Game {
       landedBodyId: s.landedBodyId,
       reachedBodyIds: Array.from(s.reachedBodyIds),
       landerDeployed: s.deployedLander,
+      stationDeployed: s.deployedStation,
+      canDeployStation: this.sim.canDeployStation(),
       targetName: target?.name,
       targetDistance,
       guidanceSteps,
@@ -474,6 +485,18 @@ export class Game {
       this.callbacks.onLanderDeploy?.();
     }
   }
+
+  /** Release the station module (the DEPLOY button) — in orbit or on a surface. */
+  manualDeployStation() {
+    if (this.mode !== 'sim' || this.ended) return;
+    const bodyId = this.sim.manualDeployStation();
+    if (bodyId) {
+      this.rocket.deployStation();
+      this.callbacks.onStationDeploy?.(bodyId, this.sim.state.stationDeployedOnSurface);
+    }
+  }
+
+  get hasStation(): boolean { return this.cfg.hasStation; }
 
   /** De-orbit + land from the current orbit (the LAND button). */
   manualLand() {

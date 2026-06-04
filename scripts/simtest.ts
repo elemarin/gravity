@@ -6,10 +6,14 @@ import { autoPlan } from '../lib/game/plan/AutoPlan';
 import { MissionKind } from '../lib/game/plan/FlightPlan';
 import { ROCKET_PRESETS, ROUTE_PROVER_BUILD } from '../lib/game/career/Presets';
 import { buildFlightSimSetup } from '../lib/game/SimSetup';
-import { RocketBuild, DEFAULT_BUILD } from '../lib/game/types';
+import { isLandable } from '../lib/game/bodies';
+import { evaluateGoals, stationGoalId, baseGoalId } from '../lib/game/career/Progress';
+import { RocketBuild, DEFAULT_BUILD, MissionResult } from '../lib/game/types';
 import { PARTS_CATALOG } from '../lib/game/career/Parts';
 import { MILESTONES } from '../lib/game/career/Milestones';
-import { buildPartIds } from '../lib/game/BuildSpec';
+import { CAMPAIGN_GOALS } from '../lib/game/career/Progress';
+import { requiredDeltaV } from '../lib/game/career/Requirements';
+import { buildPartIds, estimateBuildDeltaV } from '../lib/game/BuildSpec';
 
 const DT = 1 / 60;
 const MAX_STEPS = 4_000_000;
@@ -255,10 +259,18 @@ assertLanding(run('Venus land', 'earth', 'venus', 'land'), 'venus');
 // silently locked every advanced preset.)
 const unlockable = new Set<string>(PARTS_CATALOG.filter((p) => p.unlockedByDefault).map((p) => p.id));
 for (const m of MILESTONES) for (const id of m.unlocks) unlockable.add(id);
+for (const g of CAMPAIGN_GOALS) for (const id of g.partUnlocks ?? []) unlockable.add(id);
 for (const preset of ROCKET_PRESETS) {
   for (const id of buildPartIds(preset.build)) {
-    expect(`preset ${preset.id}`, unlockable.has(id), `part '${id}' is not unlocked by default or any milestone`);
+    expect(`preset ${preset.id}`, unlockable.has(id), `part '${id}' is not unlocked by default, any milestone, or any campaign goal`);
   }
+}
+
+// Every catalog part must be reachable through career progress (no orphans the
+// player can never unlock).
+for (const p of PARTS_CATALOG) {
+  expect('part reachability', unlockable.has(p.id),
+    `part '${p.id}' is never unlocked by default, a milestone, or a campaign goal`);
 }
 
 // The new mission-themed presets must actually fly their headline route.
@@ -267,5 +279,118 @@ assertStableOrbit(run('Heavy Orbiter Earth orbit', 'earth', 'orbit', 'orbit', 30
 assertLanding(run('Lunar Express Moon return', 'earth', 'moon', 'orbit-return', undefined, presetBuild('lunar-express')), 'earth');
 assertLanding(run('Mars Pioneer Mars land', 'earth', 'mars', 'land', undefined, presetBuild('mars-pioneer')), 'mars');
 assertOrbit(run('Grand Voyager Saturn orbit', 'earth', 'saturn', 'orbit', undefined, presetBuild('grand-voyager')), 'saturn');
+
+// ── Extended destination ladder (new outer-system + small-body targets) ──────
+// Each must be reachable and hold a real orbit; the solid worlds also land.
+const grandVoyager = presetBuild('grand-voyager');
+const outerCruiser = presetBuild('outer-cruiser');
+assertOrbit(run('Phobos orbit', 'earth', 'phobos', 'orbit', undefined, grandVoyager), 'phobos');
+assertOrbit(run('Ceres orbit', 'earth', 'ceres', 'orbit', undefined, grandVoyager), 'ceres');
+assertLanding(run('Ceres land', 'earth', 'ceres', 'land', undefined, grandVoyager), 'ceres');
+assertLanding(run('Titan land', 'earth', 'titan', 'land', undefined, grandVoyager), 'titan');
+assertOrbit(run('Outer Cruiser Uranus orbit', 'earth', 'uranus', 'orbit', undefined, outerCruiser), 'uranus');
+assertOrbit(run('Outer Cruiser Neptune orbit', 'earth', 'neptune', 'orbit', undefined, outerCruiser), 'neptune');
+
+// ── Δv-budget progression gate ───────────────────────────────────────────────
+// The career's "reach further → bigger rocket" gate. The budget must climb
+// monotonically along the destination ladder, and each rocket tier must clear
+// the budget for its headline mission while the tier below falls short.
+console.log('-- Δv budget gate --');
+const LADDER = ['orbit', 'moon', 'mercury', 'venus', 'mars', 'phobos', 'ceres', 'jupiter', 'saturn', 'titan', 'uranus', 'neptune'];
+let prevDv = 0;
+for (const dest of LADDER) {
+  const dv = requiredDeltaV('earth', dest, 'orbit');
+  expect('Δv ladder', dv >= prevDv, `budget for ${dest} (${dv}) should be >= previous (${prevDv})`);
+  prevDv = dv;
+}
+const dvOf = (id: string) => Math.round(estimateBuildDeltaV(presetBuild(id)));
+const meets = (id: string, dest: string, kind: any) => dvOf(id) >= requiredDeltaV('earth', dest, kind);
+const starterDv = Math.round(estimateBuildDeltaV(DEFAULT_BUILD));
+// Starter reaches orbit but NOT the Moon — the player must build up first.
+expect('gate: starter orbits', starterDv >= requiredDeltaV('earth', 'orbit', 'orbit'), `starter Δv ${starterDv} should clear Earth orbit`);
+expect('gate: starter can\'t Moon', starterDv < requiredDeltaV('earth', 'moon', 'orbit'), `starter Δv ${starterDv} should NOT clear the Moon budget`);
+expect('gate: orbiter Moon', meets('orbiter', 'moon', 'orbit'), 'orbiter should clear the Moon budget');
+expect('gate: orbiter can\'t Neptune', !meets('orbiter', 'neptune', 'orbit'), 'orbiter should NOT clear the Neptune budget');
+expect('gate: mars-pioneer Mars land', meets('mars-pioneer', 'mars', 'land'), 'mars-pioneer should clear the Mars-landing budget');
+expect('gate: grand-voyager Saturn', meets('grand-voyager', 'saturn', 'orbit'), 'grand-voyager should clear the Saturn budget');
+expect('gate: grand-voyager can\'t Neptune', !meets('grand-voyager', 'neptune', 'orbit'), 'grand-voyager should NOT clear the Neptune budget (needs station-tier parts)');
+expect('gate: outer-cruiser Neptune', meets('outer-cruiser', 'neptune', 'orbit'), 'outer-cruiser should clear the Neptune budget');
+console.log(`Δv gate OK — starter=${starterDv}, orbiter=${dvOf('orbiter')}, grand-voyager=${dvOf('grand-voyager')}, outer-cruiser=${dvOf('outer-cruiser')} m/s`);
+
+// ── Campaign goals (stations / landings / bases across the system) ───────────
+console.log('-- Campaign goals --');
+for (const g of CAMPAIGN_GOALS) {
+  if (g.kind === 'landing' || g.kind === 'base') {
+    expect('goal landable', isLandable(g.body), `goal '${g.id}' targets non-landable body '${g.body}'`);
+  }
+}
+const fakeLanded: MissionResult = {
+  outcome: 'landed', maxAltitude: 200, maxSpeed: 0.8, landingSpeed: 0,
+  reachedSpace: true, reachedOrbit: true, rating: 'A', score: 0,
+  reachedBodies: ['earth'], landedBody: 'earth', transferCompleted: false,
+  stationDeployed: false, stationBodyId: null,
+};
+// Stations + bases are deployed in-flight (DEPLOY button), exposed via the id helpers.
+expect('campaign', stationGoalId('earth') === 'station-earth', 'expected a station goal for Earth');
+expect('campaign', stationGoalId('neptune') === 'station-neptune', 'expected a station goal for Neptune');
+expect('campaign', stationGoalId('nowhere') === undefined, 'no station goal for an unknown body');
+expect('campaign', baseGoalId('mars') === 'base-mars', 'expected a base goal for Mars');
+expect('campaign', baseGoalId('venus') === undefined, 'no base goal for Venus (orbit/landing only)');
+// evaluateGoals (mission end) now handles landings ONLY.
+const moonLanding = evaluateGoals(
+  { result: { ...fakeLanded, landedBody: 'moon', reachedBodies: ['earth', 'moon'] }, build: DEFAULT_BUILD, launchBodyId: 'earth' }, []);
+expect('campaign', moonLanding.includes('land-moon'), `expected land-moon, got [${moonLanding.join(',')}]`);
+expect('campaign', !moonLanding.some((id) => id.startsWith('station-') || id.startsWith('base-')),
+  'evaluateGoals must not award stations or bases (those are deployed in-flight)');
+console.log(`Campaign OK — ${CAMPAIGN_GOALS.length} goals across the system.`);
+
+// ── In-flight station deploy ─────────────────────────────────────────────────
+// Fly a Station-Module rocket to Earth orbit and release the station with the
+// in-flight deploy action — the mechanic behind every station campaign goal.
+console.log('-- Station deploy --');
+{
+  const stationRocket: RocketBuild = {
+    ...ROCKET_PRESETS.find((p) => p.id === 'moon-lander')!.build,
+    noseId: 'station-module',
+  };
+  const plan = autoPlan('earth', 'orbit', { kind: 'orbit', orbitKm: 300 });
+  const setup = buildFlightSimSetup(stationRocket, plan);
+  expect('station setup', setup.config.hasStation, 'expected the build to carry a station');
+  const sim = new Simulator(setup.config, plan);
+  sim.reset();
+  let deployedAround: string | null = null;
+  let everInZone = false;
+  for (let i = 0; i < ORBIT_STEPS && !deployedAround; i++) {
+    sim.step(DT);
+    if (sim.canDeployStation()) {
+      everInZone = true;
+      deployedAround = sim.manualDeployStation();
+    }
+  }
+  expect('station deploy', everInZone, 'craft never reached a valid deploy zone (stable orbit)');
+  expect('station deploy', deployedAround === 'earth', `expected to deploy around earth, got ${deployedAround}`);
+  expect('station deploy', sim.state.deployedStation && stationGoalId(deployedAround!) === 'station-earth',
+    'expected the deploy to map to the Earth station goal');
+  // A second deploy is a no-op (single module).
+  expect('station deploy', sim.manualDeployStation() === null, 'station can only be deployed once');
+  console.log('Station deploy OK — released into a stable Earth orbit.');
+}
+// And a BASE: land on the Moon carrying a module, then deploy it on the surface.
+{
+  const baseRocket: RocketBuild = { ...ROUTE_PROVER, noseId: 'station-module' };
+  const plan = autoPlan('earth', 'moon', { kind: 'land' });
+  const setup = buildFlightSimSetup(baseRocket, plan);
+  const sim = new Simulator(setup.config, plan);
+  sim.reset();
+  for (let i = 0; i < MAX_STEPS && sim.state.phase !== 'landed'; i++) sim.step(DT);
+  expect('base deploy', sim.state.phase === 'landed' && sim.state.landedBodyId === 'moon',
+    `expected to land on the Moon, got phase=${sim.state.phase} body=${sim.state.landedBodyId}`);
+  expect('base deploy', sim.stationDeployContext() === 'surface', 'expected a surface deploy zone after landing');
+  const deployed = sim.manualDeployStation();
+  expect('base deploy', deployed === 'moon' && sim.state.stationDeployedOnSurface,
+    `expected a surface base deploy on the Moon, got ${deployed}`);
+  expect('base deploy', baseGoalId(deployed!) === 'base-moon', 'expected the deploy to map to base-moon');
+  console.log('Base deploy OK — module set down on the Moon surface.');
+}
 
 console.log('All simulation regression tests passed.');

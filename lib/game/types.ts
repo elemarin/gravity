@@ -31,6 +31,8 @@ export type FlightState = {
   landedBodyId?: string | null; // body currently/last landed on
   reachedBodyIds?: string[];    // bodies whose vicinity has been reached
   landerDeployed?: boolean;     // a lander payload has separated
+  stationDeployed?: boolean;    // the station module has been released into orbit
+  canDeployStation?: boolean;   // true while in a valid orbit to deploy a station
   targetName?: string;          // destination body name, if any
   targetDistance?: number;      // km to the destination body surface
   guidanceSteps?: GuidanceStep[]; // auto-plan / maneuver checklist for the HUD
@@ -92,6 +94,10 @@ export type MissionResult = {
   landedBody: string | null;
   /** True when the craft reached a body other than its launch body. */
   transferCompleted: boolean;
+  /** True when a station module was deployed into orbit this flight. */
+  stationDeployed: boolean;
+  /** Body the station was deployed around, or null. */
+  stationBodyId: string | null;
 };
 
 export type RocketStats = {
@@ -110,6 +116,7 @@ export type GameCallbacks = {
   onThrustStart?:       () => void;
   onStageSeparation?:   () => void;
   onLanderDeploy?:      () => void;
+  onStationDeploy?:     (bodyId: string, onSurface: boolean) => void;
   onTouchdown?:         (outcome: 'landed' | 'crashed', vSpeed: number) => void;
   onMissionEnd?:        (result: MissionResult) => void;
 };

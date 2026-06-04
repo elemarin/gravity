@@ -27,6 +27,10 @@ export type SimConfig = {
   landerIndex: number;
   hasParachute: boolean;
   hasLegs: boolean;
+  /** Build carries a deployable Station Module. */
+  hasStation: boolean;
+  /** Mass (t) shed from the payload when the station is deployed. */
+  stationMass: number;
   startPosition: THREE.Vector3;
 };
 
@@ -41,6 +45,9 @@ export type SimState = {
   stageFuel: number[];      // 0..100 per stage
   deployedLander: boolean;
   deployedParachute: boolean;
+  deployedStation: boolean;       // station module released
+  stationBodyId: string | null;   // body the station was deployed around
+  stationDeployedOnSurface: boolean; // true = base on the surface, false = orbit
   landingAssist: boolean;   // powered-descent autopilot engaged
   landAfterCapture: boolean; // after an arrival capture, auto de-orbit and land
   ascentAssist: boolean;    // powered-ascent autopilot engaged (relaunch)
@@ -71,6 +78,7 @@ export type SimState = {
   justStagedTo: number;
   justDeployedLander: boolean;
   justDeployedParachute: boolean;
+  justDeployedStation: boolean;
   justIgnited: boolean;
 };
 
@@ -101,6 +109,9 @@ export class Simulator {
       stageFuel: this.cfg.stages.map(() => 100),
       deployedLander: false,
       deployedParachute: false,
+      deployedStation: false,
+      stationBodyId: null,
+      stationDeployedOnSurface: false,
       landingAssist: false,
       landAfterCapture: false,
       ascentAssist: false,
@@ -130,6 +141,7 @@ export class Simulator {
       justStagedTo: -1,
       justDeployedLander: false,
       justDeployedParachute: false,
+      justDeployedStation: false,
       justIgnited: false,
     };
   }
@@ -168,6 +180,7 @@ export class Simulator {
     s.justStagedTo = -1;
     s.justDeployedLander = false;
     s.justDeployedParachute = false;
+    s.justDeployedStation = false;
     s.justIgnited = false;
     // Destroyed is terminal; a soft landing keeps simulating so a pending
     // relaunch (return trip) can lift the craft off again.
@@ -686,6 +699,40 @@ export class Simulator {
     return true;
   }
 
+  /**
+   * Where a station module can currently be released, or null:
+   *  - 'orbit'   parked in a stable orbit clear of the surface (a space station)
+   *  - 'surface' sitting on a solid surface after a soft landing (a base)
+   * The orbit test is defined off the orbital elements (bound, periapsis above
+   * the atmosphere/surface, well clear of the ground) so it works the same
+   * around any world, big or small.
+   */
+  stationDeployContext(): 'orbit' | 'surface' | null {
+    if (!this.cfg.hasStation || this.state.deployedStation) return null;
+    if (this.state.phase === 'destroyed') return null;
+    if (this.state.phase === 'landed') return 'surface';
+    const body = this.body();
+    const ap = this.apsides(body);
+    const floor = Math.max(1, body.atmosphereHeight * 0.5);
+    if (Number.isFinite(ap.apo) && ap.peri >= floor &&
+        this.altitude() >= Math.max(2, body.radius * 0.1)) return 'orbit';
+    return null;
+  }
+
+  canDeployStation(): boolean { return this.stationDeployContext() !== null; }
+
+  /** Real-time user-initiated station deployment. Returns the body, or null. */
+  manualDeployStation(): string | null {
+    const ctx = this.stationDeployContext();
+    if (!ctx) return null;
+    const s = this.state;
+    s.deployedStation = true;
+    s.justDeployedStation = true;
+    s.stationBodyId = this.body().id;
+    s.stationDeployedOnSurface = ctx === 'surface';
+    return s.stationBodyId;
+  }
+
   private doStage(): boolean {
     const s = this.state;
     if (s.activeStage >= this.cfg.stages.length - 1) return false;
@@ -849,12 +896,13 @@ export class Simulator {
 
   private mass(): number {
     const s = this.state;
-    let m = this.cfg.payloadMass;
+    // Once the station is deployed it no longer rides along.
+    let m = this.cfg.payloadMass - (s.deployedStation ? this.cfg.stationMass : 0);
     for (let i = s.activeStage; i < this.cfg.stages.length; i++) {
       const st = this.cfg.stages[i];
       m += st.dryMass + st.fuelMass * ((s.stageFuel[i] ?? 0) / 100);
     }
-    return m;
+    return Math.max(m, 0.001);
   }
 
   private burnFuel(dt: number) {

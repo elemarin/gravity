@@ -7,6 +7,8 @@ import { RocketBuild, StageSpec, DEFAULT_BUILD } from '@/lib/game/types';
 import { computeStats, estimateBuildDeltaV, getStages, buildPartIds } from '@/lib/game/BuildSpec';
 import { loadBuild, saveBuild, loadUnlockedParts, loadFacilityLevel } from '@/lib/storage';
 import { facilityTier } from '@/lib/game/career/Progress';
+import { farthestReachable } from '@/lib/game/career/Requirements';
+import { DESTINATIONS } from '@/lib/game/bodies';
 import { ROCKET_PRESETS, RocketPreset } from '@/lib/game/career/Presets';
 import NavDrawer from './NavDrawer';
 
@@ -14,7 +16,7 @@ const CATEGORIES: { type: PartType; label: string; short: string }[] = [
   { type: 'engine',  label: 'Engines',  short: 'ENG'   },
   { type: 'booster', label: 'Boosters', short: 'BOOST' },
   { type: 'tank',    label: 'Tanks',    short: 'TANK'  },
-  { type: 'nose',    label: 'Nose',     short: 'NOSE'  },
+  { type: 'nose',    label: 'Payload',  short: 'PAYLOAD' },
   { type: 'lander',  label: 'Landers',  short: 'LAND'  },
   { type: 'utility', label: 'Utility',  short: 'UTIL'  },
 ];
@@ -51,12 +53,20 @@ export default function RocketBuilder() {
   const stages  = useMemo(() => getStages(build), [build]);
   const stats   = useMemo(() => computeStats(build), [build]);
   const deltaV  = useMemo(() => estimateBuildDeltaV(build), [build]);
+  const rangeId = useMemo(() => farthestReachable(build), [build]);
+  const rangeName = rangeId
+    ? (DESTINATIONS.find((d) => d.id === rangeId)?.name ?? rangeId)
+    : '—';
   const activeStage = Math.min(selectedStage, stages.length - 1);
   const overMass = stats.wetMass > tier.maxMass;
   const atStageLimit = stages.length >= tier.maxStages;
+  const totalBoosters = (build.boosterIds ?? []).length;
 
   const categoryParts = useMemo(
-    () => PARTS_CATALOG.filter((p) => p.type === activeCategory),
+    // The "Payload" tab gathers nose cones AND capsule-type payloads (crew pods,
+    // satellites, the Station Module, …) — both occupy the top of the stack.
+    () => PARTS_CATALOG.filter((p) =>
+      activeCategory === 'nose' ? (p.type === 'nose' || p.type === 'capsule') : p.type === activeCategory),
     [activeCategory],
   );
 
@@ -84,14 +94,27 @@ export default function RocketBuilder() {
     });
   };
 
-  const toggleBooster = (id: string) =>
+  // Strap-ons are multiples, not a toggle: add one per tap up to four total
+  // (sane geometry), and remove the last of a given type.
+  const MAX_BOOSTERS = 4;
+  const addBooster = (id: string) =>
     setBuild((b) => {
       const cur = b.boosterIds ?? [];
-      const has = cur.includes(id);
-      // Cap strap-ons at four for sane geometry.
-      const next = has ? cur.filter((x) => x !== id) : (cur.length >= 4 ? cur : [...cur, id]);
-      return { ...b, boosterIds: next };
+      if (cur.length >= MAX_BOOSTERS) return b;
+      return { ...b, boosterIds: [...cur, id] };
     });
+  const removeBooster = (id: string) =>
+    setBuild((b) => {
+      const cur = b.boosterIds ?? [];
+      const last = cur.lastIndexOf(id);
+      if (last < 0) return b;
+      return { ...b, boosterIds: cur.filter((_, i) => i !== last) };
+    });
+  const removeBoosterAt = (index: number) => {
+    markCustom();
+    setBuild((b) => ({ ...b, boosterIds: (b.boosterIds ?? []).filter((_, i) => i !== index) }));
+  };
+  const boosterCount = (id: string) => (build.boosterIds ?? []).filter((x) => x === id).length;
 
   const removeStage = (si: number) => {
     markCustom();
@@ -124,7 +147,7 @@ export default function RocketBuilder() {
     if (!unlocked.has(p.id)) return;
     markCustom();
     if (p.type === 'engine')  setStageEngine(p.id);
-    else if (p.type === 'booster') toggleBooster(p.id);
+    else if (p.type === 'booster') addBooster(p.id);
     else if (p.type === 'tank') addTankToStage(p.id);
     else if (p.type === 'nose' || p.type === 'capsule') setNose(p.id);
     else if (p.type === 'lander') toggleLander(p.id);
@@ -186,6 +209,7 @@ export default function RocketBuilder() {
             <StatCard label="THRUST" value={`${stats.thrust.toFixed(0)} kN`} />
             <StatCard label="TWR" value={twr.toFixed(2)} warn={twr < 1.1} highlight={twr >= 1.1} />
             <StatCard label="Δv EST" value={`${deltaV.toFixed(0)} m/s`} highlight />
+            <StatCard label="RANGE" value={rangeName} highlight />
             <StatCard label="FUEL" value={`${stats.fuelCapacity.toFixed(0)} L`} />
           </div>
         </div>
@@ -205,6 +229,7 @@ export default function RocketBuilder() {
               onSelectStage={setSelectedStage}
               onRemoveTank={removeTankFromStage}
               onRemoveStage={removeStage}
+              onRemoveBooster={removeBoosterAt}
               onAddStage={addStage}
             />
           </div>
@@ -236,19 +261,29 @@ export default function RocketBuilder() {
 
           {/* Detailed parts list */}
           <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-1.5 pb-1">
+            {activeCategory === 'booster' && (
+              <div className="shrink-0 rounded-md border border-orange/25 bg-orange/[0.06] px-3 py-1 text-center text-[10px] text-orange">
+                Strap on up to <b>{MAX_BOOSTERS}</b> boosters · tap to add ·
+                <span className="text-dim"> {totalBoosters}/{MAX_BOOSTERS} fitted</span>
+              </div>
+            )}
             {categoryParts.map((p) => {
               const isUnlk = unlocked.has(p.id);
               const sel = isSelected(p);
+              const isBooster = p.type === 'booster';
+              const count = isBooster ? boosterCount(p.id) : 0;
+              const atCap = totalBoosters >= MAX_BOOSTERS;
+              const boosterFull = isBooster && atCap && count === 0;
               return (
                 <button
                   key={p.id}
-                  disabled={!isUnlk}
+                  disabled={!isUnlk || boosterFull}
                   onClick={() => handlePartTap(p)}
                   className={`flex w-full items-center gap-3 rounded-md border-2 px-3 py-2.5 text-left
                               transition-all active:scale-[0.99]
                               ${sel
                                 ? 'border-cyan bg-cyan/[0.1] shadow-[0_0_12px_rgba(31,217,255,0.22)]'
-                                : isUnlk
+                                : isUnlk && !boosterFull
                                   ? 'border-white/12 bg-white/[0.04] hover:border-white/30'
                                   : 'border-white/5 bg-white/[0.02] opacity-40 cursor-not-allowed'}`}
                 >
@@ -259,12 +294,37 @@ export default function RocketBuilder() {
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5">
                       <span className="truncate text-[11px] font-black text-ink">{p.name}</span>
-                      {sel && <span className="text-[9px] font-black text-cyan">✓ ON</span>}
+                      {p.tier !== undefined && p.tier >= 4 && (
+                        <span className="text-[8px] font-black text-purple bg-purple/15 border border-purple/40 rounded px-1 leading-tight">TOP</span>
+                      )}
+                      {sel && !isBooster && <span className="text-[9px] font-black text-cyan">✓ ON</span>}
                       {!isUnlk && <span className="ml-auto text-[11px] text-dim/60">🔒</span>}
                     </span>
                     <span className="mt-0.5 block text-[9px] leading-snug text-dim">{p.description}</span>
                     <PartChips part={p} />
                   </span>
+                  {/* Booster count stepper */}
+                  {isBooster && isUnlk && (
+                    <span className="shrink-0 flex items-center gap-1.5">
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Remove one ${p.name}`}
+                        onClick={(e) => { e.stopPropagation(); markCustom(); removeBooster(p.id); }}
+                        className={`w-7 h-7 rounded-md border flex items-center justify-center text-sm font-black
+                          ${count > 0 ? 'border-white/20 bg-white/[0.06] text-ink hover:border-red/50 hover:text-red active:scale-90' : 'border-white/8 text-dim/30 pointer-events-none'}`}
+                      >−</span>
+                      <span className={`w-5 text-center text-[13px] font-black tabular-nums ${count > 0 ? 'text-cyan' : 'text-dim/50'}`}>×{count}</span>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Add one ${p.name}`}
+                        onClick={(e) => { e.stopPropagation(); if (!atCap) { markCustom(); addBooster(p.id); } }}
+                        className={`w-7 h-7 rounded-md border flex items-center justify-center text-sm font-black
+                          ${!atCap ? 'border-cyan/40 bg-cyan/10 text-cyan hover:bg-cyan/20 active:scale-90' : 'border-white/8 text-dim/30 pointer-events-none'}`}
+                      >＋</span>
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -403,9 +463,40 @@ function colorFor(id: string): string {
   return p ? `#${p.color.toString(16).padStart(6, '0')}` : '#888';
 }
 
+function hex(n: number): string { return `#${n.toString(16).padStart(6, '0')}`; }
+
+/** Blueprint fill for a tank — surface pattern + accent vary by its style. */
+function tankFill(id: string): React.CSSProperties {
+  const p = PARTS_CATALOG.find((x) => x.id === id);
+  if (!p) return { background: '#888' };
+  const base = hex(p.color);
+  const acc = p.accent !== undefined ? hex(p.accent) : 'rgba(255,255,255,0.65)';
+  const sheen = p.finish === 'metallic'
+    ? 'inset 0 0 10px rgba(255,255,255,0.45)'
+    : p.finish === 'glossy'
+      ? 'inset 0 0 7px rgba(255,255,255,0.3)'
+      : 'none';
+  let background: string;
+  switch (p.style) {
+    case 'striped':
+      background = `repeating-linear-gradient(90deg, ${base} 0 14px, ${acc} 14px 18px)`; break;
+    case 'ribbed':
+      background = `repeating-linear-gradient(0deg, ${base} 0 7px, ${acc} 7px 9px)`; break;
+    case 'checkered':
+      background = `repeating-linear-gradient(0deg, ${base} 0 8px, ${acc} 8px 12px)`; break;
+    case 'panelled':
+    case 'metallic':
+      background = `linear-gradient(90deg, ${base} 0%, ${acc} 50%, ${base} 100%)`; break;
+    case 'banded':
+    default:
+      background = `linear-gradient(0deg, ${base}, ${base})`; break;
+  }
+  return { background, boxShadow: sheen };
+}
+
 function BlueprintRocket({
   stages, noseId, landerId, utilityIds, boosterIds,
-  selectedStage, atStageLimit, onSelectStage, onRemoveTank, onRemoveStage, onAddStage,
+  selectedStage, atStageLimit, onSelectStage, onRemoveTank, onRemoveStage, onRemoveBooster, onAddStage,
 }: {
   stages: StageSpec[];
   noseId: string;
@@ -417,6 +508,7 @@ function BlueprintRocket({
   onSelectStage: (i: number) => void;
   onRemoveTank: (si: number, ti: number) => void;
   onRemoveStage: (si: number) => void;
+  onRemoveBooster: (index: number) => void;
   onAddStage: () => void;
 }) {
   const noseColor = colorFor(noseId);
@@ -471,7 +563,7 @@ function BlueprintRocket({
             {stage.tankIds.map((id, ti) => (
               <div key={ti}
                    className="relative flex items-center justify-center border-x border-black/20"
-                   style={{ width: TANK_W, height: TANK_H, background: colorFor(id) }}>
+                   style={{ width: TANK_W, height: TANK_H, ...tankFill(id) }}>
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onRemoveTank(si, ti); }}
@@ -505,14 +597,27 @@ function BlueprintRocket({
         );
       })}
 
-      {/* Boosters strapped to stage 1 */}
+      {/* Boosters strapped to stage 1 — each removable */}
       {boosterIds.length > 0 && (
-        <div className="mt-1.5 flex items-center justify-center gap-1 rounded-md border border-orange/35
-                        bg-orange/[0.08] px-2 py-0.5 text-[10px] text-orange font-bold">
-          ⟂ ×{boosterIds.length}
+        <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1">
+          <span className="text-[9px] font-black text-orange/80">⟂ ×{boosterIds.length}</span>
           {boosterIds.map((id, i) => {
             const p = PARTS_CATALOG.find((x) => x.id === id);
-            return <span key={i}>{p?.icon ?? '🚀'}</span>;
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onRemoveBooster(i); }}
+                aria-label={`Remove ${p?.name ?? 'booster'}`}
+                className="group flex items-center gap-0.5 rounded-md border border-orange/35
+                           bg-orange/[0.08] px-1.5 py-0.5 text-[11px] text-orange font-bold
+                           hover:border-red/50 hover:text-red active:scale-95"
+                style={{ color: p ? `#${p.color.toString(16).padStart(6, '0')}` : undefined }}
+              >
+                {p?.icon ?? '🚀'}
+                <span className="text-[9px] text-dim group-hover:text-red">✕</span>
+              </button>
+            );
           })}
         </div>
       )}

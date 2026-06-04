@@ -8,12 +8,15 @@ import {
 } from '@/lib/game/plan/FlightPlan';
 import { Body, DESTINATIONS, destinationTargetId, isLandable } from '@/lib/game/bodies';
 import { autoPlan, defaultOrbitKm, minimumOrbitKm } from '@/lib/game/plan/AutoPlan';
+import { requiredDeltaV } from '@/lib/game/career/Requirements';
 
 type Props = {
   plan: FlightPlan;
   bodies: Body[];
   hasLander: boolean;
   preview: { apoapsis: number; periapsis: number; impact: boolean } | null;
+  /** Estimated Δv (m/s) of the loaded rocket — gates the launch by budget. */
+  buildDeltaV: number;
   onChange: (plan: FlightPlan) => void;
   onPlay: () => void;
 };
@@ -45,7 +48,7 @@ function fmtKm(km: number): string {
   return `${Math.round(km)} km`;
 }
 
-export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, onPlay }: Props) {
+export default function PlanPanel({ plan, bodies, hasLander, preview, buildDeltaV, onChange, onPlay }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [open, setOpen] = useState(true);
 
@@ -91,6 +94,12 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
     ? (canLand ? ['orbit', 'orbit-return', 'land', 'land-return'] : ['orbit', 'orbit-return'])
     : (canLand ? ['orbit', 'land'] : ['orbit']);
   const showOrbitKm = mission.kind === 'orbit' || mission.kind === 'orbit-return';
+
+  // Δv budget gate — the rocket must carry enough delta-v for the chosen mission.
+  const requiredDv = requiredDeltaV(plan.launchBodyId, plan.destinationId, mission.kind);
+  const haveDv = Math.round(buildDeltaV);
+  const dvShort = haveDv < requiredDv;
+  const dvShortfall = requiredDv - haveDv;
   // Orbit slider range scales to the body being orbited (the target, if any).
   const orbitBody = (targetId ? bodies.find((b) => b.id === targetId) : bodies[0]) ?? bodies[0];
   const orbitMin = orbitBody ? minimumOrbitKm(orbitBody.id) : 20;
@@ -167,35 +176,24 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                   ✨ Auto-plan
                 </button>
               </div>
-              <div className="mt-1 flex flex-wrap gap-1">
-                {DESTINATIONS.map((d) => (
-                  <button key={d.id}
-                    onClick={() => setDestination(d.id)}
-                    className={`text-[11px] rounded-md py-1.5 px-2.5 border tracking-wide font-bold
-                      ${plan.destinationId === d.id
-                        ? 'border-cyan/70 bg-cyan/20 text-cyan'
-                        : 'border-white/12 bg-white/[0.05] text-dim'}`}>
-                    {d.name}
-                  </button>
-                ))}
+              <div className="mt-1">
+                <Dropdown
+                  value={plan.destinationId}
+                  options={DESTINATIONS.map((d) => ({ id: d.id, name: d.name }))}
+                  onChange={setDestination}
+                />
               </div>
             </div>
 
             {/* Objective */}
             <div>
               <span className="stat-label">2 · Objective</span>
-              <div className="mt-1 grid grid-cols-2 gap-1 items-stretch">
-                {missionKinds.map((k) => (
-                  <button key={k}
-                    onClick={() => setMissionKind(k)}
-                    className={`min-h-[2.25rem] flex items-center justify-center text-center
-                      text-[11px] leading-tight rounded-md py-1.5 px-2 border tracking-wide font-bold
-                      ${mission.kind === k
-                        ? 'border-cyan/70 bg-cyan/20 text-cyan'
-                        : 'border-white/12 bg-white/[0.05] text-dim'}`}>
-                    {MISSION_LABELS[k]}
-                  </button>
-                ))}
+              <div className="mt-1">
+                <Dropdown
+                  value={mission.kind}
+                  options={missionKinds.map((k) => ({ id: k, name: MISSION_LABELS[k] }))}
+                  onChange={(k) => setMissionKind(k as MissionKind)}
+                />
               </div>
               {/* Target orbit altitude */}
               {showOrbitKm && (
@@ -208,6 +206,19 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
                   />
                 </div>
               )}
+              {/* Δv budget — the progression gate. */}
+              <div className={`mt-2 rounded-md border px-2.5 py-1.5 text-[10px] leading-snug
+                ${dvShort ? 'border-red/45 bg-red/[0.08]' : 'border-green/40 bg-green/[0.06]'}`}>
+                <div className="flex items-center justify-between tabular-nums font-bold">
+                  <span className={dvShort ? 'text-red' : 'text-green'}>
+                    {dvShort ? '⚠ Δv TOO SHORT' : '✓ Δv BUDGET MET'}
+                  </span>
+                  <span className="text-dim">
+                    <span className={dvShort ? 'text-red' : 'text-green'}>{haveDv}</span>
+                    {' / '}{requiredDv} m/s
+                  </span>
+                </div>
+              </div>
               {(mission.kind === 'land-return' || mission.kind === 'orbit-return') && (
                 <div className="mt-1 text-[10px] text-orange/90 leading-snug">
                   ↩ Return trips are ambitious — pack extra fuel{mission.kind === 'land-return' ? ' and a lander that can fly back up' : ''}. Launch, then warp.
@@ -380,7 +391,20 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
 
         {/* Play */}
         <div className="shrink-0 px-3 pb-3 pt-1 border-t border-white/10">
-          <button onClick={onPlay} className="btn btn-primary w-full py-3.5" style={{ fontSize: 13 }}>▶ LAUNCH</button>
+          {dvShort && (
+            <div className="mb-1.5 rounded-md border border-red/50 bg-red/15 px-2 py-1
+                            text-center text-[10px] font-black tracking-wide text-red">
+              Δv too short — need {dvShortfall} m/s more. Build a bigger rocket.
+            </div>
+          )}
+          <button
+            onClick={onPlay}
+            disabled={dvShort}
+            className={`btn w-full py-3.5 ${dvShort
+              ? 'border-2 border-red/60 bg-red/20 text-red cursor-not-allowed'
+              : 'btn-primary'}`}
+            style={{ fontSize: 13 }}
+          >{dvShort ? '🔒 Δv TOO SHORT' : '▶ LAUNCH'}</button>
         </div>
       </div>
     </div>
@@ -410,6 +434,57 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, onChange, 
       </div>
     );
   }
+}
+
+function Dropdown({
+  value, options, onChange,
+}: {
+  value: string;
+  options: { id: string; name: string }[];
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = options.find((o) => o.id === value);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-2 rounded-md border-2 border-cyan/45
+                   bg-cyan/[0.07] px-3 py-2 text-left transition hover:border-cyan/70 active:scale-[0.99]"
+      >
+        <span className="truncate text-[12px] font-black text-ink">{current?.name ?? 'Select…'}</span>
+        <span className={`shrink-0 text-cyan transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
+      </button>
+      {open && (
+        <>
+          <button type="button" aria-label="Close" onClick={() => setOpen(false)} className="fixed inset-0 z-40" />
+          <div
+            role="listbox"
+            className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-[40vh] overflow-y-auto
+                       rounded-md border-2 border-cyan/40 bg-bg/95 p-1 shadow-2xl backdrop-blur-xl"
+          >
+            {options.map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                role="option"
+                aria-selected={o.id === value}
+                onClick={() => { onChange(o.id); setOpen(false); }}
+                className={`flex w-full items-center justify-between rounded px-2.5 py-2 text-left text-[12px] font-bold transition
+                  ${o.id === value ? 'bg-cyan/15 text-cyan' : 'text-ink hover:bg-cyan/10'}`}
+              >
+                {o.name}
+                {o.id === value && <span className="text-[10px] text-cyan">✓</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 function Toggle({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {

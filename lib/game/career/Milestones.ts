@@ -53,7 +53,7 @@ export const MILESTONES: Milestone[] = [
       s.phase === 'orbit' &&
       s.altitude >= 100 &&
       (s.periapsis ?? 0) >= 80,
-    unlocks: ['tank-xl'],
+    unlocks: ['tank-xl', 'station-module'],
   },
   {
     id: 'high-orbit',
@@ -76,7 +76,7 @@ export const MILESTONES: Milestone[] = [
     check: (s) =>
       !!s.reachedBodyIds &&
       s.reachedBodyIds.some((id) => id !== (s.launchBodyId ?? '')),
-    unlocks: ['engine-nuclear'],
+    unlocks: ['engine-ion'],
   },
   {
     id: 'soft-landing',
@@ -86,14 +86,8 @@ export const MILESTONES: Milestone[] = [
       s.phase === 'landed' &&
       s.landedBodyId != null &&
       s.landedBodyId !== (s.launchBodyId ?? ''),
-    unlocks: ['lander-heavy', 'engine-ion'],
-  },
-  {
-    id: 'satellite-deploy',
-    name: 'Satellite Deployed',
-    description: 'Deploy a satellite from orbit',
-    check: () => false, // requires satellite mechanic
-    unlocks: ['satellite-bus'],
+    // A flight-skill checkpoint; the matching world's campaign goal grants parts.
+    unlocks: [],
   },
   {
     id: 'crewed',
@@ -113,7 +107,7 @@ export const MILESTONES: Milestone[] = [
       const vEsc = Math.sqrt((2 * GM) / r); // km/s
       return s.speed >= vEsc;
     },
-    unlocks: ['engine-ion'],
+    unlocks: [],
   },
 ];
 

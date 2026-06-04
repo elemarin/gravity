@@ -38,6 +38,8 @@ export function buildFlightSimSetup(build: RocketBuild, plan: FlightPlan): Fligh
       landerIndex: sim.landerIndex,
       hasParachute: sim.hasParachute,
       hasLegs: sim.hasLegs,
+      hasStation: sim.hasStation,
+      stationMass: sim.stationMass,
       startPosition,
     },
   };
