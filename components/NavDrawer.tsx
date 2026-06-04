@@ -34,16 +34,17 @@ export default function NavDrawer({ title = 'Menu' }: { title?: string }) {
         ))}
       </nav>
 
-      {/* Mobile hamburger — visible below md */}
+      {/* Mobile hamburger — retro pixel button, visible below md */}
       <button
         type="button"
         onClick={() => setOpen(true)}
         className="md:hidden absolute z-50 top-[calc(0.75rem+env(safe-area-inset-top))] left-[calc(0.75rem+env(safe-area-inset-left))]
-                   inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/20
-                   bg-panel/90 text-ink shadow-lg backdrop-blur transition hover:border-cyan/45 hover:text-cyan active:scale-95"
+                   inline-flex h-11 w-11 items-center justify-center rounded-md border-2 border-cyan/50
+                   bg-cyan/[0.08] text-cyan shadow-[0_0_12px_rgba(31,217,255,0.25)] transition
+                   hover:bg-cyan/15 hover:border-cyan/70 active:scale-95"
         aria-label="Open menu"
       >
-        <span className="text-xl leading-none">☰</span>
+        <span className="text-lg font-black leading-none tracking-tighter">≡</span>
       </button>
 
       {open && (
@@ -72,7 +73,7 @@ export default function NavDrawer({ title = 'Menu' }: { title?: string }) {
               key={item.href}
               href={item.href}
               onClick={() => setOpen(false)}
-              className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3
+              className="flex items-center gap-3 rounded-md border-2 border-white/12 bg-white/[0.06] px-4 py-3
                          text-xs font-bold text-ink transition hover:border-cyan/45 hover:bg-cyan/10 hover:text-cyan"
             >
               <span className="w-5 text-center text-base">{item.icon}</span>
