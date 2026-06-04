@@ -7,6 +7,9 @@ import { MissionKind } from '../lib/game/plan/FlightPlan';
 import { ROCKET_PRESETS, ROUTE_PROVER_BUILD } from '../lib/game/career/Presets';
 import { buildFlightSimSetup } from '../lib/game/SimSetup';
 import { RocketBuild, DEFAULT_BUILD } from '../lib/game/types';
+import { PARTS_CATALOG } from '../lib/game/career/Parts';
+import { MILESTONES } from '../lib/game/career/Milestones';
+import { buildPartIds } from '../lib/game/BuildSpec';
 
 const DT = 1 / 60;
 const MAX_STEPS = 4_000_000;
@@ -244,5 +247,25 @@ for (const dest of ['mercury', 'venus', 'mars', 'jupiter', 'saturn']) {
   assertOrbit(run(`${dest} orbit`, 'earth', dest, 'orbit'), dest);
 }
 assertLanding(run('Venus land', 'earth', 'venus', 'land'), 'venus');
+
+// ── Preset rockets ───────────────────────────────────────────────────────────
+// Every preset must be buildable through career progress: each part it uses is
+// either unlocked by default or granted by some milestone. (Regression guard:
+// engine-heavy / booster-liquid / capsule-crew were previously orphaned, which
+// silently locked every advanced preset.)
+const unlockable = new Set<string>(PARTS_CATALOG.filter((p) => p.unlockedByDefault).map((p) => p.id));
+for (const m of MILESTONES) for (const id of m.unlocks) unlockable.add(id);
+for (const preset of ROCKET_PRESETS) {
+  for (const id of buildPartIds(preset.build)) {
+    expect(`preset ${preset.id}`, unlockable.has(id), `part '${id}' is not unlocked by default or any milestone`);
+  }
+}
+
+// The new mission-themed presets must actually fly their headline route.
+const presetBuild = (id: string) => ROCKET_PRESETS.find((p) => p.id === id)!.build;
+assertStableOrbit(run('Heavy Orbiter Earth orbit', 'earth', 'orbit', 'orbit', 300, presetBuild('heavy-orbiter'), ORBIT_STEPS), 'earth', ORBIT_ALT_CAP);
+assertLanding(run('Lunar Express Moon return', 'earth', 'moon', 'orbit-return', undefined, presetBuild('lunar-express')), 'earth');
+assertLanding(run('Mars Pioneer Mars land', 'earth', 'mars', 'land', undefined, presetBuild('mars-pioneer')), 'mars');
+assertOrbit(run('Grand Voyager Saturn orbit', 'earth', 'saturn', 'orbit', undefined, presetBuild('grand-voyager')), 'saturn');
 
 console.log('All simulation regression tests passed.');

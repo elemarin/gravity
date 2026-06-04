@@ -430,13 +430,19 @@ export class Simulator {
     }
 
     // --- Auto-deploying parachute ---
-    // A fitted chute opens itself the moment the craft is falling back down
-    // through the atmosphere; no manual trigger or plan node required.
+    // A fitted chute opens itself when the craft is genuinely returning through
+    // the atmosphere to land. The trigger must NOT fire on a transient dip
+    // during a powered ascent — a low-thrust upper stage in its gravity turn
+    // briefly descends while still in the air, and popping the chute there
+    // forces the throttle to zero and strands the flight suborbital. So only
+    // deploy once the craft has actually been to space (reached the top of the
+    // atmosphere) OR can no longer thrust (a spent suborbital hop coming down).
+    const returningToLand = s.maxAltitude >= body.atmosphereHeight || !this.hasThrust();
     if (
       this.cfg.hasParachute && !s.deployedParachute &&
       body.atmosphereHeight > 0 &&
       altitude < body.atmosphereHeight * 0.6 &&
-      radialVel < 0 && s.maxAltitude > 2 && altitude > 0.02
+      radialVel < 0 && altitude > 0.02 && returningToLand
     ) {
       this.doDeployParachute();
     }

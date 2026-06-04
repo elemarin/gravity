@@ -29,7 +29,7 @@ export const MILESTONES: Milestone[] = [
     name: 'Stage Separation',
     description: 'Separate a spent stage in flight',
     check: (s) => s.activeStage >= 1 && s.altitude >= 1,
-    unlocks: ['parachute'],
+    unlocks: ['parachute', 'engine-heavy'],
   },
   {
     id: 'karman',
@@ -43,7 +43,7 @@ export const MILESTONES: Milestone[] = [
     name: 'Safe Return',
     description: 'Land safely after reaching space',
     check: (s) => s.phase === 'landed' && s.maxAltitude >= 100,
-    unlocks: ['landing-legs'],
+    unlocks: ['landing-legs', 'booster-liquid'],
   },
   {
     id: 'orbit',
@@ -98,8 +98,9 @@ export const MILESTONES: Milestone[] = [
   {
     id: 'crewed',
     name: 'Crewed Mission',
-    description: 'Send a crew to orbit and back',
-    check: () => false,
+    description: 'Reach orbital speed and return safely',
+    // Landed after reaching space at near-orbital speed — a crewed orbit & return.
+    check: (s) => s.phase === 'landed' && s.maxAltitude >= 100 && s.maxSpeed >= 0.7,
     unlocks: ['capsule-crew'],
   },
   {
