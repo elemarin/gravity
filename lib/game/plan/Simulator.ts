@@ -545,13 +545,14 @@ export class Simulator {
             s.attitude = 'prograde';
             s.throttle = 0;                 // coast to apoapsis; capture grabs there
           }
-        } else if (!body.star) {
-          // In the launch world's SOI: raise apoapsis just past the SOI edge and
-          // coast out GENTLY into Sun-space. A small burn near the SOI edge
-          // preserves the craft's inherited heliocentric velocity (so it starts
-          // the interplanetary leg on a near-circular Sun orbit at the launch
-          // world's lane), instead of a hard hyperbolic ejection that kills the
-          // heliocentric angular momentum and drops the craft into the Sun.
+        } else if (!body.star && !s.transferClimbed) {
+          // In the launch world's SOI (and not yet on the interplanetary leg):
+          // raise apoapsis just past the SOI edge and coast out GENTLY into
+          // Sun-space. A small burn near the SOI edge preserves the craft's
+          // inherited heliocentric velocity (so it starts the interplanetary leg
+          // on a near-circular Sun orbit at the launch world's lane), instead of a
+          // hard hyperbolic ejection that kills the heliocentric angular momentum
+          // and drops the craft into the Sun.
           const ap = this.apsides(body);
           const apoR = Number.isFinite(ap.apo) ? ap.apo + body.radius : Infinity;
           s.attitude = 'prograde';
@@ -559,6 +560,11 @@ export class Simulator {
             ? THREE.MathUtils.clamp((body.soiRadius * 1.05 - apoR) / (body.soiRadius * 0.4), 0.15, 1)
             : 0;
         } else {
+          // Latch the interplanetary leg the moment we first reach Sun-space, so a
+          // craft on an eccentric post-ejection orbit that dips back through a
+          // planet's SOI keeps homing on the target instead of idling in the
+          // "already escaped, coast" branch and never making progress.
+          if (body.star) s.transferClimbed = true;
           // Sun-space homing pursuit. Patched-conic gravity makes interplanetary
           // space clean (only the gentle Sun plus tides — no heavyweight reaching
           // in to hijack the craft), so steering the craft's target-relative
