@@ -34,6 +34,7 @@ export type FlightState = {
   landerDeployed?: boolean;     // a lander payload has separated
   stationDeployed?: boolean;    // the station module has been released into orbit
   canDeployStation?: boolean;   // true while in a valid orbit to deploy a station
+  canRelaunch?: boolean;        // true when landed and a return trip awaits the player
   targetName?: string;          // destination body name, if any
   targetDistance?: number;      // km to the destination body surface
   guidanceSteps?: GuidanceStep[]; // auto-plan / maneuver checklist for the HUD

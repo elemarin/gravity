@@ -9,7 +9,7 @@ import { MilestoneManager } from './career/Milestones';
 import { Simulator, SimConfig } from './plan/Simulator';
 import { FlightPlan, DEFAULT_PLAN, clonePlan, describeActions, describeTrigger } from './plan/FlightPlan';
 import { Body, dominantBody, bodyDef } from './bodies';
-import { orbitEllipse } from './orbit';
+import { orbitEllipse, orbitConic } from './orbit';
 import { buildFlightSimSetup, launchStartPosition } from './SimSetup';
 import {
   FlightState, FlightPhase, GameCallbacks, MissionResult, RocketBuild, DEFAULT_BUILD,
@@ -454,6 +454,7 @@ export class Game {
       landerDeployed: s.deployedLander,
       stationDeployed: s.deployedStation,
       canDeployStation: this.sim.canDeployStation(),
+      canRelaunch: this.canRelaunch,
       targetName: target?.name,
       targetDistance,
       guidanceSteps,
@@ -505,27 +506,37 @@ export class Game {
     this.sim.manualDeorbit();
   }
 
+  /** Lift off from the target surface and begin the return trip. */
+  manualRelaunch() {
+    if (this.mode !== 'sim') return;
+    this.sim.manualRelaunch();
+  }
+
+  /** True when the craft is landed and a return-trip relaunch is waiting for the player. */
+  get canRelaunch(): boolean {
+    return this.sim.state.phase === 'landed' &&
+           this.plan.nodes.some(
+             (n) => n.trigger.type === 'on-manual-relaunch' && !this.sim.state.firedNodeIds.has(n.id));
+  }
+
   /** Forward-predict trajectory from current sim state and refresh the line. */
   private updateSimTrajectory() {
     const cur = this.sim.state;
-
-    // A stable, surface-clearing orbit is drawn as its full analytic ellipse so
-    // the path is a complete, steady loop rather than a half-arc that keeps
-    // getting recomputed as the craft moves. Don't use it while guidance is
-    // still pending; transfer/landing plans need the forward-simulated route.
     const body = this.dominant();
-    const hasPendingGuidance =
-      this.plan.nodes.some((n) => !cur.firedNodeIds.has(n.id)) ||
-      cur.landingAssist ||
-      cur.ascentAssist ||
-      cur.captureAssist ||
-      cur.deorbitAssist ||
-      cur.departAssist;
-    const ellipse = orbitEllipse(body, cur.position, cur.velocity);
-    if (!hasPendingGuidance && ellipse && cur.phase !== 'prelaunch') {
+
+    // Show the orbit as a clean analytic conic (ellipse or hyperbolic arc)
+    // whenever one exists — this includes during burns, so the orbit visibly
+    // changes shape (circularises, elongates on a transfer, etc.) instead of
+    // drawing a forward-integrated spiral. Fall back to the forward sim only
+    // during active descent (where the landing prediction is more useful) or
+    // when the conic is truly degenerate.
+    const descending = cur.landingAssist || cur.deorbitAssist;
+    const conic = !descending ? orbitConic(body, cur.position, cur.velocity) : null;
+    if (conic && cur.phase !== 'prelaunch') {
       let color = 0x2ee59d;
-      if (ellipse.periAlt < 80) color = 0xffd54a;
-      this.trajectory.update(ellipse.points, color, body.center, body.radius, false);
+      if (conic.periAlt < 80) color = 0xffd54a;
+      if (conic.periAlt < 0) color = 0xff5577;
+      this.trajectory.update(conic.points, color, body.center, body.radius, false);
       return;
     }
 
@@ -541,9 +552,14 @@ export class Game {
     s.stageFuel      = [...cur.stageFuel];
     s.deployedLander    = cur.deployedLander;
     s.deployedParachute = cur.deployedParachute;
+    s.deployedStation   = cur.deployedStation;
+    s.stationBodyId     = cur.stationBodyId;
+    s.stationDeployedOnSurface = cur.stationDeployedOnSurface;
     s.landingAssist     = cur.landingAssist;
+    s.landAfterCapture  = cur.landAfterCapture;
     s.ascentAssist      = cur.ascentAssist;
     s.captureAssist     = cur.captureAssist;
+    s.circularizeAssist = cur.circularizeAssist;
     s.captureTargetId   = cur.captureTargetId;
     s.captureOrbitSign  = cur.captureOrbitSign;
     s.deorbitAssist     = cur.deorbitAssist;
@@ -552,6 +568,7 @@ export class Game {
     s.departTargetId    = cur.departTargetId;
     s.landedTime        = cur.landedTime;
     s.relaunchStart     = cur.relaunchStart;
+    s.relaunchRequested = cur.relaunchRequested;
     s.elapsed        = cur.elapsed;
     s.phase          = cur.phase;
     s.maxAltitude    = cur.maxAltitude;

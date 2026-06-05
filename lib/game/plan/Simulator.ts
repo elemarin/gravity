@@ -80,6 +80,7 @@ export type SimState = {
   justDeployedParachute: boolean;
   justDeployedStation: boolean;
   justIgnited: boolean;
+  relaunchRequested: boolean; // player pressed the Return button
 };
 
 export class Simulator {
@@ -143,6 +144,7 @@ export class Simulator {
       justDeployedParachute: false,
       justDeployedStation: false,
       justIgnited: false,
+      relaunchRequested: false,
     };
   }
 
@@ -157,7 +159,8 @@ export class Simulator {
 
   private hasPendingRelaunch(): boolean {
     return this.plan.nodes.some(
-      (n) => n.trigger.type === 'after-touchdown' && !this.state.firedNodeIds.has(n.id),
+      (n) => (n.trigger.type === 'after-touchdown' || n.trigger.type === 'on-manual-relaunch') &&
+             !this.state.firedNodeIds.has(n.id),
     );
   }
 
@@ -460,6 +463,21 @@ export class Simulator {
       this.doDeployParachute();
     }
 
+    // --- Resting on the surface ---
+    // Skip force integration when sitting still on the ground. Without this,
+    // gravity pulls the craft below the surface every step, clampToSurface
+    // snaps it back, and the HUD flickers between 0m and 1m altitude.
+    // Triggers and autopilots have already been checked above, so a relaunch
+    // (ascentAssist) or ignition (throttle > 0) lets the step proceed normally.
+    if (s.landedBodyId !== null && altitude < 0.05 && s.throttle < 0.01 && !s.ascentAssist) {
+      s.velocity.set(0, 0, 0);
+      s.elapsed += dt;
+      s.phase = this.determinePhase(body);
+      if (s.phase === 'landed' && s.landedTime === null) s.landedTime = s.elapsed;
+      else if (s.phase !== 'landed' && altitude > body.radius * 0.01) s.landedTime = null;
+      return;
+    }
+
     // --- Forces ---
     const grav   = this.gravityAccel(s.position);
     const thrust = this.thrustAccel(up, body);
@@ -571,6 +589,8 @@ export class Simulator {
       case 'after-touchdown':
         return this.state.landedTime !== null &&
                this.state.elapsed >= this.state.landedTime + (t.value ?? 0);
+      case 'on-manual-relaunch':
+        return this.state.phase === 'landed' && this.state.relaunchRequested;
       case 'at-soi-entry': {
         const tgt = this.cfg.bodies.find((b) => b.id === t.targetBodyId);
         if (!tgt) return false;
@@ -588,7 +608,11 @@ export class Simulator {
         // Wait until the arrival/relaunch autopilot has finished settling the
         // orbit. Firing the departure burn mid-capture (while still braking
         // down toward periapsis) aims the burn into the body and crashes.
-        if (this.state.captureAssist || this.state.ascentAssist) return false;
+        // Also block while a landing sequence is in progress — the craft
+        // intends to land first, then relaunch, then depart.
+        if (this.state.captureAssist || this.state.ascentAssist ||
+            this.state.landAfterCapture || this.state.deorbitAssist ||
+            this.state.landingAssist) return false;
         const altitudeNow = Math.max(0, this.state.position.distanceTo(current.center) - current.radius);
         const apsides = this.apsides(current);
         // Floor keyed off the orbit the SOI can actually hold, not the (often
@@ -699,6 +723,14 @@ export class Simulator {
     return true;
   }
 
+  /** Player-initiated relaunch (the Return button while landed on a target). */
+  manualRelaunch(): boolean {
+    if (this.state.phase !== 'landed') return false;
+    if (!this.hasPendingRelaunch()) return false;
+    this.state.relaunchRequested = true;
+    return true;
+  }
+
   /**
    * Where a station module can currently be released, or null:
    *  - 'orbit'   parked in a stable orbit clear of the surface (a space station)
@@ -757,6 +789,9 @@ export class Simulator {
     s.throttle = 0;
     s.deployedParachute = true;
     s.justDeployedParachute = true;
+    // Clear any non-manual attitude (e.g. prograde left by circularise) so the
+    // attitude hold stops fighting stabilizeParachute and the rocket turns nose-up.
+    if (s.attitude !== 'retrograde') s.attitude = 'manual';
     return true;
   }
 
@@ -943,9 +978,10 @@ export class Simulator {
       return;
     }
     if (vRadial < 0) {
-      s.velocity.addScaledVector(radial, -vRadial);
-      s.velocity.multiplyScalar(0.5);
-      if (s.velocity.length() * 1000 < 0.5) s.velocity.set(0, 0, 0);
+      // Zero all velocity on any soft touchdown. Leaving tangential velocity
+      // causes the rocket to "slide" along the surface and bounce between
+      // altitude 0 and 1 m every step while the sim waits for speed < 1 m/s.
+      s.velocity.set(0, 0, 0);
     }
     if (s.maxAltitude >= 0.2) s.landedBodyId = body.id;
   }

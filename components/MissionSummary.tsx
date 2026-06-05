@@ -12,10 +12,12 @@ const RATING_COLOR: Record<string, string> = {
 };
 
 export default function MissionSummary({
-  result, onRestart,
+  result, onRestart, onCopyLog, logCopied,
 }: {
   result: MissionResult;
   onRestart: () => void;
+  onCopyLog?: () => void;
+  logCopied?: boolean;
 }) {
   const crashed = result.outcome === 'crashed';
   const inOrbit = !crashed && !result.landedBody && result.reachedOrbit;
@@ -81,6 +83,14 @@ export default function MissionSummary({
             <Link href="/builder" className="btn btn-secondary flex-1 text-sm">🛠 Builder</Link>
             <Link href="/" className="btn btn-secondary flex-1 text-sm">☰ Menu</Link>
           </div>
+          {onCopyLog && (
+            <button
+              onClick={onCopyLog}
+              className="btn btn-secondary w-full text-[11px] border-yellow/40 text-yellow hover:bg-yellow/10"
+            >
+              {logCopied ? '✓ Copied!' : '📋 Copy Flight Log'}
+            </button>
+          )}
         </div>
       </div>
     </div>

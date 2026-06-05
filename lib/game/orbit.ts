@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import { Body } from './bodies';
 
 export type OrbitPath = {
-  /** Closed ellipse polyline (first ≈ last) ready for the trajectory line. */
+  /** Conic polyline ready for the trajectory line. */
   points: THREE.Vector3[];
-  apoAlt: number;  // km above surface
-  periAlt: number; // km above surface
+  apoAlt: number;  // km above surface (Infinity for escape)
+  periAlt: number; // km above surface (negative = sub-surface)
 };
 
 const SEGMENTS = 240;
@@ -60,4 +60,82 @@ export function orbitEllipse(body: Body, pos: THREE.Vector3, vel: THREE.Vector3)
   }
 
   return { points, apoAlt: ra - body.radius, periAlt: rp - body.radius };
+}
+
+/**
+ * Like {@link orbitEllipse} but handles ALL conic sections — highly eccentric
+ * ellipses, surface-dipping orbits, and hyperbolic/parabolic escape arcs — so
+ * the trajectory line always shows the instantaneous Keplerian orbit rather
+ * than a forward-integrated spiral during burns. Returns null only for truly
+ * degenerate cases (radial free-fall with no angular momentum).
+ */
+export function orbitConic(body: Body, pos: THREE.Vector3, vel: THREE.Vector3): OrbitPath | null {
+  const mu = body.GM;
+  const rel = pos.clone().sub(body.center);
+  const r = rel.length();
+  if (r < 1e-6) return null;
+
+  const v2 = vel.lengthSq();
+  const eps = v2 / 2 - mu / r;
+
+  const hVec = new THREE.Vector3().crossVectors(rel, vel);
+  const h = hVec.length();
+  if (h < 1e-9) return null;
+
+  const eVec = vel.clone().cross(hVec).multiplyScalar(1 / mu).sub(rel.clone().multiplyScalar(1 / r));
+  const e = eVec.length();
+
+  const hHat = hVec.clone().normalize();
+  const pHat = e > 1e-6 ? eVec.clone().normalize() : rel.clone().normalize();
+  const qHat = new THREE.Vector3().crossVectors(hHat, pHat).normalize();
+  const p = (h * h) / mu; // semi-latus rectum (valid for all conics)
+
+  if (eps < -1e-9 && e < 1) {
+    // ── Elliptical orbit ──
+    const a = -mu / (2 * eps);
+    const rp = a * (1 - e);
+    const ra = a * (1 + e);
+    const points: THREE.Vector3[] = [];
+    for (let i = 0; i <= SEGMENTS; i++) {
+      const theta = (i / SEGMENTS) * Math.PI * 2;
+      const rr = p / (1 + e * Math.cos(theta));
+      points.push(
+        body.center.clone()
+          .addScaledVector(pHat, rr * Math.cos(theta))
+          .addScaledVector(qHat, rr * Math.sin(theta)),
+      );
+    }
+    return { points, apoAlt: ra - body.radius, periAlt: rp - body.radius };
+  }
+
+  // ── Hyperbolic / parabolic escape arc ──
+  const rp = p / (1 + e);
+  // Cap the drawn arc at a useful distance: the body's SOI or 3× current radius.
+  const maxR = Math.max(r * 3, body.soiRadius > 0 ? body.soiRadius * 1.5 : r * 5);
+  // Asymptotic angle for hyperbola: θ_max = arccos(-1/e); for parabola: π.
+  const asymptote = e > 1.0001 ? Math.acos(Math.max(-1, -1 / e)) : Math.PI;
+  // Further cap the angle so r never exceeds maxR.
+  let thetaCap = asymptote * 0.97;
+  if (e > 1e-6) {
+    const cosAtMax = (p / maxR - 1) / e;
+    if (cosAtMax >= -1 && cosAtMax <= 1) {
+      thetaCap = Math.min(thetaCap, Math.acos(cosAtMax));
+    }
+  }
+
+  const points: THREE.Vector3[] = [];
+  for (let i = 0; i <= SEGMENTS; i++) {
+    const theta = -thetaCap + (2 * thetaCap * i) / SEGMENTS;
+    const denom = 1 + e * Math.cos(theta);
+    if (denom <= 0.01) continue;
+    const rr = p / denom;
+    points.push(
+      body.center.clone()
+        .addScaledVector(pHat, rr * Math.cos(theta))
+        .addScaledVector(qHat, rr * Math.sin(theta)),
+    );
+  }
+
+  if (points.length < 4) return null;
+  return { points, apoAlt: Infinity, periAlt: rp - body.radius };
 }

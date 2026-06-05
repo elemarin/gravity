@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import { PARTS_CATALOG, RocketPart, PartType } from '@/lib/game/career/Parts';
 import { RocketBuild, StageSpec, DEFAULT_BUILD } from '@/lib/game/types';
 import { computeStats, estimateBuildDeltaV, getStages, buildPartIds } from '@/lib/game/BuildSpec';
-import { loadBuild, saveBuild, loadUnlockedParts, loadFacilityLevel } from '@/lib/storage';
-import { facilityTier } from '@/lib/game/career/Progress';
+import { loadBuild, saveBuild, loadUnlockedParts, loadFacilityLevel, loadDevMode } from '@/lib/storage';
+import { facilityTier, FACILITY_TIERS } from '@/lib/game/career/Progress';
 import { farthestReachable } from '@/lib/game/career/Requirements';
 import { DESTINATIONS } from '@/lib/game/bodies';
 import { ROCKET_PRESETS, RocketPreset } from '@/lib/game/career/Presets';
@@ -43,10 +43,11 @@ export default function RocketBuilder() {
 
   useEffect(() => {
     setBuild(loadBuild());
+    const devMode = loadDevMode();
     const ids = new Set(loadUnlockedParts());
-    PARTS_CATALOG.forEach((p) => { if (p.unlockedByDefault) ids.add(p.id); });
+    PARTS_CATALOG.forEach((p) => { if (p.unlockedByDefault || devMode) ids.add(p.id); });
     setUnlocked(ids);
-    setFacilityLevel(loadFacilityLevel());
+    setFacilityLevel(devMode ? FACILITY_TIERS.length - 1 : loadFacilityLevel());
   }, []);
 
   const tier    = facilityTier(facilityLevel);

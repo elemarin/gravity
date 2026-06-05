@@ -16,6 +16,7 @@ type Props = {
   canLand: boolean;
   canDeployStation: boolean;
   stationDeployed: boolean;
+  canRelaunch: boolean;
   onEdit: () => void;
   onReplay: () => void;
   onWarp: () => void;
@@ -26,6 +27,7 @@ type Props = {
   onLander: () => void;
   onLand: () => void;
   onDeployStation: () => void;
+  onRelaunch: () => void;
 };
 
 function PixelBtn({
@@ -63,7 +65,8 @@ export default function SimControls({
   finished, phase, landed, timeScale, canFinish,
   canStage, hasParachute, parachuteDeployed,
   hasLander, landerDeployed, canLand, canDeployStation, stationDeployed,
-  onEdit, onReplay, onWarp, onWarpUp, onWarpDown, onFinish, onStage, onLander, onLand, onDeployStation,
+  canRelaunch,
+  onEdit, onReplay, onWarp, onWarpUp, onWarpDown, onFinish, onStage, onLander, onLand, onDeployStation, onRelaunch,
 }: Props) {
   const active = !finished && phase !== 'prelaunch';
   const inFlight = phase !== 'prelaunch' && phase !== 'landed' && phase !== 'destroyed';
@@ -86,6 +89,9 @@ export default function SimControls({
         )}
         {active && canLand && (
           <PixelBtn label="↓ LAND" color="#39e9a6" onClick={onLand} glow />
+        )}
+        {canRelaunch && (
+          <PixelBtn label="🚀 RETURN" color="#bb8bff" onClick={onRelaunch} glow large />
         )}
         {active && canDeployStation && (
           <PixelBtn

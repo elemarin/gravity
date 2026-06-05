@@ -8,12 +8,12 @@ import { buildFlightBodies, destinationTargetId, bodyDef } from '@/lib/game/bodi
 import { autoPlan, defaultOrbitKm } from '@/lib/game/plan/AutoPlan';
 import {
   loadBuild, loadCompletedMilestones, addCompletedMilestone, addUnlockedParts,
-  loadPlan, savePlan, loadBases, addBase, loadGoals, addGoal,
+  loadPlan, savePlan, loadBases, addBase, loadGoals, addGoal, loadDevMode,
 } from '@/lib/storage';
 import { MILESTONES } from '@/lib/game/career/Milestones';
 import { evaluateGoals, campaignGoal, stationGoalId, baseGoalId } from '@/lib/game/career/Progress';
 import { getPart } from '@/lib/game/career/Parts';
-import { estimateBuildDeltaV } from '@/lib/game/BuildSpec';
+import { estimateBuildDeltaV, computeStats } from '@/lib/game/BuildSpec';
 import {
   hapticThrust, hapticStage, hapticDeploy, hapticLanding, hapticCrash,
 } from '@/lib/haptics';
@@ -95,6 +95,8 @@ export default function GameScreen() {
   const [toast, setToast] = useState<ToastInfo | null>(null);
   const [bases, setBases] = useState<string[]>(['earth']);
   const [buildDeltaV, setBuildDeltaV] = useState(0);
+  const [devMode, setDevModeState] = useState(false);
+  const [logCopied, setLogCopied] = useState(false);
   const toastId = useRef(0);
 
   const setPlan = useCallback((p: FlightPlan | null) => {
@@ -118,6 +120,7 @@ export default function GameScreen() {
     setBuildDeltaV(estimateBuildDeltaV(build));
     setHasLander(!!build.landerId);
     setBases(loadBases());
+    setDevModeState(loadDevMode());
     setMode('plan');
 
     (async () => {
@@ -288,6 +291,46 @@ export default function GameScreen() {
   const handleLand = useCallback(() => gameRef.current?.manualLand(), []);
   const handleDeployStation = useCallback(() => gameRef.current?.manualDeployStation(), []);
 
+  const handleCopyLog = useCallback(() => {
+    const build = buildRef.current;
+    const p = planRef.current;
+    const fs = flightState;
+    if (!build || !p) return;
+    const stats = computeStats(build);
+    const dv = estimateBuildDeltaV(build);
+    const log = {
+      build,
+      stats: { ...stats, deltaV: Math.round(dv) },
+      plan: {
+        launchBodyId: p.launchBodyId,
+        destinationId: p.destinationId,
+        mission: p.mission,
+        launch: p.launch,
+        nodes: p.nodes.map((n) => ({
+          trigger: n.trigger,
+          actions: n.actions,
+        })),
+      },
+      flight: fs ? {
+        phase: fs.phase,
+        altitude: Math.round(fs.altitude * 1000) / 1000,
+        speed: Math.round(fs.speed * 10000) / 10000,
+        apoapsis: fs.apoapsis,
+        periapsis: fs.periapsis,
+        fuel: Math.round(fs.fuel * 10) / 10,
+        activeStage: fs.activeStage,
+        stageCount: fs.stageCount,
+        maxAltitude: Math.round(fs.maxAltitude * 100) / 100,
+        guidanceSteps: fs.guidanceSteps,
+      } : null,
+    };
+    navigator.clipboard.writeText(JSON.stringify(log, null, 2));
+    setLogCopied(true);
+    setTimeout(() => setLogCopied(false), 2000);
+  }, [flightState]);
+
+  const handleRelaunch = useCallback(() => gameRef.current?.manualRelaunch(), []);
+
   const handleLaunchSite = useCallback((id: string) => {
     const cur = planRef.current;
     if (!cur || cur.launchBodyId === id) return;
@@ -314,6 +357,7 @@ export default function GameScreen() {
   // Deploy a station (in orbit) or a base (on the surface) when a module is aboard.
   const canDeployStation = mode === 'sim' && !finished && hasStation &&
     !stationDeployed && (flightState?.canDeployStation ?? false);
+  const canRelaunch = mode === 'sim' && !finished && (flightState?.canRelaunch ?? false);
 
   const bodies = plan
     ? buildFlightBodies(plan.launchBodyId, destinationTargetId(plan.destinationId, plan.launchBodyId))
@@ -400,11 +444,18 @@ export default function GameScreen() {
           onLander={handleLander}
           onLand={handleLand}
           onDeployStation={handleDeployStation}
+          canRelaunch={canRelaunch}
+          onRelaunch={handleRelaunch}
         />
       )}
 
       {missionResult && (
-        <MissionSummary result={missionResult} onRestart={handleReplay} />
+        <MissionSummary
+          result={missionResult}
+          onRestart={handleReplay}
+          onCopyLog={devMode ? handleCopyLog : undefined}
+          logCopied={logCopied}
+        />
       )}
 
       {toast && (

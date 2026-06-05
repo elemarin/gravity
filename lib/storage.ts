@@ -8,6 +8,7 @@ const PLAN_KEY     = 'gravity:plan';
 const FACILITY_KEY = 'gravity:facility';
 const BASES_KEY    = 'gravity:bases';
 const GOALS_KEY    = 'gravity:goals';
+const DEV_MODE_KEY = 'gravity:devMode';
 
 const isClient = typeof window !== 'undefined';
 
@@ -128,6 +129,19 @@ export function resetProgress() {
   localStorage.removeItem(GOALS_KEY);
 }
 
+// ── Dev mode ─────────────────────────────────────────────────────────────────
+
+export function loadDevMode(): boolean {
+  if (!isClient) return false;
+  return localStorage.getItem(DEV_MODE_KEY) === '1';
+}
+
+export function saveDevMode(on: boolean) {
+  if (!isClient) return;
+  if (on) localStorage.setItem(DEV_MODE_KEY, '1');
+  else localStorage.removeItem(DEV_MODE_KEY);
+}
+
 export function loadPlan(): FlightPlan {
   if (!isClient) return clonePlan(DEFAULT_PLAN);
   try {
@@ -153,7 +167,16 @@ export function loadPlan(): FlightPlan {
       },
       nodes: parsed.nodes
         .filter((n) => n && n.trigger && n.actions && typeof n.id === 'string')
-        .map((n) => ({ id: n.id, trigger: { ...n.trigger }, actions: { ...n.actions } })),
+        .map((n) => {
+          const trigger = { ...n.trigger };
+          const actions = { ...n.actions };
+          // Migrate: after-touchdown + ascend → on-manual-relaunch (player button).
+          if (trigger.type === 'after-touchdown' && actions.ascend) {
+            trigger.type = 'on-manual-relaunch';
+            delete trigger.value;
+          }
+          return { id: n.id, trigger, actions };
+        }),
     };
   } catch {
     return clonePlan(DEFAULT_PLAN);

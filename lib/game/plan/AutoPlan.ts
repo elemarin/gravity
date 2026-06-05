@@ -146,7 +146,7 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
     nodes.push(node('at-soi-entry', undefined, targetId, { descend: true }));
     if (kind === 'land-return') {
       // After touchdown, fly the ascent autopilot back to orbit, then head home.
-      nodes.push(node('after-touchdown', 3, undefined, { ascend: true }));
+      nodes.push(node('on-manual-relaunch', undefined, undefined, { ascend: true }));
       addReturnLeg(nodes, launchId);
     }
   }

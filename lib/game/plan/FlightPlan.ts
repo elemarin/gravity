@@ -19,7 +19,8 @@ export type TriggerType =
   | 'on-fuel-empty'       // active stage runs dry
   | 'at-soi-entry'        // enters targetBodyId's sphere of influence
   | 'after-orbit'         // after reaching orbit around a non-target body
-  | 'after-touchdown';    // value = seconds after a soft landing (for relaunch)
+  | 'after-touchdown'     // value = seconds after a soft landing (for relaunch)
+  | 'on-manual-relaunch'; // player presses the Return button while landed
 
 export type Trigger = {
   type: TriggerType;
@@ -127,6 +128,7 @@ export const TRIGGER_LABELS: Record<TriggerType, string> = {
   'at-soi-entry':  'At SOI entry',
   'after-orbit':   'After orbit',
   'after-touchdown': 'After landing',
+  'on-manual-relaunch': 'Return button',
 };
 
 /** Human-readable summary of a node for the plan list UI. */
@@ -143,6 +145,7 @@ export function describeTrigger(t: Trigger): string {
     case 'at-soi-entry': return `Enter ${t.targetBodyId ?? 'SOI'}`;
     case 'after-orbit':  return `Orbit, then ${t.targetBodyId ?? 'depart'}`;
     case 'after-touchdown': return `T+${Math.round(t.value ?? 0)}s after landing`;
+    case 'on-manual-relaunch': return 'Return button';
   }
 }
 

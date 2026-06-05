@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { loadDevMode, saveDevMode } from '@/lib/storage';
 
 const MENU_ITEMS = [
   { href: '/', label: 'Home', icon: '⌂' },
@@ -25,10 +26,21 @@ export default function NavDrawer({
   hideTrigger?: boolean;
 }) {
   const [internalOpen, setInternalOpen] = useState(false);
+  const [devMode, setDevMode] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const setOpen = (next: boolean) => {
     if (onOpenChange) onOpenChange(next);
     else setInternalOpen(next);
+  };
+
+  useEffect(() => { setDevMode(loadDevMode()); }, []);
+
+  const toggleDev = () => {
+    const next = !devMode;
+    setDevMode(next);
+    saveDevMode(next);
+    // Reload so all screens pick up the unlock/lock change.
+    window.location.reload();
   };
 
   return (
@@ -50,6 +62,19 @@ export default function NavDrawer({
             {item.label}
           </Link>
         ))}
+        <button
+          type="button"
+          onClick={toggleDev}
+          className={`flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-bold shadow-lg backdrop-blur
+                      transition active:scale-95
+                      ${devMode
+                        ? 'border-yellow/50 bg-yellow/15 text-yellow'
+                        : 'border-white/20 bg-panel/90 text-ink hover:border-cyan/45 hover:text-cyan'}`}
+          title={devMode ? 'Dev mode ON — all parts unlocked' : 'Enable dev mode'}
+        >
+          <span className="text-base leading-none">⚙</span>
+          {devMode && <span className="text-[10px]">DEV</span>}
+        </button>
       </nav>
 
       {/* Mobile hamburger — retro pixel button, visible below md */}
@@ -101,6 +126,27 @@ export default function NavDrawer({
             </Link>
           ))}
         </nav>
+
+        {/* Settings */}
+        <div className="mt-auto border-t border-white/10 pt-4">
+          <div className="text-[8px] uppercase tracking-[0.25em] text-dim/60 mb-2">Settings</div>
+          <button
+            type="button"
+            onClick={toggleDev}
+            className={`flex items-center gap-3 w-full rounded-md border-2 px-4 py-3 text-xs font-bold transition
+              ${devMode
+                ? 'border-yellow/40 bg-yellow/10 text-yellow'
+                : 'border-white/12 bg-white/[0.06] text-dim hover:border-cyan/45 hover:text-cyan'}`}
+          >
+            <span className="w-5 text-center text-base">⚙</span>
+            {devMode ? 'Dev Mode ✓' : 'Dev Mode'}
+          </button>
+          {devMode && (
+            <p className="text-[9px] text-yellow/70 mt-1.5 px-1 leading-relaxed">
+              All parts &amp; facilities unlocked. Copy Flight Log available during flight.
+            </p>
+          )}
+        </div>
       </aside>
     </>
   );
