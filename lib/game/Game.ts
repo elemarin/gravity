@@ -314,6 +314,7 @@ export class Game {
         // player can deploy a base, relaunch, or finish the mission manually.
         if (this.sim.state.phase === 'destroyed') break;
       }
+      this.syncBodies(this.sim.state.elapsed);
       const center = this.dominant().center;
       this.rocket.applyState(this.sim.state, center, FIXED_DT);
       this.renderer.updateCameraOffset(this.sim.altitude());
@@ -427,7 +428,7 @@ export class Game {
   private buildFlightState(): FlightState {
     const s = this.sim.state;
     const altitude = this.sim.altitude();
-    const speed = s.velocity.length();
+    const speed = this.sim.relativeSpeed();
     const stageCount = this.cfg.stages.length;
     // Distance to the destination body (the non-launch body), if any.
     const target = this.bodies.find((b) => b.id !== this.launchBodyId);

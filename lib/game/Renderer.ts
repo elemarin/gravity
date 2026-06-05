@@ -336,8 +336,10 @@ export class Renderer {
   /** Configure the launch world's daytime sky and atmosphere depth. */
   setSky(dayHex: number, atmosphereHeight: number) {
     this.skyDay.setHex(dayHex);
-    // Airless worlds read almost like open space even at the surface.
-    this.skyFade = atmosphereHeight > 0 ? Math.max(120, atmosphereHeight * 1.6) : 30;
+    // Fade fully to space by the time the craft is at/above the atmosphere top,
+    // so a low orbit (above the Kármán line) reads as black space rather than a
+    // washed-out blue sky — even when the camera is pulled far back.
+    this.skyFade = atmosphereHeight > 0 ? Math.max(45, atmosphereHeight) : 22;
     this.updateSky(0);
   }
 

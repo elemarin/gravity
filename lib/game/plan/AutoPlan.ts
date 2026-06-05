@@ -54,7 +54,10 @@ export function ascentNodes(launchId: string, orbitKm: number, circularize = tru
   const atmo = def.atmosphereHeight;
   const insert = Math.max(2, orbitKm * 0.85);
   const insertion = (): Maneuver[] => (circularize
-    ? [node('at-apoapsis', undefined, undefined, { circularize: true })]
+    ? [
+        node('at-altitude', insert, undefined, { circularize: true }),
+        node('at-apoapsis', undefined, undefined, { circularize: true }),
+      ]
     : [
         node('at-apoapsis', undefined, undefined, { heading: 90, throttle: 0.5 }),
         node('at-periapsis-altitude', insert, undefined, { throttle: 0 }),
@@ -130,7 +133,7 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
     // target's gravity dominates.
     nodes.push(node('at-soi-entry', undefined, targetId, { capture: true }));
     if (kind === 'orbit-return') {
-      addReturnLeg(nodes, launchId);
+      addReturnLeg(nodes, launchId, targetId);
     }
   } else {
     // Land (one-way) — brake the arrival on the upper stage with the powered
@@ -141,7 +144,7 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
     if (kind === 'land-return') {
       // After touchdown, fly the ascent autopilot back to orbit, then head home.
       nodes.push(node('on-manual-relaunch', undefined, undefined, { ascend: true }));
-      addReturnLeg(nodes, launchId);
+      addReturnLeg(nodes, launchId, targetId);
     }
   }
 
@@ -149,13 +152,27 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
 }
 
 /**
- * Append the trip home: once the craft has established a real orbit around the
- * destination body, engage the departure autopilot toward the launch body. The
- * descent is then automatic (a fitted parachute auto-opens in the launch world's
- * atmosphere).
+ * Append the trip home once the craft has established orbit around the target.
+ *
+ * For a MOON of the launch world (nested inside the launch world's SOI), a single
+ * `depart` burn escapes the moon and drops into the launch world's atmosphere.
+ *
+ * For a PLANET (its own heliocentric orbit), going home is a full interplanetary
+ * transfer: home the craft back to the launch world with the same Lambert cruise
+ * the outbound leg uses, then capture-descend into its atmosphere. A lone
+ * `depart` burn can't cross interplanetary space to a moving launch world — it
+ * just escapes the target's SOI and strands the craft in solar orbit.
  */
-function addReturnLeg(nodes: Maneuver[], launchId: string) {
-  nodes.push(node('after-orbit', undefined, launchId, { depart: true }));
+function addReturnLeg(nodes: Maneuver[], launchId: string, targetId: string) {
+  const targetDef = bodyDef(targetId);
+  const targetIsMoon = !!targetDef.parent && targetDef.parent !== 'sun';
+  if (targetIsMoon) {
+    nodes.push(node('after-orbit', undefined, launchId, { depart: true }));
+  } else {
+    // Interplanetary return: transfer back to the launch world, then descend.
+    nodes.push(node('after-orbit', undefined, launchId, { transfer: true }));
+    nodes.push(node('at-soi-entry', undefined, launchId, { descend: true }));
+  }
 }
 
 function finish(launchBodyId: string, destinationId: string, kind: MissionKind, orbitKm: number, nodes: Maneuver[]): FlightPlan {

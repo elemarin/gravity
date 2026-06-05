@@ -83,6 +83,11 @@ function run(
     const landedNow = s.phase === 'landed';
     if (landedNow && !prevLanded) touchdowns++;
     prevLanded = landedNow;
+    if (s.phase === 'landed' && plan.nodes.some(
+      (n) => n.trigger.type === 'on-manual-relaunch' && !s.firedNodeIds.has(n.id),
+    )) {
+      sim.manualRelaunch();
+    }
     if (sim.finished) break;
   }
 

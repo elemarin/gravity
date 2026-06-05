@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Body, dominantBody, positionBodiesAt, bodyStateAt, SUN_GM } from '../bodies';
+import { Body, dominantBody, positionBodiesAt, bodyStateAt, destinationTargetId, SUN_GM, SUN_ID } from '../bodies';
 import { FlightPlan, Maneuver, Attitude } from './FlightPlan';
 import { StageStats } from '../BuildSpec';
 
@@ -192,6 +192,20 @@ export class Simulator {
     return this.state.velocity.clone().sub(body.velocity);
   }
 
+  private pinnedBody(): Body | null {
+    if (!this.state.landedBodyId) return null;
+    return this.bodies.find((b) => b.id === this.state.landedBodyId) ?? null;
+  }
+
+  private pinToSurface(body: Body, upHint?: THREE.Vector3) {
+    const s = this.state;
+    const radial = upHint?.clone() ?? new THREE.Vector3().subVectors(s.position, body.center);
+    if (radial.lengthSq() < 1e-12) radial.set(0, 1, 0);
+    radial.normalize();
+    s.position.copy(body.center).addScaledVector(radial, body.radius + 0.001);
+    s.velocity.copy(body.velocity);
+  }
+
   private freshState(): SimState {
     return {
       position: this.cfg.startPosition.clone(),
@@ -269,7 +283,12 @@ export class Simulator {
     return !!st && st.thrust > 0 && (this.state.stageFuel[this.state.activeStage] ?? 0) > 0.001;
   }
 
-  body(): Body { return dominantBody(this.bodies, this.state.position); }
+  body(): Body {
+    if (this.state.phase === 'landed' && this.state.landedBodyId) {
+      return this.bodies.find((b) => b.id === this.state.landedBodyId) ?? dominantBody(this.bodies, this.state.position);
+    }
+    return dominantBody(this.bodies, this.state.position);
+  }
 
   /** The live solar system at the current sim time (read-only view). */
   liveBodies(): Body[] { return this.bodies; }
@@ -277,6 +296,16 @@ export class Simulator {
   altitude(): number {
     const b = this.body();
     return Math.max(0, this.state.position.distanceTo(b.center) - b.radius);
+  }
+
+  /**
+   * Speed relative to the body the craft is flying around — i.e. excluding the
+   * world's own heliocentric orbital motion. This is the "ground/orbit" speed the
+   * HUD should show: 0 when landed, orbital speed when in orbit, not the planet's
+   * ~hundreds of m/s drift around the Sun.
+   */
+  relativeSpeed(): number {
+    return this.relVel(this.body()).length();
   }
 
   /** Advance one fixed step: apply launch + maneuver triggers, then integrate. */
@@ -295,7 +324,7 @@ export class Simulator {
     // a body position. (elapsed is bumped at the end of the step.)
     this.positionBodies();
 
-    const body = this.body();
+    const body = this.pinnedBody() ?? this.body();
     const up = new THREE.Vector3().subVectors(s.position, body.center).normalize();
     const altitude = Math.max(0, s.position.distanceTo(body.center) - body.radius);
     const radialVel = up.dot(this.relVel(body));
@@ -342,13 +371,32 @@ export class Simulator {
       // body IS the landing body and its altitude is the right reference.
       s.attitude = 'retrograde';
       const speedMs = this.relVel(body).length() * 1000;
-      const safeMs = LAND_FLOOR_MS + altitude * LAND_RATE;
+      // On an atmospheric world with a parachute, let aerobraking + the chute do
+      // the work for FREE and only burn the engine as a safety net when the
+      // descent is genuinely too fast — so a return mission keeps its fuel for the
+      // trip home instead of spending the whole lander tank fighting a descent the
+      // air would have slowed anyway. (Airless worlds have no drag, so there the
+      // engine must do all the braking, as before.)
+      const aeroAssisted = this.cfg.hasParachute && body.atmosphereHeight > 0;
+      const safeMs = aeroAssisted
+        ? (LAND_FLOOR_MS + altitude * LAND_RATE) * 3.5   // generous: let drag/chute brake
+        : LAND_FLOOR_MS + altitude * LAND_RATE;
       s.throttle = speedMs > safeMs ? 1 : 0;
 
       // Stage the lander LATE: only once the upper stage has braked the bulk of
       // the arrival speed and we're low and slow, so the lander's small tank
       // just finishes the touchdown instead of fighting the whole descent.
-      if (this.cfg.landerIndex >= 0 && !s.deployedLander) {
+      // BUT: on a return mission to an atmospheric world the parachute lands the
+      // whole stack for free, and the craft needs its big main stage (not the
+      // tiny lander tank) to climb back to orbit afterwards. So don't drop the
+      // lander when a relaunch is pending and a chute is available to land on —
+      // keep the fuel that the trip home depends on.
+      const relaunchPending = this.plan.nodes.some(
+        (n) => (n.trigger.type === 'on-manual-relaunch' || n.trigger.type === 'after-touchdown') &&
+               !s.firedNodeIds.has(n.id));
+      const aeroLands = this.cfg.hasParachute && body.atmosphereHeight > 0;
+      const keepStageForReturn = relaunchPending && aeroLands;
+      if (this.cfg.landerIndex >= 0 && !s.deployedLander && !keepStageForReturn) {
         const lowEnough = altitude < Math.max(2, body.radius * 0.35);
         const slowEnough = speedMs < 90;
         const onLanderStage = s.activeStage >= this.cfg.landerIndex;
@@ -503,6 +551,10 @@ export class Simulator {
           s.throttle = correction.length() > Math.max(0.003, vCirc * 0.03) ? 1 : 0;
         }
       }
+
+      if (s.throttle > 0.01 && !this.hasThrust() && this.cfg.landerIndex >= 0 && !s.deployedLander) {
+        this.doDeployLander();
+      }
     }
 
     // --- Departure autopilot (the return-home burn) ---
@@ -520,14 +572,20 @@ export class Simulator {
       const stillAtDeparture = !!fromBody && fromBody.id !== target.id &&
         this.body().id === fromBody.id;
       if (stillAtDeparture) {
-        // Phase 1 — escape the world we're leaving: raise apoapsis just PAST its
-        // dominance edge (the SOI sits a touch inside it) so the home world's
-        // gravity takes over, then coast. Stopping short leaves the craft bound in
-        // a decaying orbit it never departs.
+        // Phase 1 — escape the world we're leaving (e.g. the Moon) GENTLY: burn
+        // craft-prograde to just past its escape velocity so the craft slips out
+        // of its SOI at low speed relative to it, settling into a near-circular
+        // orbit around the home world at that world's lane. A full-throttle escape
+        // of a tiny SOI overshoots massively on a strong engine and flings the
+        // craft clear past the home world's SOI entirely (it never comes home).
+        // The throttle tapers as escape nears to keep the exit speed low.
+        const rNow = Math.max(s.position.distanceTo(fromBody.center), fromBody.radius);
+        const vEsc = Math.sqrt(2 * fromBody.GM / rNow) * 1.04;
+        const vRel = this.relVel(fromBody).length();
         s.attitude = 'prograde';
-        const ap = this.apsides(fromBody);
-        const apoR = Number.isFinite(ap.apo) ? ap.apo + fromBody.radius : Infinity;
-        s.throttle = apoR < fromBody.soiRadius * 1.3 ? 1 : 0;
+        s.throttle = vRel >= vEsc
+          ? 0
+          : THREE.MathUtils.clamp((vEsc - vRel) / (vEsc * 0.12), 0.2, 1);
       } else {
         // Phase 2 — drop home. Lower the periapsis of the orbit AROUND THE TARGET
         // by burning retrograde *relative to the target* (not the instantaneous
@@ -603,36 +661,75 @@ export class Simulator {
             s.attitude = 'prograde';
             s.throttle = 0;                 // coast to apoapsis; capture grabs there
           }
-        } else if (!body.star && !s.transferClimbed) {
-          // In the launch world's SOI (and not yet on the interplanetary leg):
-          // raise apoapsis just past the SOI edge and coast out GENTLY into
-          // Sun-space. A small burn near the SOI edge preserves the craft's
-          // inherited heliocentric velocity (so it starts the interplanetary leg
-          // on a near-circular Sun orbit at the launch world's lane), instead of a
-          // hard hyperbolic ejection that kills the heliocentric angular momentum
-          // and drops the craft into the Sun.
-          const ap = this.apsides(body);
-          const apoR = Number.isFinite(ap.apo) ? ap.apo + body.radius : Infinity;
+        } else if (!body.star) {
+          // Trans-target injection from the launch world's parking orbit. The
+          // escape must leave in the RIGHT heliocentric direction or the craft
+          // just ejects sunward and the launch world re-captures it ("launches
+          // back toward Earth"). So we time the burn to the orbital phase where
+          // the craft's prograde aligns with the desired heliocentric direction —
+          // along the world's motion for an outer target, against it for an inner
+          // one — then burn craft-prograde to just past escape velocity. That adds
+          // the burn heliocentrically in the transfer direction, dropping the
+          // craft into Sun-space already heading toward the target's lane; Lambert
+          // then fine-tunes. Burning at the aligned phase is the heliocentric
+          // equivalent of a Hohmann injection.
+          const sun = this.bodies.find((b) => b.star);
+          const helioR = sun ? s.position.distanceTo(sun.center) : laneR;
+          const targetLane = tgt.orbit ? tgt.orbit.radius : laneR;
+          const outward = targetLane >= helioR;
+          const rNow = Math.max(s.position.distanceTo(body.center), body.radius);
+          const vEsc = Math.sqrt(2 * body.GM / rNow) * 1.04;
+          const vRel = this.relVel(body).length();
+          const helioDir = body.velocity.clone();
+          if (helioDir.lengthSq() < 1e-10) helioDir.copy(this.relVel(body));
+          helioDir.normalize();
+          const wantDir = outward ? helioDir : helioDir.clone().negate();
+          const orbDir = this.relVel(body);
+          const orbAlign = orbDir.lengthSq() > 1e-10 ? orbDir.clone().normalize().dot(wantDir) : 1;
           s.attitude = 'prograde';
-          s.throttle = apoR < body.soiRadius * 1.05
-            ? THREE.MathUtils.clamp((body.soiRadius * 1.05 - apoR) / (body.soiRadius * 0.4), 0.15, 1)
-            : 0;
-        } else if (dist < tgt.soiRadius * 4) {
+          if (vRel >= vEsc) {
+            s.throttle = 0;                 // escaping — coast out into Sun-space
+          } else if (orbAlign > 0.55) {
+            s.throttle = THREE.MathUtils.clamp((vEsc - vRel) / (vEsc * 0.12), 0.2, 1);
+          } else {
+            s.throttle = 0;                 // wrong phase — coast to the injection point
+          }
+        } else if (dist < Math.max(tgt.soiRadius * 6, tgt.radius + 160)) {
           // Rendezvous endgame. Once we're within a few SOI radii, stop chasing a
           // fixed arrival point and instead null the velocity RELATIVE TO THE
           // TARGET while easing in, so the craft slips into the SOI at low relative
           // speed — a cheap arrival the capture autopilot can brake into orbit.
-          if (body.star) s.transferClimbed = true;
+          s.transferClimbed = true;
           const tgtRel = this.relVel(tgt);
           const escAtSoi = Math.sqrt(2 * tgt.GM / Math.max(tgt.soiRadius, tgt.radius + 1));
           const closeSpeed = THREE.MathUtils.clamp(dist * 0.02, 0.02, escAtSoi * 0.8);
           const desiredRel = toTgt.clone().normalize().multiplyScalar(closeSpeed);
           const correction = desiredRel.sub(tgtRel);
           if (correction.lengthSq() > 1e-10) this.aimToward(correction, up);
-          s.throttle = correction.length() > 0.01 ? 1 : 0;
+          const moonEndgame = !!tgt.orbit && tgt.orbit.parentId !== SUN_ID;
+          const maxThrottle = moonEndgame ? 0.28 : 1;
+          s.throttle = correction.length() > 0.01
+            ? Math.min(maxThrottle, correction.length() * 3)
+            : 0;
         } else {
-          // Latch the interplanetary leg the moment we first reach Sun-space.
-          if (body.star) s.transferClimbed = true;
+          // Sun-space interplanetary cruise (the dominant body is the Sun).
+          s.transferClimbed = true;
+          // If the craft has only just slipped out of a non-target world's SOI it
+          // is still deep in that world's neighbourhood (the SOIs are large at
+          // arcade scale). Burning the Lambert intercept there is wasted — the
+          // world's gravity warps it and the craft tends to dip back in. Coast
+          // prograde until clear of every non-target world, THEN commit to the
+          // intercept burn. This is what lets the craft keep enough Δv to actually
+          // arrive at the target instead of stranding short ("ends up near Earth").
+          let nearWorld = false;
+          for (const o of this.bodies) {
+            if (o.star || o.id === tgt.id) continue;
+            if (s.position.distanceTo(o.center) < o.soiRadius * 1.6) { nearWorld = true; break; }
+          }
+          if (nearWorld) {
+            s.attitude = 'prograde';
+            s.throttle = 0;
+          } else {
           // Lambert intercept guidance. Pick an arrival time once, ask where the
           // target WILL be then (its motion is analytic), and solve Lambert's
           // problem for the heliocentric velocity that puts us there at that
@@ -669,6 +766,7 @@ export class Simulator {
             s.throttle = 1;
             s.transferArriveT = null;
           }
+          }
         }
       }
     }
@@ -702,11 +800,21 @@ export class Simulator {
     // deploy once the craft has actually been to space (reached the top of the
     // atmosphere) OR can no longer thrust (a spent suborbital hop coming down).
     const returningToLand = s.maxAltitude >= body.atmosphereHeight || !this.hasThrust();
+    // The chute's huge drag caps the descent at a slow (~10 m/s) terminal
+    // velocity. Opening it high in a thin upper atmosphere makes the craft crawl
+    // down for ages from tens of km up — the "chute opens super high, floats at
+    // 5 m/s forever" problem. So only auto-open it when it is actually effective
+    // and quick: down in the dense lower atmosphere, OR once the craft is out of
+    // thrust (a ballistic descent that has nothing else to slow it). And never
+    // open it while a powered descent is still braking with fuel — the engine
+    // lands the craft far faster, and the chute would just stall that descent.
+    const poweredDescentActive = s.landingAssist && this.hasThrust();
+    const denseAtmosphere = altitude < body.atmosphereHeight * 0.3;
     if (
       this.cfg.hasParachute && !s.deployedParachute &&
       body.atmosphereHeight > 0 &&
-      altitude < body.atmosphereHeight * 0.6 &&
-      radialVel < 0 && altitude > 0.02 && returningToLand
+      (denseAtmosphere || !this.hasThrust()) &&
+      radialVel < 0 && altitude > 0.02 && returningToLand && !poweredDescentActive
     ) {
       this.doDeployParachute();
     }
@@ -723,10 +831,11 @@ export class Simulator {
       // the ground instead of being left behind as the world moves.
       const radialUp = new THREE.Vector3().subVectors(s.position, body.center);
       if (radialUp.lengthSq() < 1e-12) radialUp.copy(up);
-      radialUp.normalize();
-      s.position.copy(body.center).addScaledVector(radialUp, body.radius + 0.001);
-      s.velocity.copy(body.velocity);
+      this.pinToSurface(body, radialUp);
       s.elapsed += dt;
+      this.positionBodies();
+      const pinned = this.pinnedBody() ?? body;
+      this.pinToSurface(pinned, radialUp);
       s.phase = this.determinePhase(body);
       if (s.phase === 'landed' && s.landedTime === null) s.landedTime = s.elapsed;
       else if (s.phase !== 'landed' && altitude > body.radius * 0.01) s.landedTime = null;
@@ -784,6 +893,9 @@ export class Simulator {
     // off it; clear it again once the craft is airborne and climbing.
     if (s.phase === 'landed' && s.landedTime === null) s.landedTime = s.elapsed;
     else if (s.phase !== 'landed' && altitude > body.radius * 0.01) s.landedTime = null;
+    if (s.landedBodyId !== null && s.phase !== 'landed' && this.altitude() > 0.2) {
+      s.landedBodyId = null;
+    }
   }
 
   /**
@@ -850,6 +962,19 @@ export class Simulator {
       case 'at-soi-entry': {
         const tgt = this.bodies.find((b) => b.id === t.targetBodyId);
         if (!tgt) return false;
+        // A return-home SOI entry (the entry target is the launch world) must not
+        // fire until the craft has actually REACHED the outbound destination. The
+        // home world's SOI is wide enough to contain its own moon and to be
+        // re-grazed by an interplanetary transfer arc, so without this the return
+        // descent fires on the launch pad, or mid-outbound-cruise when the orbit
+        // dips back through home — dragging the craft down before it ever gets to
+        // the destination. Keying off "outbound target reached" is exact and makes
+        // the legs strictly ordered: go there first, only then is coming home armed.
+        const outboundTarget = destinationTargetId(this.plan.destinationId, this.plan.launchBodyId);
+        const isReturnHome = t.targetBodyId === this.plan.launchBodyId;
+        if (isReturnHome && outboundTarget && !this.state.reachedBodyIds.has(outboundTarget)) {
+          return false;
+        }
         // Arrive when inside the authored SOI OR once the target's gravity
         // actually dominates. The hand-authored SOI radii don't track each
         // body's true dominance region (a massive world like Venus dominates
@@ -860,6 +985,7 @@ export class Simulator {
       }
       case 'after-orbit': {
         const current = this.body();
+        if (current.star) return false;
         if (current.id === t.targetBodyId) return false;
         // Wait until the arrival/relaunch autopilot has finished settling the
         // orbit. Firing the departure burn mid-capture (while still braking
@@ -881,6 +1007,9 @@ export class Simulator {
           this.minStableOrbitKm(current) * 0.6,
           current.atmosphereHeight > 0 ? current.atmosphereHeight * 0.55 : current.radius * 0.06,
         );
+        if (node.actions.depart && !(this.state.prevRadialVel < 0 && radialVel >= 0 && altitudeNow > 1)) {
+          return false;
+        }
         return altitudeNow >= this.minStableOrbitKm(current) * 0.6 &&
           Number.isFinite(apsides.apo) &&
           apsides.peri >= periFloor;
@@ -936,7 +1065,7 @@ export class Simulator {
     if (a.ascend)  { s.ascentAssist = true; s.landingAssist = false; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.transferAssist = false; s.transferTargetId = null; s.relaunchStart = s.elapsed; }
     if (a.transfer) { s.transferAssist = true; s.transferTargetId = node.trigger.targetBodyId ?? null; s.transferClimbed = false; s.transferArriveT = null; s.captureAssist = false; s.captureOrbitSign = 0; s.circularizeAssist = false; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; }
     if (a.capture) { s.captureAssist = true; s.captureTargetId = node.trigger.targetBodyId ?? null; s.captureOrbitSign = 0; s.circularizeAssist = false; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; s.transferAssist = false; s.transferTargetId = null; }
-    if (a.circularize) { s.circularizeAssist = true; s.captureAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; s.transferAssist = false; s.transferTargetId = null; s.attitude = 'prograde'; }
+    if (a.circularize && !s.transferAssist && !s.captureAssist && !s.departAssist && !s.landingAssist && !s.ascentAssist) { s.circularizeAssist = true; s.captureAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; s.transferAssist = false; s.transferTargetId = null; s.attitude = 'prograde'; }
     if (a.depart)  { s.departAssist = true; s.departFromId = this.body().id; s.departTargetId = node.trigger.targetBodyId ?? this.bodies[0]?.id ?? null; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.landingAssist = false; s.ascentAssist = false; s.transferAssist = false; s.transferTargetId = null; }
     // An explicit throttle command (e.g. a manual burn) takes manual control
     // back from the autopilots so the craft can leave orbit.
@@ -1061,31 +1190,27 @@ export class Simulator {
   // ---- forces ----
 
   private gravityAccel(pos: THREE.Vector3): THREE.Vector3 {
-    // Patched-conic gravity (the KSP model). The craft feels its governing body
-    // — the SOI it's in, or the Sun in interplanetary space — at FULL strength,
-    // and every other body only as a TIDAL term: that body's pull on the craft
-    // minus its pull on the governing body. Subtracting the common (far-field)
-    // pull is what keeps a distant heavyweight from reaching across and hijacking
-    // the craft (Jupiter stealing a transfer, Venus stealing an Earth return),
-    // while preserving clean local orbits and clean heliocentric transfers. A
-    // pure N-body sum can't do this at arcade scale: the planets' dominance
-    // regions are far too broad relative to their spacing.
+    // Strict patched-conic gravity (the KSP model): inside a body's SOI the
+    // craft feels only that body; outside every planet/moon SOI it feels only
+    // the Sun. SOI transitions, not background N-body tides, decide when another
+    // world can affect the craft. This keeps local orbits stable at game scale
+    // and prevents large planets from reaching across transfer space.
     const dom = dominantBody(this.bodies, pos);
     const acc = new THREE.Vector3();
     const domToC = new THREE.Vector3().subVectors(dom.center, pos);
     const domDist = Math.max(domToC.length(), dom.radius + 0.001);
+    acc.add(this.bodyFrameAccel(dom));
     acc.addScaledVector(domToC.normalize(), dom.GM / (domDist * domDist));
-    for (const b of this.bodies) {
-      if (b.id === dom.id) continue;
-      // Tidal term: pull on the craft minus pull on the governing body.
-      const toCraft = new THREE.Vector3().subVectors(b.center, pos);
-      const dCraft = Math.max(toCraft.length(), b.radius + 0.001);
-      acc.addScaledVector(toCraft.normalize(), b.GM / (dCraft * dCraft));
-      const toDom = new THREE.Vector3().subVectors(b.center, dom.center);
-      const dDom = Math.max(toDom.length(), b.radius + 0.001);
-      acc.addScaledVector(toDom.normalize(), -b.GM / (dDom * dDom));
-    }
     return acc;
+  }
+
+  /** Acceleration of an analytically orbiting body in the inertial scene frame. */
+  private bodyFrameAccel(body: Body): THREE.Vector3 {
+    if (!body.orbit) return new THREE.Vector3();
+    const parent = this.bodies.find((b) => b.id === body.orbit!.parentId);
+    if (!parent) return new THREE.Vector3();
+    const rel = body.center.clone().sub(parent.center);
+    return this.bodyFrameAccel(parent).addScaledVector(rel, -(body.orbit.omega * body.orbit.omega));
   }
 
   /**
@@ -1271,7 +1396,7 @@ export class Simulator {
       // Leaving relative tangential velocity causes the rocket to "slide" along
       // the surface and bounce between altitude 0 and 1 m every step while the
       // sim waits for the relative speed to fall below 1 m/s.
-      s.velocity.copy(body.velocity);
+      this.pinToSurface(body, radial);
     }
     if (s.maxAltitude >= 0.2) s.landedBodyId = body.id;
   }

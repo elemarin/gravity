@@ -67,36 +67,32 @@ type BodyDef = {
 export const SUN_ID = 'sun';
 
 /**
- * The Sun's gravitational parameter. Kept gentle on purpose: heliocentric orbital
- * speeds stay low, so a launch barely inherits sideways drift and a single flight
- * plays out against near-static planets — while the whole system still visibly
- * wheels around the Sun over time. Turning this up makes the planets orbit faster
- * and more dramatically (at the cost of harder interplanetary intercepts).
+ * The Sun's gravitational parameter. Strong enough that outer-planet Lambert
+ * transfers fit the mission clock, while still keeping local launch/orbit play
+ * governed mostly by the current body's patched conic.
  */
-export const SUN_GM = 42.0;
+export const SUN_GM = 700.0;
 
 /** Arcade-scaled heliocentric solar system. Radii are compressed for
  *  playability but surface gravities and atmosphere presence track the real
- *  worlds. Orbit radii are compressed far more aggressively than reality so the
- *  whole system stays flyable, while preserving the planets' ordering — and
- *  spaced so every world keeps a clean gravitational dominance region (the
- *  massive gas giants in particular sit far enough out that they can't reach in
- *  and steal an inner planet's orbital space). */
+ *  worlds. Orbit radii remain game-scaled, but the lanes are wide enough that
+ *  moons no longer sit nearly an inner-planet hop away and the authored SOIs do
+ *  not constantly overlap transfer space. */
 const DEFS: BodyDef[] = [
   { id: 'sun',     name: 'Sun',     radius: 220,  surfaceG: 0,    atmosphereHeight: 0,   soiRadius: 99999, color: 0xffcf57, skyDay: 0xffe9a8, star: true },
 
-  { id: 'mercury', name: 'Mercury', radius: 24.4, surfaceG: 3.70, atmosphereHeight: 0,   soiRadius: 150, color: 0x9c9088, skyDay: 0x07070b, orbitR: 640,  phase: 0.5 },
-  { id: 'venus',   name: 'Venus',   radius: 60.5, surfaceG: 8.87, atmosphereHeight: 180, soiRadius: 320, color: 0xd9b870, skyDay: 0xe8c878, orbitR: 1020, phase: 2.6 },
-  { id: 'earth',   name: 'Earth',   radius: EARTH_RADIUS, surfaceG: 9.81, atmosphereHeight: ATMOSPHERE_HEIGHT, soiRadius: 900, color: 0x2e74e8, skyDay: 0x8ec9ff, orbitR: 1500, phase: 0.0 },
-  { id: 'moon',    name: 'Moon',    radius: 17.4, surfaceG: 1.62, atmosphereHeight: 0,   soiRadius: 115, color: 0xc2c7d2, skyDay: 0x0a0a12, parent: 'earth', orbitR: 660, phase: 0.7 },
-  { id: 'mars',    name: 'Mars',    radius: 33.9, surfaceG: 3.71, atmosphereHeight: 60,  soiRadius: 340, color: 0xd06a44, skyDay: 0xe0a07a, orbitR: 2100, phase: 0.9 },
-  { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 14,  color: 0x9a8f84, skyDay: 0x07070a, parent: 'mars', orbitR: 300, phase: 1.5 },
-  { id: 'ceres',   name: 'Ceres',   radius: 13.5, surfaceG: 0.27, atmosphereHeight: 0,   soiRadius: 44,  color: 0x8d8a82, skyDay: 0x06060a, dwarf: true, orbitR: 2700, phase: 4.0 },
-  { id: 'jupiter', name: 'Jupiter', radius: 120,  surfaceG: 24.79,atmosphereHeight: 240, soiRadius: 1100,color: 0xd7b58a, skyDay: 0xc9a878, gas: true, orbitR: 4200, phase: 5.3 },
-  { id: 'saturn',  name: 'Saturn',  radius: 105,  surfaceG: 10.44,atmosphereHeight: 220, soiRadius: 1000,color: 0xe6d6a8, skyDay: 0xd8c790, gas: true, orbitR: 5600, phase: 2.0 },
-  { id: 'titan',   name: 'Titan',   radius: 25.8, surfaceG: 1.35, atmosphereHeight: 120, soiRadius: 70,  color: 0xd2a24c, skyDay: 0xc88a3a, parent: 'saturn', orbitR: 1000, phase: 0.3 },
-  { id: 'uranus',  name: 'Uranus',  radius: 72,   surfaceG: 8.69, atmosphereHeight: 200, soiRadius: 800, color: 0x9fe0e6, skyDay: 0x7fb8c4, gas: true, orbitR: 7000, phase: 3.4 },
-  { id: 'neptune', name: 'Neptune', radius: 70,   surfaceG: 11.15,atmosphereHeight: 200, soiRadius: 800, color: 0x3f63d8, skyDay: 0x2a3f9c, gas: true, orbitR: 8400, phase: 5.9 },
+  { id: 'mercury', name: 'Mercury', radius: 24.4, surfaceG: 3.70, atmosphereHeight: 0,   soiRadius: 90,  color: 0x9c9088, skyDay: 0x07070b, orbitR: 1100,  phase: 0.5 },
+  { id: 'venus',   name: 'Venus',   radius: 60.5, surfaceG: 8.87, atmosphereHeight: 180, soiRadius: 240, color: 0xd9b870, skyDay: 0xe8c878, orbitR: 2100,  phase: 2.6 },
+  { id: 'earth',   name: 'Earth',   radius: EARTH_RADIUS, surfaceG: 9.81, atmosphereHeight: ATMOSPHERE_HEIGHT, soiRadius: 720, color: 0x2e74e8, skyDay: 0x8ec9ff, orbitR: 3400, phase: 0.0 },
+  { id: 'moon',    name: 'Moon',    radius: 17.4, surfaceG: 1.62, atmosphereHeight: 0,   soiRadius: 70,  color: 0xc2c7d2, skyDay: 0x0a0a12, parent: 'earth', orbitR: 560, phase: 0.7 },
+  { id: 'mars',    name: 'Mars',    radius: 33.9, surfaceG: 3.71, atmosphereHeight: 60,  soiRadius: 240, color: 0xd06a44, skyDay: 0xe0a07a, orbitR: 4700, phase: 0.9 },
+  { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 10,  color: 0x9a8f84, skyDay: 0x07070a, parent: 'mars', orbitR: 140, phase: 1.5 },
+  { id: 'ceres',   name: 'Ceres',   radius: 13.5, surfaceG: 0.27, atmosphereHeight: 0,   soiRadius: 54,  color: 0x8d8a82, skyDay: 0x06060a, dwarf: true, orbitR: 6000, phase: 4.0 },
+  { id: 'jupiter', name: 'Jupiter', radius: 120,  surfaceG: 24.79,atmosphereHeight: 240, soiRadius: 900, color: 0xd7b58a, skyDay: 0xc9a878, gas: true, orbitR: 8200, phase: 5.3 },
+  { id: 'saturn',  name: 'Saturn',  radius: 105,  surfaceG: 10.44,atmosphereHeight: 220, soiRadius: 850, color: 0xe6d6a8, skyDay: 0xd8c790, gas: true, orbitR: 10600, phase: 2.0 },
+  { id: 'titan',   name: 'Titan',   radius: 25.8, surfaceG: 1.35, atmosphereHeight: 120, soiRadius: 65,  color: 0xd2a24c, skyDay: 0xc88a3a, parent: 'saturn', orbitR: 650, phase: 0.3 },
+  { id: 'uranus',  name: 'Uranus',  radius: 72,   surfaceG: 8.69, atmosphereHeight: 200, soiRadius: 750, color: 0x9fe0e6, skyDay: 0x7fb8c4, gas: true, orbitR: 13000, phase: 3.4 },
+  { id: 'neptune', name: 'Neptune', radius: 70,   surfaceG: 11.15,atmosphereHeight: 200, soiRadius: 750, color: 0x3f63d8, skyDay: 0x2a3f9c, gas: true, orbitR: 15400, phase: 5.9 },
 ];
 
 export const SOLAR_BODIES: Record<string, BodyDef> =
@@ -149,7 +145,7 @@ function makeBody(def: BodyDef, state: BodyState): Body {
     center: state.pos.clone(),
     velocity: state.vel.clone(),
     radius: def.radius,
-    GM: gmFromSurfaceG(def.surfaceG, def.radius),
+    GM: def.star ? SUN_GM : gmFromSurfaceG(def.surfaceG, def.radius),
     atmosphereHeight: def.atmosphereHeight,
     soiRadius: def.soiRadius,
     color: def.color,

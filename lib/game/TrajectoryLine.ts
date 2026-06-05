@@ -25,9 +25,17 @@ const MIN_APSIS_ALT = 2;
 
 export class TrajectoryLine {
   line: THREE.Line;
+  /** Soft, wide additive underlay that gives the path a neon "glow". */
+  private glow: THREE.Line;
+  private group: THREE.Group;
   private positions: Float32Array;
+  private colors: Float32Array;
+  private glowColors: Float32Array;
   private geometry: THREE.BufferGeometry;
+  private glowGeometry: THREE.BufferGeometry;
   private material: THREE.LineBasicMaterial;
+  private glowMaterial: THREE.LineBasicMaterial;
+  private baseColor = new THREE.Color(0x00e5ff);
   private apoMarker: THREE.Sprite;
   private periMarker: THREE.Sprite;
   private landingMarker: THREE.Mesh;
@@ -35,21 +43,53 @@ export class TrajectoryLine {
   private periCanvas: HTMLCanvasElement;
 
   constructor(scene: THREE.Scene) {
+    this.group = new THREE.Group();
     this.positions = new Float32Array(MAX_POINTS * 3);
+    this.colors = new Float32Array(MAX_POINTS * 3);
+    this.glowColors = new Float32Array(MAX_POINTS * 3);
+
     this.geometry  = new THREE.BufferGeometry();
     this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
     this.geometry.setDrawRange(0, 0);
 
+    // Crisp bright core line — vertex colours carry a head→tail brightness
+    // gradient so the path reads as "flowing" toward the craft instead of a flat
+    // uniform stroke.
     this.material = new THREE.LineBasicMaterial({
-      color: 0x00e5ff,
+      vertexColors: true,
       transparent: true,
-      opacity: 0.6,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
     });
 
     this.line = new THREE.Line(this.geometry, this.material);
     this.line.frustumCulled = false;
-    this.line.visible = false;
-    scene.add(this.line);
+    this.line.renderOrder = 3;
+
+    // Wide, dim additive copy underneath fakes a soft glow/bloom around the core
+    // without a full post-processing pass (keeps the casual-arcade look cheap).
+    this.glowGeometry = new THREE.BufferGeometry();
+    this.glowGeometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    this.glowGeometry.setAttribute('color', new THREE.BufferAttribute(this.glowColors, 3));
+    this.glowGeometry.setDrawRange(0, 0);
+    this.glowMaterial = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.5,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+    });
+    this.glow = new THREE.Line(this.glowGeometry, this.glowMaterial);
+    this.glow.frustumCulled = false;
+    this.glow.renderOrder = 2;
+
+    this.group.add(this.glow, this.line);
+    this.group.visible = false;
+    scene.add(this.group);
 
     const apo = this.makeMarker('AP', '#2ee59d');
     const peri = this.makeMarker('PE', '#00e5ff');
@@ -64,22 +104,39 @@ export class TrajectoryLine {
 
   update(points: THREE.Vector3[], color = 0x00e5ff, focus?: THREE.Vector3, radius = 0, showLandingSite = false) {
     const n = Math.min(points.length, MAX_POINTS);
+    this.baseColor.setHex(color);
     for (let i = 0; i < n; i++) {
       const p = points[i];
       this.positions[i * 3]     = p.x;
       this.positions[i * 3 + 1] = p.y;
       this.positions[i * 3 + 2] = p.z;
+      // Head→tail gradient: the segment nearest the craft (the path's start) is
+      // brightest and fades along its length, so the orbit line has direction and
+      // depth instead of a flat uniform stroke.
+      const t = n > 1 ? i / (n - 1) : 0;
+      const fade = 0.25 + 0.75 * (1 - t);            // 1.0 at head → 0.25 at tail
+      this.colors[i * 3]     = this.baseColor.r * fade;
+      this.colors[i * 3 + 1] = this.baseColor.g * fade;
+      this.colors[i * 3 + 2] = this.baseColor.b * fade;
+      const glowFade = fade * 0.6;
+      this.glowColors[i * 3]     = this.baseColor.r * glowFade;
+      this.glowColors[i * 3 + 1] = this.baseColor.g * glowFade;
+      this.glowColors[i * 3 + 2] = this.baseColor.b * glowFade;
     }
     this.geometry.setDrawRange(0, n);
     this.geometry.attributes.position.needsUpdate = true;
+    this.geometry.attributes.color.needsUpdate = true;
     this.geometry.computeBoundingSphere();
-    this.material.color.setHex(color);
-    this.line.visible = n > 1;
+    this.glowGeometry.setDrawRange(0, n);
+    this.glowGeometry.attributes.position.needsUpdate = true;
+    this.glowGeometry.attributes.color.needsUpdate = true;
+    this.glowGeometry.computeBoundingSphere();
+    this.group.visible = n > 1;
     this.updateMarkers(points.slice(0, n), focus, radius, showLandingSite);
   }
 
   setVisible(v: boolean) {
-    this.line.visible = v;
+    this.group.visible = v;
     this.apoMarker.visible = v && this.apoMarker.visible;
     this.periMarker.visible = v && this.periMarker.visible;
     this.landingMarker.visible = v && this.landingMarker.visible;
@@ -128,19 +185,39 @@ export class TrajectoryLine {
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    ctx.fillStyle = color;
-    ctx.strokeStyle = 'rgba(10, 23, 38, 0.9)';
-    ctx.lineWidth = 5;
+    // Soft outer glow disc so the node reads as a luminous marker, not a flat dot.
+    const glow = ctx.createRadialGradient(APSIS_DOT_X, APSIS_DOT_Y, 1, APSIS_DOT_X, APSIS_DOT_Y, 16);
+    glow.addColorStop(0, color);
+    glow.addColorStop(0.4, this.hexToRgba(color, 0.5));
+    glow.addColorStop(1, this.hexToRgba(color, 0));
+    ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(APSIS_DOT_X, APSIS_DOT_Y, 8, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.arc(APSIS_DOT_X, APSIS_DOT_Y, 16, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.font = '700 24px monospace';
+    // Crisp filled core dot with a dark rim for contrast against bright skies.
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = 'rgba(10, 23, 38, 0.9)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(APSIS_DOT_X, APSIS_DOT_Y, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Label above the dot, with a dark halo so it stays legible everywhere.
+    ctx.font = '700 22px ui-monospace, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(10, 23, 38, 0.92)';
     ctx.strokeText(label, APSIS_DOT_X, APSIS_LABEL_Y);
+    ctx.fillStyle = color;
     ctx.fillText(label, APSIS_DOT_X, APSIS_LABEL_Y);
+  }
+
+  private hexToRgba(hex: string, alpha: number): string {
+    const c = new THREE.Color(hex);
+    return `rgba(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)}, ${alpha})`;
   }
 
   private drawLandingMarker(canvas: HTMLCanvasElement) {
@@ -239,7 +316,9 @@ export class TrajectoryLine {
 
   dispose() {
     this.geometry.dispose();
+    this.glowGeometry.dispose();
     this.material.dispose();
+    this.glowMaterial.dispose();
     [this.apoMarker, this.periMarker].forEach((sprite) => {
       const mat = sprite.material as THREE.SpriteMaterial;
       mat.map?.dispose();
