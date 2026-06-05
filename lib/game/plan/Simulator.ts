@@ -1068,7 +1068,7 @@ export class Simulator {
     // radius, so a comfortably large fraction of it holds a stable orbit (well
     // inside the tidal edge). This must clear the surface + min-orbit floor for
     // small worlds whose dominance reaches only a little above the ground.
-    return Math.max(minR + 1, body.soiRadius * 0.5);
+    return Math.max(minR + 1, body.soiRadius * 0.3);
   }
 
   /**

@@ -87,8 +87,8 @@ const DEFS: BodyDef[] = [
 
   { id: 'mercury', name: 'Mercury', radius: 24.4, surfaceG: 3.70, atmosphereHeight: 0,   soiRadius: 150, color: 0x9c9088, skyDay: 0x07070b, orbitR: 640,  phase: 0.5 },
   { id: 'venus',   name: 'Venus',   radius: 60.5, surfaceG: 8.87, atmosphereHeight: 180, soiRadius: 320, color: 0xd9b870, skyDay: 0xe8c878, orbitR: 1020, phase: 2.6 },
-  { id: 'earth',   name: 'Earth',   radius: EARTH_RADIUS, surfaceG: 9.81, atmosphereHeight: ATMOSPHERE_HEIGHT, soiRadius: 720, color: 0x2e74e8, skyDay: 0x8ec9ff, orbitR: 1500, phase: 0.0 },
-  { id: 'moon',    name: 'Moon',    radius: 17.4, surfaceG: 1.62, atmosphereHeight: 0,   soiRadius: 60,  color: 0xc2c7d2, skyDay: 0x0a0a12, parent: 'earth', orbitR: 660, phase: 0.7 },
+  { id: 'earth',   name: 'Earth',   radius: EARTH_RADIUS, surfaceG: 9.81, atmosphereHeight: ATMOSPHERE_HEIGHT, soiRadius: 900, color: 0x2e74e8, skyDay: 0x8ec9ff, orbitR: 1500, phase: 0.0 },
+  { id: 'moon',    name: 'Moon',    radius: 17.4, surfaceG: 1.62, atmosphereHeight: 0,   soiRadius: 115, color: 0xc2c7d2, skyDay: 0x0a0a12, parent: 'earth', orbitR: 660, phase: 0.7 },
   { id: 'mars',    name: 'Mars',    radius: 33.9, surfaceG: 3.71, atmosphereHeight: 60,  soiRadius: 340, color: 0xd06a44, skyDay: 0xe0a07a, orbitR: 2100, phase: 0.9 },
   { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 14,  color: 0x9a8f84, skyDay: 0x07070a, parent: 'mars', orbitR: 300, phase: 1.5 },
   { id: 'ceres',   name: 'Ceres',   radius: 13.5, surfaceG: 0.27, atmosphereHeight: 0,   soiRadius: 44,  color: 0x8d8a82, skyDay: 0x06060a, dwarf: true, orbitR: 2700, phase: 4.0 },
