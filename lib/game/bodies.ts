@@ -1,15 +1,24 @@
 import * as THREE from 'three';
-import { EARTH_CENTER, EARTH_RADIUS, ATMOSPHERE_HEIGHT } from './constants';
+import { EARTH_RADIUS, ATMOSPHERE_HEIGHT } from './constants';
 
 /**
- * A celestial body the flight is calculated against. Bodies are static within
- * a flight (they do not orbit each other) which keeps the simulation
- * deterministic — the same plan always plays out identically.
+ * A celestial body the flight is calculated against.
+ *
+ * The world is a heliocentric solar system: the Sun sits fixed at the origin and
+ * every planet rides a slow circular orbit in the x-y plane; moons orbit their
+ * parent planet (which in turn orbits the Sun). All of this motion is *analytic*
+ * — a pure function of sim time via {@link bodyStateAt} — so the simulation stays
+ * deterministic and replayable: the same plan always plays out identically.
+ *
+ * A `Body` is a snapshot of a definition at one instant: `center` and `velocity`
+ * are where the body is (and how fast it is moving) at the evaluation time. The
+ * Simulator re-evaluates these every step from its own clock.
  */
 export type Body = {
   id: string;
   name: string;
-  center: THREE.Vector3;
+  center: THREE.Vector3;     // heliocentric position at the evaluation time
+  velocity: THREE.Vector3;   // heliocentric velocity at the evaluation time
   radius: number;            // surface radius (THREE units ≈ km, arcade-scaled)
   GM: number;                // gravitational parameter (km³/s²)
   atmosphereHeight: number;  // units above surface where drag fades to 0 (0 = airless)
@@ -21,6 +30,18 @@ export type Body = {
   gravityScale: number;
   /** True for gas giants (no hard surface, decorative banding). */
   gas?: boolean;
+  /** True for the Sun — a luminous star at the centre of the system. */
+  star?: boolean;
+  /** Orbital parameters (null/undefined for the fixed central Sun). */
+  orbit?: BodyOrbit;
+};
+
+/** A body's circular orbit around its parent (the Sun, or a host planet). */
+export type BodyOrbit = {
+  parentId: string;  // body this one orbits ('sun' for planets)
+  radius: number;    // orbital radius (THREE units)
+  phase: number;     // initial true anomaly (radians) at t=0
+  omega: number;     // angular speed (rad/s), keyed to the parent's GM
 };
 
 /** Surface gravity (m/s²) → GM, matching the calibration in constants.ts. */
@@ -32,55 +53,51 @@ type BodyDef = {
   id: string; name: string; radius: number; surfaceG: number;
   atmosphereHeight: number; soiRadius: number; color: number; skyDay: number;
   gas?: boolean;
-  /**
-   * Distance multiplier applied when this body is the transfer destination.
-   * Higher = placed proportionally farther from the launch world, so the
-   * outbound + capture burns cost more delta-v. Defaults to 1; the farther
-   * a body sits in the real solar system, the higher its reach — this is the
-   * knob that makes "reach further → need a bigger rocket" actually bite.
-   */
-  reach?: number;
+  star?: boolean;
+  /** Heliocentric orbit radius (planets) or orbit radius around `parent` (moons). */
+  orbitR?: number;
+  /** Initial orbital angle (radians) at t=0. */
+  phase?: number;
+  /** Parent body this one orbits; omitted = orbits the Sun (or is the Sun). */
+  parent?: string;
   /** True for icy/rocky dwarf worlds (decorative; used for sky/landing rules). */
   dwarf?: boolean;
 };
 
-/** Arcade-scaled solar system. Radii are compressed for playability but
- *  surface gravities and atmosphere presence track the real worlds. */
+export const SUN_ID = 'sun';
+
+/**
+ * The Sun's gravitational parameter. Kept gentle on purpose: heliocentric orbital
+ * speeds stay low, so a launch barely inherits sideways drift and a single flight
+ * plays out against near-static planets — while the whole system still visibly
+ * wheels around the Sun over time. Turning this up makes the planets orbit faster
+ * and more dramatically (at the cost of harder interplanetary intercepts).
+ */
+export const SUN_GM = 42.0;
+
+/** Arcade-scaled heliocentric solar system. Radii are compressed for
+ *  playability but surface gravities and atmosphere presence track the real
+ *  worlds. Orbit radii are compressed far more aggressively than reality so the
+ *  whole system stays flyable, while preserving the planets' ordering — and
+ *  spaced so every world keeps a clean gravitational dominance region (the
+ *  massive gas giants in particular sit far enough out that they can't reach in
+ *  and steal an inner planet's orbital space). */
 const DEFS: BodyDef[] = [
-  { id: 'mercury', name: 'Mercury', radius: 24.4, surfaceG: 3.70, atmosphereHeight: 0,   soiRadius: 70,  color: 0x9c9088, skyDay: 0x07070b },
-  { id: 'venus',   name: 'Venus',   radius: 60.5, surfaceG: 8.87, atmosphereHeight: 180, soiRadius: 200, color: 0xd9b870, skyDay: 0xe8c878, gas: false },
-  { id: 'earth',   name: 'Earth',   radius: EARTH_RADIUS, surfaceG: 9.81, atmosphereHeight: ATMOSPHERE_HEIGHT, soiRadius: 1600, color: 0x2e74e8, skyDay: 0x8ec9ff },
-  { id: 'moon',    name: 'Moon',    radius: 17.4, surfaceG: 1.62, atmosphereHeight: 0,   soiRadius: 120, color: 0xc2c7d2, skyDay: 0x0a0a12 },
-  { id: 'mars',    name: 'Mars',    radius: 33.9, surfaceG: 3.71, atmosphereHeight: 60,  soiRadius: 400, color: 0xd06a44, skyDay: 0xe0a07a },
-  { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 30,  color: 0x9a8f84, skyDay: 0x07070a, reach: 1.35 },
-  { id: 'ceres',   name: 'Ceres',   radius: 13.5, surfaceG: 0.27, atmosphereHeight: 0,   soiRadius: 55,  color: 0x8d8a82, skyDay: 0x06060a, dwarf: true, reach: 1.55 },
-  { id: 'jupiter', name: 'Jupiter', radius: 120,  surfaceG: 24.79,atmosphereHeight: 240, soiRadius: 1400,color: 0xd7b58a, skyDay: 0xc9a878, gas: true },
-  { id: 'saturn',  name: 'Saturn',  radius: 105,  surfaceG: 10.44,atmosphereHeight: 220, soiRadius: 1200,color: 0xe6d6a8, skyDay: 0xd8c790, gas: true },
-  { id: 'titan',   name: 'Titan',   radius: 25.8, surfaceG: 1.35, atmosphereHeight: 120, soiRadius: 110, color: 0xd2a24c, skyDay: 0xc88a3a, reach: 1.85 },
-  { id: 'uranus',  name: 'Uranus',  radius: 72,   surfaceG: 8.69, atmosphereHeight: 200, soiRadius: 900, color: 0x9fe0e6, skyDay: 0x7fb8c4, gas: true, reach: 2.1 },
-  { id: 'neptune', name: 'Neptune', radius: 70,   surfaceG: 11.15,atmosphereHeight: 200, soiRadius: 850, color: 0x3f63d8, skyDay: 0x2a3f9c, gas: true, reach: 2.4 },
+  { id: 'sun',     name: 'Sun',     radius: 220,  surfaceG: 0,    atmosphereHeight: 0,   soiRadius: 99999, color: 0xffcf57, skyDay: 0xffe9a8, star: true },
+
+  { id: 'mercury', name: 'Mercury', radius: 24.4, surfaceG: 3.70, atmosphereHeight: 0,   soiRadius: 70,  color: 0x9c9088, skyDay: 0x07070b, orbitR: 640,  phase: 0.5 },
+  { id: 'venus',   name: 'Venus',   radius: 60.5, surfaceG: 8.87, atmosphereHeight: 180, soiRadius: 200, color: 0xd9b870, skyDay: 0xe8c878, orbitR: 1020, phase: 2.6 },
+  { id: 'earth',   name: 'Earth',   radius: EARTH_RADIUS, surfaceG: 9.81, atmosphereHeight: ATMOSPHERE_HEIGHT, soiRadius: 760, color: 0x2e74e8, skyDay: 0x8ec9ff, orbitR: 1500, phase: 0.0 },
+  { id: 'moon',    name: 'Moon',    radius: 17.4, surfaceG: 1.62, atmosphereHeight: 0,   soiRadius: 120, color: 0xc2c7d2, skyDay: 0x0a0a12, parent: 'earth', orbitR: 660, phase: 0.7 },
+  { id: 'mars',    name: 'Mars',    radius: 33.9, surfaceG: 3.71, atmosphereHeight: 60,  soiRadius: 320, color: 0xd06a44, skyDay: 0xe0a07a, orbitR: 2100, phase: 0.9 },
+  { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 30,  color: 0x9a8f84, skyDay: 0x07070a, parent: 'mars', orbitR: 130, phase: 1.5 },
+  { id: 'ceres',   name: 'Ceres',   radius: 13.5, surfaceG: 0.27, atmosphereHeight: 0,   soiRadius: 55,  color: 0x8d8a82, skyDay: 0x06060a, dwarf: true, orbitR: 2700, phase: 4.0 },
+  { id: 'jupiter', name: 'Jupiter', radius: 120,  surfaceG: 24.79,atmosphereHeight: 240, soiRadius: 900, color: 0xd7b58a, skyDay: 0xc9a878, gas: true, orbitR: 4200, phase: 5.3 },
+  { id: 'saturn',  name: 'Saturn',  radius: 105,  surfaceG: 10.44,atmosphereHeight: 220, soiRadius: 760, color: 0xe6d6a8, skyDay: 0xd8c790, gas: true, orbitR: 5600, phase: 2.0 },
+  { id: 'titan',   name: 'Titan',   radius: 25.8, surfaceG: 1.35, atmosphereHeight: 120, soiRadius: 110, color: 0xd2a24c, skyDay: 0xc88a3a, parent: 'saturn', orbitR: 360, phase: 0.3 },
+  { id: 'uranus',  name: 'Uranus',  radius: 72,   surfaceG: 8.69, atmosphereHeight: 200, soiRadius: 520, color: 0x9fe0e6, skyDay: 0x7fb8c4, gas: true, orbitR: 7000, phase: 3.4 },
+  { id: 'neptune', name: 'Neptune', radius: 70,   surfaceG: 11.15,atmosphereHeight: 200, soiRadius: 500, color: 0x3f63d8, skyDay: 0x2a3f9c, gas: true, orbitR: 8400, phase: 5.9 },
 ];
-
-function makeBody(def: BodyDef, center: THREE.Vector3): Body {
-  return {
-    id: def.id,
-    name: def.name,
-    center: center.clone(),
-    radius: def.radius,
-    GM: gmFromSurfaceG(def.surfaceG, def.radius),
-    atmosphereHeight: def.atmosphereHeight,
-    soiRadius: def.soiRadius,
-    color: def.color,
-    skyDay: def.skyDay,
-    gravityScale: def.surfaceG / 9.81,
-    gas: def.gas,
-  };
-}
-
-/** Placement reach multiplier for a destination body (1 = baseline). */
-function bodyReach(id: string): number {
-  return SOLAR_BODIES[id]?.reach ?? 1;
-}
 
 export const SOLAR_BODIES: Record<string, BodyDef> =
   Object.fromEntries(DEFS.map((d) => [d.id, d]));
@@ -89,33 +106,104 @@ export function bodyDef(id: string): BodyDef {
   return SOLAR_BODIES[id] ?? SOLAR_BODIES.earth;
 }
 
-/** Canonical Earth body (launch surface at world origin, centre below). */
-export const EARTH_BODY: Body = makeBody(SOLAR_BODIES.earth, EARTH_CENTER);
+/** Central GM a body orbits about: the Sun for planets, the host planet for moons. */
+function centralGM(parentId: string): number {
+  if (parentId === SUN_ID) return SUN_GM;
+  const p = bodyDef(parentId);
+  return gmFromSurfaceG(p.surfaceG, p.radius);
+}
+
+/** Angular speed of a circular orbit at `radius` about a body of parameter `mu`. */
+function orbitOmega(mu: number, radius: number): number {
+  return radius > 0 ? Math.sqrt(mu / (radius * radius * radius)) : 0;
+}
+
+export type BodyState = { pos: THREE.Vector3; vel: THREE.Vector3 };
 
 /**
- * Build the body list for a flight: the launch body is centred so its surface
- * sits at the world origin (+y is "up"), and an optional destination body is
- * placed off to the side at a reachable distance so the transfer is flyable.
+ * Heliocentric position + velocity of a body at sim time `t` (seconds). The Sun
+ * is fixed at the origin; planets ride circular orbits about it; moons ride
+ * circular orbits about their (also-moving) parent. Everything stays in the x-y
+ * plane, where the whole flight is computed.
  */
-export function buildFlightBodies(launchId: string, destId: string | null): Body[] {
-  const launchDef = bodyDef(launchId);
-  const launchCenter = new THREE.Vector3(0, -launchDef.radius, 0);
-  const launch = makeBody(launchDef, launchCenter);
-  if (!destId || destId === launchId) return [launch];
+export function bodyStateAt(id: string, t: number): BodyState {
+  const def = bodyDef(id);
+  if (id === SUN_ID || def.orbitR === undefined) {
+    return { pos: new THREE.Vector3(0, 0, 0), vel: new THREE.Vector3(0, 0, 0) };
+  }
+  const parentId = def.parent ?? SUN_ID;
+  const parent = bodyStateAt(parentId, t);
+  const r = def.orbitR;
+  const omega = orbitOmega(centralGM(parentId), r);
+  const theta = (def.phase ?? 0) + omega * t;
+  const cos = Math.cos(theta), sin = Math.sin(theta);
+  const pos = parent.pos.clone().add(new THREE.Vector3(r * cos, r * sin, 0));
+  const vel = parent.vel.clone().add(new THREE.Vector3(-r * omega * sin, r * omega * cos, 0));
+  return { pos, vel };
+}
 
-  const destDef = bodyDef(destId);
-  // Place the destination up-and-out, scaled by both radii so larger worlds
-  // sit proportionally farther away but always within camera range. The
-  // destination must also sit clear of its OWN sphere of influence — a big
-  // body like Jupiter has an SOI wide enough to otherwise swallow the launch
-  // pad, firing the arrival capture at t=0 and hijacking the ascent.
-  const gap = Math.max(
-    (launchDef.radius + destDef.radius) * 5 + 380,
-    destDef.soiRadius * 1.3 + launchDef.radius,
-  ) * bodyReach(destId);
-  const destCenter = launchCenter.clone().add(new THREE.Vector3(gap * 0.82, gap * 0.57, 0));
-  const dest = makeBody(destDef, destCenter);
-  return [launch, dest];
+function makeBody(def: BodyDef, state: BodyState): Body {
+  const body: Body = {
+    id: def.id,
+    name: def.name,
+    center: state.pos.clone(),
+    velocity: state.vel.clone(),
+    radius: def.radius,
+    GM: gmFromSurfaceG(def.surfaceG, def.radius),
+    atmosphereHeight: def.atmosphereHeight,
+    soiRadius: def.soiRadius,
+    color: def.color,
+    skyDay: def.skyDay,
+    gravityScale: def.surfaceG / 9.81,
+    gas: def.gas,
+    star: def.star,
+  };
+  if (def.orbitR !== undefined && def.id !== SUN_ID) {
+    const parentId = def.parent ?? SUN_ID;
+    body.orbit = {
+      parentId,
+      radius: def.orbitR,
+      phase: def.phase ?? 0,
+      omega: orbitOmega(centralGM(parentId), def.orbitR),
+    };
+  }
+  return body;
+}
+
+/** Ids of every body in the system, Sun first. */
+export const SYSTEM_BODY_IDS: string[] = DEFS.map((d) => d.id);
+
+/** Build the full live solar system evaluated at sim time `t`. */
+export function buildSystem(t = 0): Body[] {
+  return DEFS.map((d) => makeBody(d, bodyStateAt(d.id, t)));
+}
+
+/** Reposition an existing body array in place to sim time `t` (no allocations of Body objects). */
+export function positionBodiesAt(bodies: Body[], t: number): void {
+  for (const b of bodies) {
+    const s = bodyStateAt(b.id, t);
+    b.center.copy(s.pos);
+    b.velocity.copy(s.vel);
+  }
+}
+
+/** Canonical Earth body (snapshot at t=0). */
+export const EARTH_BODY: Body = makeBody(SOLAR_BODIES.earth, bodyStateAt('earth', 0));
+
+/**
+ * Build the body list for a flight. Unlike the old two-body model, every flight
+ * now runs against the *entire* solar system. The list is ordered launch-body
+ * first, then the transfer target (if any), then the rest — preserving the
+ * `[0] = launch`, `[1] = target` contract a few callers rely on.
+ */
+export function buildFlightBodies(launchId: string, destId: string | null, t = 0): Body[] {
+  const system = buildSystem(t);
+  const order = (b: Body): number => {
+    if (b.id === launchId) return 0;
+    if (destId && b.id === destId) return 1;
+    return 2;
+  };
+  return system.sort((a, b) => order(a) - order(b));
 }
 
 // ── Destinations (what the plan targets) ──────────────────────────────────
@@ -134,7 +222,7 @@ export const DESTINATIONS: Destination[] = [
   { id: 'mercury', name: 'Mercury', targetId: 'mercury', objective: 'Cross to scorched, airless Mercury.' },
   { id: 'venus',   name: 'Venus',   targetId: 'venus',   objective: 'Brave the thick skies of Venus.' },
   { id: 'mars',    name: 'Mars',    targetId: 'mars',    objective: 'Transfer to Mars — the red planet awaits.' },
-  { id: 'phobos',  name: 'Phobos',  targetId: 'phobos',  objective: 'Rendezvous with Phobos — a tiny, low-gravity moon far out by Mars.' },
+  { id: 'phobos',  name: 'Phobos',  targetId: 'phobos',  objective: 'Rendezvous with Phobos — a tiny, low-gravity moon of Mars.' },
   { id: 'ceres',   name: 'Ceres',   targetId: 'ceres',   objective: 'Reach Ceres, the dwarf world in the asteroid belt.' },
   { id: 'jupiter', name: 'Jupiter', targetId: 'jupiter', objective: 'Orbit the king of planets — a gas giant, no surface to land on.' },
   { id: 'saturn',  name: 'Saturn',  targetId: 'saturn',  objective: 'Orbit the ringed giant — a gas world with no surface.' },
@@ -147,9 +235,10 @@ export function getDestination(id: string): Destination {
   return DESTINATIONS.find((d) => d.id === id) ?? DESTINATIONS[0];
 }
 
-/** A solid world can be landed on; gas giants can only be orbited. */
+/** A solid world can be landed on; gas giants and the Sun can only be orbited. */
 export function isLandable(bodyId: string): boolean {
-  return !bodyDef(bodyId).gas;
+  const def = bodyDef(bodyId);
+  return !def.gas && !def.star;
 }
 
 /** Returns the transfer target, or null when the destination is the launch body itself. */
@@ -191,6 +280,5 @@ export function dominantBody(bodies: Body[], position: THREE.Vector3): Body {
   return best;
 }
 
-/** Backwards-compatible Moon export (used by a few legacy references). */
-export const MOON_BODY: Body = makeBody(SOLAR_BODIES.moon,
-  new THREE.Vector3(620, EARTH_CENTER.y + 430, 0));
+/** Backwards-compatible Moon export (snapshot at t=0). */
+export const MOON_BODY: Body = makeBody(SOLAR_BODIES.moon, bodyStateAt('moon', 0));

@@ -41,6 +41,9 @@ export type ManeuverActions = {
   descend?: boolean;
   /** Engage the powered-ascent autopilot to climb from a surface into orbit. */
   ascend?: boolean;
+  /** Engage the transfer autopilot — climb out of the launch world's well and
+   *  home in on a (moving) target body until its gravity takes over. */
+  transfer?: boolean;
   /** Engage the capture autopilot — brake toward a circular orbit at arrival. */
   capture?: boolean;
   /** Engage the circularize autopilot — close the current arc into a circular orbit. */
@@ -153,6 +156,7 @@ export function describeActions(a: ManeuverActions): string {
   const parts: string[] = [];
   if (a.descend)                parts.push('descend');
   if (a.ascend)                 parts.push('ascend');
+  if (a.transfer)               parts.push('transfer');
   if (a.capture)                parts.push('capture');
   if (a.circularize)            parts.push('circularize');
   if (a.depart)                 parts.push('depart home');

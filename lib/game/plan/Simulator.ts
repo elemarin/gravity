@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Body, dominantBody } from '../bodies';
+import { Body, dominantBody, positionBodiesAt } from '../bodies';
 import { FlightPlan, Maneuver, Attitude } from './FlightPlan';
 import { StageStats } from '../BuildSpec';
 
@@ -32,6 +32,8 @@ export type SimConfig = {
   /** Mass (t) shed from the payload when the station is deployed. */
   stationMass: number;
   startPosition: THREE.Vector3;
+  /** Heliocentric velocity inherited from the launch body at t=0 (orbital motion). */
+  startVelocity?: THREE.Vector3;
 };
 
 /** Mutable physics state — pure data, no THREE meshes. */
@@ -55,6 +57,9 @@ export type SimState = {
   circularizeAssist: boolean; // ascent circularization autopilot engaged
   captureTargetId: string | null; // body the capture autopilot brakes relative to
   captureOrbitSign: -1 | 0 | 1; // direction chosen for destination orbit insertion
+  transferAssist: boolean;  // homing-transfer autopilot engaged (cruise to a target)
+  transferTargetId: string | null; // body the transfer autopilot is homing toward
+  transferClimbed: boolean; // apoapsis has reached the target's lane — stop raising, coast
   deorbitAssist: boolean;   // de-orbit autopilot engaged (lower periapsis then land)
   departAssist: boolean;    // departure autopilot engaged (burn until escaping home-ward)
   departFromId: string | null; // body being escaped during a departure burn
@@ -87,22 +92,58 @@ export class Simulator {
   state: SimState;
   private cfg: SimConfig;
   private plan: FlightPlan;
+  /**
+   * The live solar system at the current sim time. The bodies orbit, so this is
+   * re-evaluated from `state.elapsed` every step. It's a private working copy
+   * (cloned from the config) so multiple simulators — the live flight and the
+   * forward-running preview sandboxes — never fight over one shared array.
+   */
+  private bodies: Body[];
 
   constructor(cfg: SimConfig, plan: FlightPlan) {
     this.cfg = cfg;
     this.plan = plan;
+    this.bodies = this.cloneBodies();
     this.state = this.freshState();
+    this.positionBodies();
   }
 
   setPlan(plan: FlightPlan) { this.plan = plan; }
-  setConfig(cfg: SimConfig) { this.cfg = cfg; }
+  setConfig(cfg: SimConfig) {
+    this.cfg = cfg;
+    this.bodies = this.cloneBodies();
+    this.positionBodies();
+  }
 
-  reset() { this.state = this.freshState(); }
+  reset() {
+    this.state = this.freshState();
+    this.positionBodies();
+  }
+
+  private cloneBodies(): Body[] {
+    return this.cfg.bodies.map((b) => ({
+      ...b,
+      center: b.center.clone(),
+      velocity: b.velocity.clone(),
+    }));
+  }
+
+  /** Re-evaluate every body's position + velocity at the current sim time. */
+  private positionBodies() {
+    positionBodiesAt(this.bodies, this.state?.elapsed ?? 0);
+  }
+
+  /** Velocity of the craft relative to a (moving) body. */
+  private relVel(body: Body): THREE.Vector3 {
+    return this.state.velocity.clone().sub(body.velocity);
+  }
 
   private freshState(): SimState {
     return {
       position: this.cfg.startPosition.clone(),
-      velocity: new THREE.Vector3(),
+      // Inherit the launch body's orbital motion so the craft rides along with
+      // its world instead of being instantly left behind by a moving planet.
+      velocity: this.cfg.startVelocity?.clone() ?? new THREE.Vector3(),
       angle: this.plan.launch.heading,
       attitude: 'manual',
       throttle: 0,
@@ -120,6 +161,9 @@ export class Simulator {
       circularizeAssist: false,
       captureTargetId: null,
       captureOrbitSign: 0,
+      transferAssist: false,
+      transferTargetId: null,
+      transferClimbed: false,
       deorbitAssist: false,
       departAssist: false,
       departFromId: null,
@@ -170,7 +214,10 @@ export class Simulator {
     return !!st && st.thrust > 0 && (this.state.stageFuel[this.state.activeStage] ?? 0) > 0.001;
   }
 
-  body(): Body { return dominantBody(this.cfg.bodies, this.state.position); }
+  body(): Body { return dominantBody(this.bodies, this.state.position); }
+
+  /** The live solar system at the current sim time (read-only view). */
+  liveBodies(): Body[] { return this.bodies; }
 
   altitude(): number {
     const b = this.body();
@@ -189,10 +236,14 @@ export class Simulator {
     // relaunch (return trip) can lift the craft off again.
     if (s.phase === 'destroyed') return;
 
+    // Advance the orbiting solar system to this step's time before anything reads
+    // a body position. (elapsed is bumped at the end of the step.)
+    this.positionBodies();
+
     const body = this.body();
     const up = new THREE.Vector3().subVectors(s.position, body.center).normalize();
     const altitude = Math.max(0, s.position.distanceTo(body.center) - body.radius);
-    const radialVel = up.dot(s.velocity);
+    const radialVel = up.dot(this.relVel(body));
 
     // --- Launch ignition (first armed step) ---
     if (s.phase === 'prelaunch') {
@@ -293,14 +344,16 @@ export class Simulator {
     // so a powerful engine brakes itself instead of accelerating past escape.
     if (s.circularizeAssist) {
       const east = this.eastDir(up);
+      const bodyVel = this.relVel(body);
       const rNow = Math.max(s.position.distanceTo(body.center), body.radius + 0.001);
       const vCirc = Math.sqrt(body.GM / rNow);
-      const tangential = s.velocity.dot(east);
+      const tangential = bodyVel.dot(east);
       const sign = tangential < 0 ? -1 : 1;
       // Target a purely tangential, circular-speed velocity (zero radial) at the
-      // current radius. Holding altitude here keeps the apoapsis we coasted to.
+      // current radius, measured relative to the (moving) body. Holding altitude
+      // here keeps the apoapsis we coasted to.
       const desiredVel = east.clone().multiplyScalar(vCirc * sign);
-      const correction = desiredVel.sub(s.velocity);
+      const correction = desiredVel.sub(bodyVel);
       const tol = Math.max(0.004, vCirc * 0.02);
       if (correction.length() <= tol) {
         s.throttle = 0;
@@ -322,13 +375,14 @@ export class Simulator {
     // capped to a safe fraction of the SOI (the requested altitude can be higher
     // than the SOI can actually hold).
     if (s.captureAssist) {
-      const tgt = this.cfg.bodies.find((b) => b.id === s.captureTargetId) ?? body;
+      const tgt = this.bodies.find((b) => b.id === s.captureTargetId) ?? body;
       const rel = new THREE.Vector3().subVectors(s.position, tgt.center);
+      const tgtVel = this.relVel(tgt);
       const rNow = Math.max(rel.length(), tgt.radius + 0.001);
       const tgtUp = rel.clone().normalize();
       const tgtEast = this.eastDir(tgtUp);
-      const radialVel = s.velocity.dot(tgtUp);
-      const tangentialVel = s.velocity.dot(tgtEast);
+      const radialVel = tgtVel.dot(tgtUp);
+      const tangentialVel = tgtVel.dot(tgtEast);
       const vCirc = Math.sqrt(tgt.GM / rNow);
       if (s.captureOrbitSign === 0) {
         s.captureOrbitSign = tangentialVel < 0 ? -1 : 1;
@@ -389,7 +443,7 @@ export class Simulator {
           // INTO orbit — it brakes its own descent and sheds excess speed rather
           // than over-burning past escape.
           const desiredVel = tgtEast.clone().multiplyScalar(vCirc * sign);
-          const correction = desiredVel.sub(s.velocity);
+          const correction = desiredVel.sub(tgtVel);
           if (correction.lengthSq() > 1e-10) this.aimToward(correction, tgtUp);
           s.throttle = correction.length() > Math.max(0.003, vCirc * 0.03) ? 1 : 0;
         }
@@ -406,7 +460,7 @@ export class Simulator {
     //     conic into its atmosphere/surface. A plain prograde escape can point
     //     away from home and waste the entire return stage.
     if (s.departAssist) {
-      const target = this.cfg.bodies.find((b) => b.id === s.departTargetId) ?? this.cfg.bodies[0];
+      const target = this.bodies.find((b) => b.id === s.departTargetId) ?? this.bodies[0];
       if (body.id !== target.id) {
         // Raise apoapsis just past the SOI, then coast out under the target's
         // pull. Burning all the way to escape velocity flings the craft into a
@@ -431,18 +485,94 @@ export class Simulator {
       }
     }
 
+    // --- Transfer autopilot (homing cruise to a moving target) ---
+    // Replaces the old open-loop "burn at a transfer window, coast to a fixed
+    // apoapsis" — which can't hit a target that is itself orbiting. Instead it
+    // (1) climbs prograde out of the launch world's gravity well, then (2) homes
+    // on the target's *led* position like a guided cruise, easing its closing
+    // speed down as it nears so the arrival capture is cheap. The target's own
+    // gravity taking over (or the at-soi-entry node) hands off to the capture /
+    // descent autopilot.
+    if (s.transferAssist && !s.circularizeAssist) {
+      const tgt = this.bodies.find((b) => b.id === s.transferTargetId);
+      if (!tgt) {
+        s.transferAssist = false;
+      } else if (body.id === tgt.id) {
+        // The target now dominates — capture/descent takes it from here.
+        s.transferAssist = false;
+        s.transferTargetId = null;
+      } else {
+        const toTgt = new THREE.Vector3().subVectors(tgt.center, s.position);
+        const dist = toTgt.length();
+        const ap = this.apsides(body);
+        const apoR = Number.isFinite(ap.apo) ? ap.apo + body.radius : Infinity;
+        const periR = s.periapsis + body.radius;
+        // Distance from the body we're climbing out of to the target — i.e. how
+        // far the apoapsis must reach to get up to the target's orbital lane.
+        const laneR = tgt.center.distanceTo(body.center);
+        const moonLike = !!tgt.orbit && tgt.orbit.parentId === body.id;
+        if (moonLike) {
+          // The target orbits the very body we're parked around (a moon). Fly a
+          // phased Hohmann: WAIT in the parking orbit until the geometry is right,
+          // then raise apoapsis to the moon's lane so the craft arrives at apoapsis
+          // exactly when the moon is there — a gentle, single-burn rendezvous (the
+          // craft is slow at apoapsis, so the relative speed is small and capture
+          // is cheap). `transferClimbed` latches once the window opens so the burn
+          // isn't abandoned mid-climb.
+          if (!s.transferClimbed) {
+            if (this.transferWindowOpen(body, tgt)) s.transferClimbed = true;
+          }
+          if (!s.transferClimbed) {
+            s.attitude = 'prograde';
+            s.throttle = 0;                 // hold the parking orbit, await window
+          } else if (apoR < laneR * 0.985) {
+            // Raise apoapsis to the lane, tapering throttle to zero as it nears so
+            // even a very powerful engine eases up instead of blasting past into
+            // an escape (the "shoots into space" failure).
+            s.attitude = 'prograde';
+            s.throttle = THREE.MathUtils.clamp((laneR - apoR) / (laneR * 0.12), 0, 1);
+          } else {
+            s.attitude = 'prograde';
+            s.throttle = 0;                 // coast to apoapsis; capture grabs there
+          }
+        } else if (body.star || apoR >= laneR * 0.985) {
+          // Interplanetary cruise (the Sun dominates, or we've climbed out of the
+          // launch world): home on the target by pure pursuit — drive the craft's
+          // velocity *relative to the target* straight at it so the range closes
+          // (constant bearing, decreasing range). Closing speed scales with range
+          // so it eases down near arrival, leaving capture a cheap orbit to grab.
+          const tgtRel = this.relVel(tgt);
+          const cruise = THREE.MathUtils.clamp(dist * 0.03, Math.max(0.08, tgt.soiRadius * 0.004), 1.2);
+          const desiredVel = toTgt.clone().normalize().multiplyScalar(cruise);
+          const correction = desiredVel.sub(tgtRel);
+          if (correction.lengthSq() > 1e-10) this.aimToward(correction, up);
+          s.throttle = correction.length() > Math.max(0.02, cruise * 0.18) ? 1 : 0;
+        } else {
+          // Climb out of the launch world's well toward the target's lane.
+          s.attitude = 'prograde';
+          s.throttle = THREE.MathUtils.clamp((laneR - apoR) / (laneR * 0.12), 0, 1);
+        }
+      }
+    }
+
     // --- Automatic attitude hold (prograde / retrograde) ---
     // Convert the desired thrust direction into the up/east aim angle so the
     // existing thrust + mesh code "just works". Everything stays in the x-y
     // plane, where the planets live.
-    if (s.attitude !== 'manual' && s.velocity.lengthSq() > 1e-8) {
+    if (s.attitude !== 'manual') {
+      // Prograde/retrograde are defined against motion *relative to the body we're
+      // flying around*, so a retrograde brake actually kills orbital speed about a
+      // moving planet instead of chasing its heliocentric motion.
+      const bodyVel = this.relVel(body);
+      if (bodyVel.lengthSq() > 1e-8) {
       const east = this.eastDir(up);
       const dir = (s.attitude === 'retrograde'
-        ? s.velocity.clone().negate()
-        : s.velocity.clone()).normalize();
+        ? bodyVel.clone().negate()
+        : bodyVel.clone()).normalize();
       const cosA = THREE.MathUtils.clamp(dir.dot(up), -1, 1);
       const sinA = dir.dot(east);
       s.angle = THREE.MathUtils.radToDeg(Math.atan2(sinA, cosA));
+      }
     }
 
     // --- Auto-deploying parachute ---
@@ -470,7 +600,14 @@ export class Simulator {
     // Triggers and autopilots have already been checked above, so a relaunch
     // (ascentAssist) or ignition (throttle > 0) lets the step proceed normally.
     if (s.landedBodyId !== null && altitude < 0.05 && s.throttle < 0.01 && !s.ascentAssist) {
-      s.velocity.set(0, 0, 0);
+      // Ride along with the (orbiting) body: re-pin to the surface beneath the
+      // current body centre and match its velocity, so the craft stays planted on
+      // the ground instead of being left behind as the world moves.
+      const radialUp = new THREE.Vector3().subVectors(s.position, body.center);
+      if (radialUp.lengthSq() < 1e-12) radialUp.copy(up);
+      radialUp.normalize();
+      s.position.copy(body.center).addScaledVector(radialUp, body.radius + 0.001);
+      s.velocity.copy(body.velocity);
       s.elapsed += dt;
       s.phase = this.determinePhase(body);
       if (s.phase === 'landed' && s.landedTime === null) s.landedTime = s.elapsed;
@@ -539,11 +676,12 @@ export class Simulator {
   private apsides(body: Body): { apo: number; peri: number } {
     const s = this.state;
     const rel = new THREE.Vector3().subVectors(s.position, body.center);
+    const relVel = this.relVel(body);
     const r = rel.length();
-    const v = s.velocity.length();
+    const v = relVel.length();
     if (r < 1e-6) return { apo: 0, peri: 0 };
     const eps = (v * v) / 2 - body.GM / r;             // specific orbital energy
-    const h = new THREE.Vector3().crossVectors(rel, s.velocity).length();
+    const h = new THREE.Vector3().crossVectors(rel, relVel).length();
     const e = Math.sqrt(Math.max(0, 1 + (2 * eps * h * h) / (body.GM * body.GM)));
     const rp = (h * h / body.GM) / (1 + e);            // periapsis radius
     const peri = rp - body.radius;
@@ -592,7 +730,7 @@ export class Simulator {
       case 'on-manual-relaunch':
         return this.state.phase === 'landed' && this.state.relaunchRequested;
       case 'at-soi-entry': {
-        const tgt = this.cfg.bodies.find((b) => b.id === t.targetBodyId);
+        const tgt = this.bodies.find((b) => b.id === t.targetBodyId);
         if (!tgt) return false;
         // Arrive when inside the authored SOI OR once the target's gravity
         // actually dominates. The hand-authored SOI radii don't track each
@@ -600,7 +738,7 @@ export class Simulator {
         // far beyond its small SOI), so keying purely off the SOI lets the
         // craft sail past and escape. Dominance is self-scaling per body.
         if (this.state.position.distanceTo(tgt.center) <= tgt.soiRadius) return true;
-        return dominantBody(this.cfg.bodies, this.state.position).id === tgt.id;
+        return dominantBody(this.bodies, this.state.position).id === tgt.id;
       }
       case 'after-orbit': {
         const current = this.body();
@@ -615,11 +753,17 @@ export class Simulator {
             this.state.landingAssist) return false;
         const altitudeNow = Math.max(0, this.state.position.distanceTo(current.center) - current.radius);
         const apsides = this.apsides(current);
-        // Floor keyed off the orbit the SOI can actually hold, not the (often
-        // higher) requested altitude — otherwise a tight SOI like the Moon's can
-        // never satisfy it and the return-leg departure burn never fires.
-        const periFloor = Math.max(this.minStableOrbitKm(current), this.captureTargetAltKm(current) * 0.5);
-        return altitudeNow >= this.minStableOrbitKm(current) &&
+        // A bound orbit whose periapsis clears the atmosphere counts as "parked".
+        // The floor is deliberately lenient: an underpowered build often settles a
+        // marginal parking orbit (periapsis right at the atmosphere edge), and
+        // gating it too high here would strand the whole transfer/return on the
+        // pad of its parking orbit, never departing. Keyed off the atmosphere /
+        // surface so it scales to any world (a tight SOI like the Moon's included).
+        const periFloor = Math.max(
+          this.minStableOrbitKm(current) * 0.6,
+          current.atmosphereHeight > 0 ? current.atmosphereHeight * 0.55 : current.radius * 0.06,
+        );
+        return altitudeNow >= this.minStableOrbitKm(current) * 0.6 &&
           Number.isFinite(apsides.apo) &&
           apsides.peri >= periFloor;
       }
@@ -628,7 +772,7 @@ export class Simulator {
         // target so that a prograde outbound burn raises apoapsis toward it.
         // Return/departure burns aim directly home, so they fire from the near
         // side instead of burning through the body they are leaving.
-        const tgt = this.cfg.bodies.find((b) => b.id === t.targetBodyId);
+        const tgt = this.bodies.find((b) => b.id === t.targetBodyId);
         if (!tgt) return false;
         const central = this.body();
         // Gate on altitude so we burn from orbit, scaled down for small bodies
@@ -651,7 +795,7 @@ export class Simulator {
     const a = node.actions;
     if (a.descend) {
       const tgtId = node.trigger.targetBodyId;
-      const tgt = tgtId ? this.cfg.bodies.find((b) => b.id === tgtId) : undefined;
+      const tgt = tgtId ? this.bodies.find((b) => b.id === tgtId) : undefined;
       // Arriving (not yet captured) if the orbit relative to the target is
       // unbound or still high — capture into a low orbit first, then de-orbit
       // and land. Decided from the orbit shape, not gravitational dominance: a
@@ -666,19 +810,20 @@ export class Simulator {
         // powered descent from high altitude.
         s.captureAssist = true; s.captureTargetId = tgt.id; s.captureOrbitSign = 0;
         s.landAfterCapture = true;
-        s.landingAssist = false; s.ascentAssist = false; s.circularizeAssist = false; s.deorbitAssist = false; s.departAssist = false; s.departTargetId = null;
+        s.landingAssist = false; s.ascentAssist = false; s.circularizeAssist = false; s.deorbitAssist = false; s.departAssist = false; s.departTargetId = null; s.transferAssist = false; s.transferTargetId = null;
       } else {
-        s.landingAssist = true; s.landAfterCapture = false; s.ascentAssist = false; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.attitude = 'retrograde';
+        s.landingAssist = true; s.landAfterCapture = false; s.ascentAssist = false; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.transferAssist = false; s.transferTargetId = null; s.attitude = 'retrograde';
       }
     }
-    if (a.ascend)  { s.ascentAssist = true; s.landingAssist = false; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.relaunchStart = s.elapsed; }
-    if (a.capture) { s.captureAssist = true; s.captureTargetId = node.trigger.targetBodyId ?? null; s.captureOrbitSign = 0; s.circularizeAssist = false; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; }
-    if (a.circularize) { s.circularizeAssist = true; s.captureAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; s.attitude = 'prograde'; }
-    if (a.depart)  { s.departAssist = true; s.departFromId = this.body().id; s.departTargetId = node.trigger.targetBodyId ?? this.cfg.bodies[0]?.id ?? null; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.landingAssist = false; s.ascentAssist = false; }
+    if (a.ascend)  { s.ascentAssist = true; s.landingAssist = false; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.transferAssist = false; s.transferTargetId = null; s.relaunchStart = s.elapsed; }
+    if (a.transfer) { s.transferAssist = true; s.transferTargetId = node.trigger.targetBodyId ?? null; s.transferClimbed = false; s.captureAssist = false; s.captureOrbitSign = 0; s.circularizeAssist = false; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; }
+    if (a.capture) { s.captureAssist = true; s.captureTargetId = node.trigger.targetBodyId ?? null; s.captureOrbitSign = 0; s.circularizeAssist = false; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; s.transferAssist = false; s.transferTargetId = null; }
+    if (a.circularize) { s.circularizeAssist = true; s.captureAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; s.transferAssist = false; s.transferTargetId = null; s.attitude = 'prograde'; }
+    if (a.depart)  { s.departAssist = true; s.departFromId = this.body().id; s.departTargetId = node.trigger.targetBodyId ?? this.bodies[0]?.id ?? null; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.landingAssist = false; s.ascentAssist = false; s.transferAssist = false; s.transferTargetId = null; }
     // An explicit throttle command (e.g. a manual burn) takes manual control
     // back from the autopilots so the craft can leave orbit.
-    if (a.throttle !== undefined && !a.descend && !a.ascend && !a.capture && !a.circularize && !a.depart) {
-      s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departFromId = null; s.departTargetId = null;
+    if (a.throttle !== undefined && !a.descend && !a.ascend && !a.capture && !a.circularize && !a.depart && !a.transfer) {
+      s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departFromId = null; s.departTargetId = null; s.transferAssist = false; s.transferTargetId = null;
     }
     if (a.attitude !== undefined) s.attitude = a.attitude;
     if (a.heading !== undefined) { s.angle = THREE.MathUtils.clamp(a.heading, -90, 90); s.attitude = 'manual'; }
@@ -798,40 +943,18 @@ export class Simulator {
   // ---- forces ----
 
   private gravityAccel(pos: THREE.Vector3): THREE.Vector3 {
+    // Straight N-body sum over the whole live solar system. No tidal "Stark"
+    // correction is needed any more: the bodies genuinely move, and each one's
+    // prescribed circular orbit is keyed to its parent's GM (see bodies.ts), so a
+    // planet really does fall toward the Sun — and a moon toward its planet —
+    // alongside a craft orbiting it. The shared pull is absorbed by the
+    // co-accelerating frame, leaving only the real tide, so local orbits around a
+    // moving Moon (or any world) stay naturally stable.
     const acc = new THREE.Vector3();
-    for (const b of this.cfg.bodies) {
+    for (const b of this.bodies) {
       const toC = new THREE.Vector3().subVectors(b.center, pos);
       const dist = Math.max(toC.length(), b.radius + 0.001);
       acc.addScaledVector(toC.normalize(), b.GM / (dist * dist));
-    }
-
-    // Indirect (tidal) term. The bodies are static — they never accelerate
-    // toward one another — so a craft orbiting a secondary (e.g. the Moon) would
-    // otherwise feel the primary's FULL pull as an unbalanced, uniform force.
-    // A constant force on a Keplerian orbit pumps its eccentricity without bound
-    // (the "Stark" effect), so the craft's Moon orbit decays until it crashes or
-    // is flung back toward Earth — the moon-orbit "shoots into space" bug.
-    //
-    // In reality the secondary falls toward the primary alongside the craft, so
-    // only the DIFFERENCE in pull across the orbit (the tide) perturbs it. We
-    // recover that by working in the freely-falling frame of the dominant body:
-    // subtract the acceleration the other bodies impart to that body itself.
-    // Earth orbits are unaffected (the Moon's pull on Earth is negligible), and
-    // Moon orbits become physically stable.
-    if (this.cfg.bodies.length > 1) {
-      const central = dominantBody(this.cfg.bodies, pos);
-      for (const b of this.cfg.bodies) {
-        // Only correct for a MORE massive perturber (e.g. Earth's pull on the
-        // Moon). The reverse — a light secondary's pull on the primary — is
-        // negligible, and applying it during the interplanetary cruise would
-        // nudge the finely-tuned transfer enough to miss the target's narrow
-        // dominance region. Gating on mass keeps Earth cruise identical while
-        // still cancelling the dominant Stark force inside the Moon's SOI.
-        if (b.id === central.id || b.GM <= central.GM) continue;
-        const toC = new THREE.Vector3().subVectors(b.center, central.center);
-        const dist = Math.max(toC.length(), b.radius + 0.001);
-        acc.addScaledVector(toC.normalize(), -b.GM / (dist * dist));
-      }
     }
     return acc;
   }
@@ -857,6 +980,32 @@ export class Simulator {
     const sinA = unit.dot(east);
     this.state.angle = THREE.MathUtils.radToDeg(Math.atan2(sinA, cosA));
     this.state.attitude = 'manual';
+  }
+
+  /**
+   * Phasing gate for a Hohmann transfer to a target that orbits the body we're
+   * parked around (a moon). Returns true at the moment a prograde burn — which
+   * raises apoapsis to the moon's lane on the far side of the orbit — will put
+   * the craft at that apoapsis just as the moon arrives there, so the encounter
+   * is a slow, cheap rendezvous instead of a hyperbolic flyby.
+   */
+  private transferWindowOpen(home: Body, tgt: Body): boolean {
+    if (!tgt.orbit || tgt.orbit.parentId !== home.id) return true;
+    const s = this.state;
+    const cp = new THREE.Vector3().subVectors(s.position, home.center);
+    const mp = new THREE.Vector3().subVectors(tgt.center, home.center);
+    const rPark = cp.length();
+    const R = tgt.orbit.radius;
+    const a = (rPark + R) / 2;
+    const tTransfer = Math.PI * Math.sqrt((a * a * a) / home.GM); // time to apoapsis
+    const lead = tgt.orbit.omega * tTransfer;       // angle the moon sweeps en route
+    const thetaC = Math.atan2(cp.y, cp.x);
+    const thetaM = Math.atan2(mp.y, mp.x);
+    // Want (thetaM − thetaC) ≡ π − lead, i.e. the moon trails the craft's eventual
+    // apoapsis (thetaC + π) by exactly the angle it will cover during the transfer.
+    let diff = (thetaM - thetaC) - (Math.PI - lead);
+    diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+    return Math.abs(diff) < 0.04;
   }
 
   private minStableOrbitKm(body: Body): number {
@@ -965,7 +1114,10 @@ export class Simulator {
   private clampToSurface(body: Body) {
     const s = this.state;
     const radial = new THREE.Vector3().subVectors(s.position, body.center).normalize();
-    const vRadial = radial.dot(s.velocity);
+    // Impact is judged on the speed *relative to the body's surface*, not the
+    // heliocentric speed (which includes the whole world's orbital motion).
+    const relVel = this.relVel(body);
+    const vRadial = radial.dot(relVel);
     const impactMs = Math.max(0, -vRadial) * 1000;
     s.lastImpactSpeedMs = impactMs;
 
@@ -973,15 +1125,16 @@ export class Simulator {
 
     if (!s.crashed && s.maxAltitude >= 0.2 && impactMs > this.safeLandingMs()) {
       s.crashed = true;
-      s.velocity.set(0, 0, 0);
+      s.velocity.copy(body.velocity);
       s.landedBodyId = body.id;
       return;
     }
     if (vRadial < 0) {
-      // Zero all velocity on any soft touchdown. Leaving tangential velocity
-      // causes the rocket to "slide" along the surface and bounce between
-      // altitude 0 and 1 m every step while the sim waits for speed < 1 m/s.
-      s.velocity.set(0, 0, 0);
+      // Match the body's motion on any soft touchdown (zero relative velocity).
+      // Leaving relative tangential velocity causes the rocket to "slide" along
+      // the surface and bounce between altitude 0 and 1 m every step while the
+      // sim waits for the relative speed to fall below 1 m/s.
+      s.velocity.copy(body.velocity);
     }
     if (s.maxAltitude >= 0.2) s.landedBodyId = body.id;
   }
@@ -991,7 +1144,8 @@ export class Simulator {
     if (s.crashed) return 'destroyed';
     const altitude = Math.max(0, s.position.distanceTo(body.center) - body.radius);
     const onGround = altitude < 0.01;
-    const speedMs = s.velocity.length() * 1000;
+    const relVel = this.relVel(body);
+    const speedMs = relVel.length() * 1000;
 
     // At rest on the surface with the engine idle — or unable to thrust (out of
     // fuel) — counts as landed, which keeps a failed relaunch from hanging.
@@ -1007,7 +1161,7 @@ export class Simulator {
     }
     if (altitude > 0.01) {
       const radial = new THREE.Vector3().subVectors(s.position, body.center).normalize();
-      if (radial.dot(s.velocity) < -0.05 && s.maxAltitude >= KARMAN_LINE * 0.5) return 'reentry';
+      if (radial.dot(relVel) < -0.05 && s.maxAltitude >= KARMAN_LINE * 0.5) return 'reentry';
       return 'flight';
     }
     return 'flight';

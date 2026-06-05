@@ -1,5 +1,5 @@
 import { FlightPlan, Maneuver, Trigger, ManeuverActions, MissionKind, MissionSpec, newNodeId } from './FlightPlan';
-import { buildFlightBodies, destinationTargetId, bodyDef } from '../bodies';
+import { destinationTargetId, bodyDef } from '../bodies';
 import { KARMAN_LINE } from '../constants';
 
 /**
@@ -118,18 +118,12 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
   }
 
   // ── Interplanetary / lunar transfer ────────────────────────────────────────
-  const bodies = buildFlightBodies(launchId, targetId);
-  const lb = bodies[0];
-  const tb = bodies[1];
-  const targetDist = lb.center.distanceTo(tb.center);
-  const apoTarget = targetDist - lb.radius; // raise apoapsis to reach the target
-
-  if (needsAscentAssist(launchId)) {
-    nodes.push(node('after-orbit', undefined, targetId, { depart: true }));
-  } else {
-    nodes.push(node('at-transfer-window', undefined, targetId, { attitude: 'prograde', throttle: 1 }));
-    nodes.push(node('at-apoapsis-altitude', apoTarget, undefined, { throttle: 0 }));
-  }
+  // Once a parking orbit is established, hand the cruise to the homing transfer
+  // autopilot: it climbs out of the launch world's well and chases the (orbiting)
+  // target until the target's gravity takes over. This replaces the old open-loop
+  // "burn at a transfer window, coast to a fixed apoapsis", which could never hit
+  // a target that is itself moving along its orbit.
+  nodes.push(node('after-orbit', undefined, targetId, { transfer: true }));
 
   if (kind === 'orbit' || kind === 'orbit-return') {
     // Capture autopilot brakes the arrival into a near-circular orbit once the
