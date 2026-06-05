@@ -1,7 +1,59 @@
 import * as THREE from 'three';
-import { Body, dominantBody, positionBodiesAt } from '../bodies';
+import { Body, dominantBody, positionBodiesAt, bodyStateAt, SUN_GM } from '../bodies';
 import { FlightPlan, Maneuver, Attitude } from './FlightPlan';
 import { StageStats } from '../BuildSpec';
+
+// ── Lambert's problem (universal-variable solution) ──────────────────────────
+// Given two position vectors and a time of flight under a central body of
+// gravitational parameter `mu`, find the velocity at r1 of the unique conic that
+// connects them in that time. This is what makes interplanetary intercepts work:
+// because every body's future position is analytic (bodyStateAt), the transfer
+// autopilot picks an arrival time, asks where the target WILL be, and solves for
+// the exact burn to be there at the same instant — then re-solves each step as a
+// closed-loop correction. Standard Bate–Mueller–White / Vallado formulation.
+function stumpffC(z: number): number {
+  if (z > 1e-6) return (1 - Math.cos(Math.sqrt(z))) / z;
+  if (z < -1e-6) { const s = Math.sqrt(-z); return (Math.cosh(s) - 1) / -z; }
+  return 0.5;
+}
+function stumpffS(z: number): number {
+  if (z > 1e-6) { const s = Math.sqrt(z); return (s - Math.sin(s)) / (s * s * s); }
+  if (z < -1e-6) { const s = Math.sqrt(-z); return (Math.sinh(s) - s) / (s * s * s); }
+  return 1 / 6;
+}
+/** Velocity at r1 (THREE units/s) for a prograde transfer r1→r2 in time `dt`, or null. */
+function lambertV1(r1v: THREE.Vector3, r2v: THREE.Vector3, dt: number, mu: number): THREE.Vector3 | null {
+  const r1 = r1v.length(), r2 = r2v.length();
+  if (r1 < 1e-6 || r2 < 1e-6 || dt <= 0) return null;
+  let cosdnu = r1v.dot(r2v) / (r1 * r2);
+  cosdnu = Math.max(-1, Math.min(1, cosdnu));
+  const crossZ = r1v.x * r2v.y - r1v.y * r2v.x;   // planar (x-y) transfer
+  let dnu = Math.acos(cosdnu);
+  if (crossZ < 0) dnu = 2 * Math.PI - dnu;        // prograde (counter-clockwise)
+  const A = Math.sin(dnu) * Math.sqrt((r1 * r2) / (1 - cosdnu));
+  if (Math.abs(A) < 1e-9) return null;
+
+  let psi = 0, psiUp = 4 * Math.PI * Math.PI, psiLow = -4 * Math.PI * Math.PI;
+  let y = r1 + r2;
+  for (let i = 0; i < 80; i++) {
+    const C = stumpffC(psi), S = stumpffS(psi);
+    y = r1 + r2 + (A * (psi * S - 1)) / Math.sqrt(C);
+    if (A > 0 && y < 0) { psiLow = psi; psi = (psiUp + psiLow) / 2; continue; }
+    if (y < 0) return null;
+    const chi = Math.sqrt(y / C);
+    const dtCalc = (chi * chi * chi * S + A * Math.sqrt(y)) / Math.sqrt(mu);
+    if (Math.abs(dtCalc - dt) < dt * 1e-5) break;
+    if (dtCalc <= dt) psiLow = psi; else psiUp = psi;
+    psi = (psiUp + psiLow) / 2;
+  }
+  const f = 1 - y / r1;
+  const g = A * Math.sqrt(y / mu);
+  if (Math.abs(g) < 1e-9) return null;
+  // v1 = (r2 - f·r1) / g
+  const v1 = r2v.clone().addScaledVector(r1v, -f).multiplyScalar(1 / g);
+  if (!Number.isFinite(v1.x) || !Number.isFinite(v1.y)) return null;
+  return v1;
+}
 
 export type SimPhase =
   | 'prelaunch' | 'flight' | 'orbit' | 'reentry' | 'landed' | 'destroyed';
@@ -60,6 +112,8 @@ export type SimState = {
   transferAssist: boolean;  // homing-transfer autopilot engaged (cruise to a target)
   transferTargetId: string | null; // body the transfer autopilot is homing toward
   transferClimbed: boolean; // apoapsis has reached the target's lane — stop raising, coast
+  /** Sim time (s) the Lambert transfer is targeting arrival at, or null. */
+  transferArriveT: number | null;
   deorbitAssist: boolean;   // de-orbit autopilot engaged (lower periapsis then land)
   departAssist: boolean;    // departure autopilot engaged (burn until escaping home-ward)
   departFromId: string | null; // body being escaped during a departure burn
@@ -164,6 +218,7 @@ export class Simulator {
       transferAssist: false,
       transferTargetId: null,
       transferClimbed: false,
+      transferArriveT: null,
       deorbitAssist: false,
       departAssist: false,
       departFromId: null,
@@ -520,7 +575,10 @@ export class Simulator {
         // Distance from the body we're climbing out of to the target — i.e. how
         // far the apoapsis must reach to get up to the target's orbital lane.
         const laneR = tgt.center.distanceTo(body.center);
-        const moonLike = !!tgt.orbit && tgt.orbit.parentId === body.id;
+        // "Moon-like" = the target orbits the (non-Sun) world we're currently at,
+        // e.g. our Moon while parked at Earth. NOT a planet while in Sun-space —
+        // a planet's parent IS the Sun, but that's the interplanetary case below.
+        const moonLike = !!tgt.orbit && tgt.orbit.parentId === body.id && !body.star;
         if (moonLike) {
           // The target orbits the very body we're parked around (a moon). Fly a
           // phased Hohmann: WAIT in the parking orbit until the geometry is right,
@@ -559,27 +617,58 @@ export class Simulator {
           s.throttle = apoR < body.soiRadius * 1.05
             ? THREE.MathUtils.clamp((body.soiRadius * 1.05 - apoR) / (body.soiRadius * 0.4), 0.15, 1)
             : 0;
-        } else {
-          // Latch the interplanetary leg the moment we first reach Sun-space, so a
-          // craft on an eccentric post-ejection orbit that dips back through a
-          // planet's SOI keeps homing on the target instead of idling in the
-          // "already escaped, coast" branch and never making progress.
+        } else if (dist < tgt.soiRadius * 4) {
+          // Rendezvous endgame. Once we're within a few SOI radii, stop chasing a
+          // fixed arrival point and instead null the velocity RELATIVE TO THE
+          // TARGET while easing in, so the craft slips into the SOI at low relative
+          // speed — a cheap arrival the capture autopilot can brake into orbit.
           if (body.star) s.transferClimbed = true;
-          // Sun-space homing pursuit. Patched-conic gravity makes interplanetary
-          // space clean (only the gentle Sun plus tides — no heavyweight reaching
-          // in to hijack the craft), so steering the craft's target-relative
-          // velocity straight at the target closes the range cheaply (constant
-          // bearing, decreasing range). The closing speed scales with range and
-          // eases to ~the target's escape speed at the SOI, so the arrival is
-          // gentle enough for the capture autopilot to brake into orbit.
           const tgtRel = this.relVel(tgt);
           const escAtSoi = Math.sqrt(2 * tgt.GM / Math.max(tgt.soiRadius, tgt.radius + 1));
-          const k = escAtSoi / Math.max(tgt.soiRadius, 1);
-          const cruise = THREE.MathUtils.clamp(dist * k, 0.05, 1.6);
-          const desiredVel = toTgt.clone().normalize().multiplyScalar(cruise);
-          const correction = desiredVel.sub(tgtRel);
+          const closeSpeed = THREE.MathUtils.clamp(dist * 0.02, 0.02, escAtSoi * 0.8);
+          const desiredRel = toTgt.clone().normalize().multiplyScalar(closeSpeed);
+          const correction = desiredRel.sub(tgtRel);
           if (correction.lengthSq() > 1e-10) this.aimToward(correction, up);
-          s.throttle = correction.length() > Math.max(0.03, cruise * 0.2) ? 1 : 0;
+          s.throttle = correction.length() > 0.01 ? 1 : 0;
+        } else {
+          // Latch the interplanetary leg the moment we first reach Sun-space.
+          if (body.star) s.transferClimbed = true;
+          // Lambert intercept guidance. Pick an arrival time once, ask where the
+          // target WILL be then (its motion is analytic), and solve Lambert's
+          // problem for the heliocentric velocity that puts us there at that
+          // instant — burning the difference. Re-solving every step makes it a
+          // closed loop that absorbs the messy ejection and the patched-conic
+          // tides, and naturally handles inward (Mercury/Venus) and outward
+          // (Jupiter…Neptune) transfers alike. The Sun sits at the origin, so the
+          // craft's heliocentric position/velocity are just its world ones.
+          const r1 = s.position.clone();
+          const R = tgt.orbit ? tgt.orbit.radius : laneR;
+          const pickArrival = () => {
+            const a = (r1.length() + R) / 2;
+            const tHohmann = Math.PI * Math.sqrt((a * a * a) / SUN_GM);
+            // Cap arrival time so distant targets fly a faster, higher-energy
+            // transfer that still fits the mission clock (the long-range builds
+            // carry the Δv for it) rather than a budget-busting minimum-energy one.
+            s.transferArriveT = s.elapsed + THREE.MathUtils.clamp(tHohmann, 1500, 52000);
+          };
+          // (Re)pick the arrival on first entry, or after the window elapses on a
+          // near miss so the closed loop keeps chasing a fresh intercept.
+          if (s.transferArriveT === null || s.transferArriveT - s.elapsed <= 8) pickArrival();
+          const tof = s.transferArriveT! - s.elapsed;
+          const r2 = bodyStateAt(tgt.id, s.transferArriveT!).pos;
+          const v1 = lambertV1(r1, r2, tof, SUN_GM);
+          if (v1) {
+            const correction = v1.sub(s.velocity);
+            if (correction.lengthSq() > 1e-10) this.aimToward(correction, up);
+            s.throttle = correction.length() > 0.015 ? 1 : 0;
+          } else {
+            // Lambert degenerate: nudge prograde toward the target lane and retry.
+            const desiredVel = toTgt.clone().normalize().multiplyScalar(0.3);
+            const correction = desiredVel.sub(this.relVel(tgt));
+            if (correction.lengthSq() > 1e-10) this.aimToward(correction, up);
+            s.throttle = 1;
+            s.transferArriveT = null;
+          }
         }
       }
     }
@@ -845,7 +934,7 @@ export class Simulator {
       }
     }
     if (a.ascend)  { s.ascentAssist = true; s.landingAssist = false; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.transferAssist = false; s.transferTargetId = null; s.relaunchStart = s.elapsed; }
-    if (a.transfer) { s.transferAssist = true; s.transferTargetId = node.trigger.targetBodyId ?? null; s.transferClimbed = false; s.captureAssist = false; s.captureOrbitSign = 0; s.circularizeAssist = false; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; }
+    if (a.transfer) { s.transferAssist = true; s.transferTargetId = node.trigger.targetBodyId ?? null; s.transferClimbed = false; s.transferArriveT = null; s.captureAssist = false; s.captureOrbitSign = 0; s.circularizeAssist = false; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; }
     if (a.capture) { s.captureAssist = true; s.captureTargetId = node.trigger.targetBodyId ?? null; s.captureOrbitSign = 0; s.circularizeAssist = false; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; s.transferAssist = false; s.transferTargetId = null; }
     if (a.circularize) { s.circularizeAssist = true; s.captureAssist = false; s.captureOrbitSign = 0; s.departAssist = false; s.departTargetId = null; s.landingAssist = false; s.ascentAssist = false; s.transferAssist = false; s.transferTargetId = null; s.attitude = 'prograde'; }
     if (a.depart)  { s.departAssist = true; s.departFromId = this.body().id; s.departTargetId = node.trigger.targetBodyId ?? this.bodies[0]?.id ?? null; s.captureAssist = false; s.circularizeAssist = false; s.captureOrbitSign = 0; s.landingAssist = false; s.ascentAssist = false; s.transferAssist = false; s.transferTargetId = null; }
