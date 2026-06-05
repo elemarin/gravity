@@ -85,18 +85,18 @@ export const SUN_GM = 42.0;
 const DEFS: BodyDef[] = [
   { id: 'sun',     name: 'Sun',     radius: 220,  surfaceG: 0,    atmosphereHeight: 0,   soiRadius: 99999, color: 0xffcf57, skyDay: 0xffe9a8, star: true },
 
-  { id: 'mercury', name: 'Mercury', radius: 24.4, surfaceG: 3.70, atmosphereHeight: 0,   soiRadius: 70,  color: 0x9c9088, skyDay: 0x07070b, orbitR: 640,  phase: 0.5 },
-  { id: 'venus',   name: 'Venus',   radius: 60.5, surfaceG: 8.87, atmosphereHeight: 180, soiRadius: 200, color: 0xd9b870, skyDay: 0xe8c878, orbitR: 1020, phase: 2.6 },
-  { id: 'earth',   name: 'Earth',   radius: EARTH_RADIUS, surfaceG: 9.81, atmosphereHeight: ATMOSPHERE_HEIGHT, soiRadius: 760, color: 0x2e74e8, skyDay: 0x8ec9ff, orbitR: 1500, phase: 0.0 },
-  { id: 'moon',    name: 'Moon',    radius: 17.4, surfaceG: 1.62, atmosphereHeight: 0,   soiRadius: 120, color: 0xc2c7d2, skyDay: 0x0a0a12, parent: 'earth', orbitR: 660, phase: 0.7 },
-  { id: 'mars',    name: 'Mars',    radius: 33.9, surfaceG: 3.71, atmosphereHeight: 60,  soiRadius: 320, color: 0xd06a44, skyDay: 0xe0a07a, orbitR: 2100, phase: 0.9 },
-  { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 30,  color: 0x9a8f84, skyDay: 0x07070a, parent: 'mars', orbitR: 130, phase: 1.5 },
-  { id: 'ceres',   name: 'Ceres',   radius: 13.5, surfaceG: 0.27, atmosphereHeight: 0,   soiRadius: 55,  color: 0x8d8a82, skyDay: 0x06060a, dwarf: true, orbitR: 2700, phase: 4.0 },
-  { id: 'jupiter', name: 'Jupiter', radius: 120,  surfaceG: 24.79,atmosphereHeight: 240, soiRadius: 900, color: 0xd7b58a, skyDay: 0xc9a878, gas: true, orbitR: 4200, phase: 5.3 },
-  { id: 'saturn',  name: 'Saturn',  radius: 105,  surfaceG: 10.44,atmosphereHeight: 220, soiRadius: 760, color: 0xe6d6a8, skyDay: 0xd8c790, gas: true, orbitR: 5600, phase: 2.0 },
-  { id: 'titan',   name: 'Titan',   radius: 25.8, surfaceG: 1.35, atmosphereHeight: 120, soiRadius: 110, color: 0xd2a24c, skyDay: 0xc88a3a, parent: 'saturn', orbitR: 360, phase: 0.3 },
-  { id: 'uranus',  name: 'Uranus',  radius: 72,   surfaceG: 8.69, atmosphereHeight: 200, soiRadius: 520, color: 0x9fe0e6, skyDay: 0x7fb8c4, gas: true, orbitR: 7000, phase: 3.4 },
-  { id: 'neptune', name: 'Neptune', radius: 70,   surfaceG: 11.15,atmosphereHeight: 200, soiRadius: 500, color: 0x3f63d8, skyDay: 0x2a3f9c, gas: true, orbitR: 8400, phase: 5.9 },
+  { id: 'mercury', name: 'Mercury', radius: 24.4, surfaceG: 3.70, atmosphereHeight: 0,   soiRadius: 150, color: 0x9c9088, skyDay: 0x07070b, orbitR: 640,  phase: 0.5 },
+  { id: 'venus',   name: 'Venus',   radius: 60.5, surfaceG: 8.87, atmosphereHeight: 180, soiRadius: 320, color: 0xd9b870, skyDay: 0xe8c878, orbitR: 1020, phase: 2.6 },
+  { id: 'earth',   name: 'Earth',   radius: EARTH_RADIUS, surfaceG: 9.81, atmosphereHeight: ATMOSPHERE_HEIGHT, soiRadius: 720, color: 0x2e74e8, skyDay: 0x8ec9ff, orbitR: 1500, phase: 0.0 },
+  { id: 'moon',    name: 'Moon',    radius: 17.4, surfaceG: 1.62, atmosphereHeight: 0,   soiRadius: 60,  color: 0xc2c7d2, skyDay: 0x0a0a12, parent: 'earth', orbitR: 660, phase: 0.7 },
+  { id: 'mars',    name: 'Mars',    radius: 33.9, surfaceG: 3.71, atmosphereHeight: 60,  soiRadius: 340, color: 0xd06a44, skyDay: 0xe0a07a, orbitR: 2100, phase: 0.9 },
+  { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 14,  color: 0x9a8f84, skyDay: 0x07070a, parent: 'mars', orbitR: 300, phase: 1.5 },
+  { id: 'ceres',   name: 'Ceres',   radius: 13.5, surfaceG: 0.27, atmosphereHeight: 0,   soiRadius: 44,  color: 0x8d8a82, skyDay: 0x06060a, dwarf: true, orbitR: 2700, phase: 4.0 },
+  { id: 'jupiter', name: 'Jupiter', radius: 120,  surfaceG: 24.79,atmosphereHeight: 240, soiRadius: 1100,color: 0xd7b58a, skyDay: 0xc9a878, gas: true, orbitR: 4200, phase: 5.3 },
+  { id: 'saturn',  name: 'Saturn',  radius: 105,  surfaceG: 10.44,atmosphereHeight: 220, soiRadius: 1000,color: 0xe6d6a8, skyDay: 0xd8c790, gas: true, orbitR: 5600, phase: 2.0 },
+  { id: 'titan',   name: 'Titan',   radius: 25.8, surfaceG: 1.35, atmosphereHeight: 120, soiRadius: 70,  color: 0xd2a24c, skyDay: 0xc88a3a, parent: 'saturn', orbitR: 1000, phase: 0.3 },
+  { id: 'uranus',  name: 'Uranus',  radius: 72,   surfaceG: 8.69, atmosphereHeight: 200, soiRadius: 800, color: 0x9fe0e6, skyDay: 0x7fb8c4, gas: true, orbitR: 7000, phase: 3.4 },
+  { id: 'neptune', name: 'Neptune', radius: 70,   surfaceG: 11.15,atmosphereHeight: 200, soiRadius: 800, color: 0x3f63d8, skyDay: 0x2a3f9c, gas: true, orbitR: 8400, phase: 5.9 },
 ];
 
 export const SOLAR_BODIES: Record<string, BodyDef> =
@@ -265,17 +265,33 @@ export function getScenario(id: string): Scenario {
   return SCENARIOS.find((s) => s.id === id) ?? SCENARIOS[0];
 }
 
-/** Returns the body whose gravity dominates at a given world position. */
+/**
+ * Returns the body whose sphere of influence the position sits in — the
+ * "patched-conic" governing body. SOIs are sized to each body's true
+ * gravitational dominance radius (see DEFS), so the craft is governed by the
+ * most local body whose SOI contains it (a moon over its planet over the Sun).
+ * Outside every planet/moon SOI it's interplanetary space, governed by the Sun;
+ * if there is no Sun in the set, fall back to the strongest raw pull.
+ */
 export function dominantBody(bodies: Body[], position: THREE.Vector3): Body {
+  let inSoi: Body | null = null;
+  for (const b of bodies) {
+    if (b.star) continue;
+    if (position.distanceTo(b.center) <= b.soiRadius) {
+      // Prefer the most local influence (smallest SOI) when SOIs overlap.
+      if (!inSoi || b.soiRadius < inSoi.soiRadius) inSoi = b;
+    }
+  }
+  if (inSoi) return inSoi;
+  const sun = bodies.find((b) => b.star);
+  if (sun) return sun;
+  // No star in the set (legacy two-body lists): strongest raw pull.
   let best = bodies[0];
   let bestPull = -Infinity;
   for (const b of bodies) {
     const dist = Math.max(position.distanceTo(b.center), b.radius);
     const pull = b.GM / (dist * dist);
-    if (pull > bestPull) {
-      bestPull = pull;
-      best = b;
-    }
+    if (pull > bestPull) { bestPull = pull; best = b; }
   }
   return best;
 }

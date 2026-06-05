@@ -286,7 +286,7 @@ export class Simulator {
       // capture lowered periapsis (see the `descend` action). So the dominant
       // body IS the landing body and its altitude is the right reference.
       s.attitude = 'retrograde';
-      const speedMs = s.velocity.length() * 1000;
+      const speedMs = this.relVel(body).length() * 1000;
       const safeMs = LAND_FLOOR_MS + altitude * LAND_RATE;
       s.throttle = speedMs > safeMs ? 1 : 0;
 
@@ -461,15 +461,24 @@ export class Simulator {
     //     away from home and waste the entire return stage.
     if (s.departAssist) {
       const target = this.bodies.find((b) => b.id === s.departTargetId) ?? this.bodies[0];
-      if (body.id !== target.id) {
-        // Raise apoapsis just past the SOI, then coast out under the target's
-        // pull. Burning all the way to escape velocity flings the craft into a
-        // huge orbit around the target it can't then drop home from.
+      const fromBody = this.bodies.find((b) => b.id === s.departFromId);
+      const stillAtDeparture = !!fromBody && fromBody.id !== target.id &&
+        this.body().id === fromBody.id;
+      if (stillAtDeparture) {
+        // Phase 1 — escape the world we're leaving: raise apoapsis just PAST its
+        // dominance edge (the SOI sits a touch inside it) so the home world's
+        // gravity takes over, then coast. Stopping short leaves the craft bound in
+        // a decaying orbit it never departs.
         s.attitude = 'prograde';
-        const ap = this.apsides(body);
-        const apoR = Number.isFinite(ap.apo) ? ap.apo + body.radius : Infinity;
-        s.throttle = apoR < body.soiRadius ? 1 : 0;
+        const ap = this.apsides(fromBody);
+        const apoR = Number.isFinite(ap.apo) ? ap.apo + fromBody.radius : Infinity;
+        s.throttle = apoR < fromBody.soiRadius * 1.3 ? 1 : 0;
       } else {
+        // Phase 2 — drop home. Lower the periapsis of the orbit AROUND THE TARGET
+        // by burning retrograde *relative to the target* (not the instantaneous
+        // dominant body, which can be the Sun out near a high apoapsis and would
+        // send the craft the wrong way). Reentry + parachute / the landing
+        // autopilot finishes the touchdown.
         const targetApsides = this.apsides(target);
         const returnPeriapsis = target.atmosphereHeight > 0 ? target.atmosphereHeight * 0.65 : target.radius * 0.08;
         if (targetApsides.peri <= returnPeriapsis) {
@@ -478,8 +487,9 @@ export class Simulator {
           s.departFromId = null;
           s.departTargetId = null;
         } else {
-          const homeward = target.center.clone().sub(s.position);
-          if (homeward.lengthSq() > 1e-10) this.aimToward(homeward, up);
+          const velRelTarget = s.velocity.clone().sub(target.velocity);
+          if (velRelTarget.lengthSq() > 1e-10) this.aimToward(velRelTarget.negate(), up);
+          s.attitude = 'manual';
           s.throttle = 1;
         }
       }
@@ -535,22 +545,35 @@ export class Simulator {
             s.attitude = 'prograde';
             s.throttle = 0;                 // coast to apoapsis; capture grabs there
           }
-        } else if (body.star || apoR >= laneR * 0.985) {
-          // Interplanetary cruise (the Sun dominates, or we've climbed out of the
-          // launch world): home on the target by pure pursuit — drive the craft's
-          // velocity *relative to the target* straight at it so the range closes
-          // (constant bearing, decreasing range). Closing speed scales with range
-          // so it eases down near arrival, leaving capture a cheap orbit to grab.
+        } else if (!body.star) {
+          // In the launch world's SOI: raise apoapsis just past the SOI edge and
+          // coast out GENTLY into Sun-space. A small burn near the SOI edge
+          // preserves the craft's inherited heliocentric velocity (so it starts
+          // the interplanetary leg on a near-circular Sun orbit at the launch
+          // world's lane), instead of a hard hyperbolic ejection that kills the
+          // heliocentric angular momentum and drops the craft into the Sun.
+          const ap = this.apsides(body);
+          const apoR = Number.isFinite(ap.apo) ? ap.apo + body.radius : Infinity;
+          s.attitude = 'prograde';
+          s.throttle = apoR < body.soiRadius * 1.05
+            ? THREE.MathUtils.clamp((body.soiRadius * 1.05 - apoR) / (body.soiRadius * 0.4), 0.15, 1)
+            : 0;
+        } else {
+          // Sun-space homing pursuit. Patched-conic gravity makes interplanetary
+          // space clean (only the gentle Sun plus tides — no heavyweight reaching
+          // in to hijack the craft), so steering the craft's target-relative
+          // velocity straight at the target closes the range cheaply (constant
+          // bearing, decreasing range). The closing speed scales with range and
+          // eases to ~the target's escape speed at the SOI, so the arrival is
+          // gentle enough for the capture autopilot to brake into orbit.
           const tgtRel = this.relVel(tgt);
-          const cruise = THREE.MathUtils.clamp(dist * 0.03, Math.max(0.08, tgt.soiRadius * 0.004), 1.2);
+          const escAtSoi = Math.sqrt(2 * tgt.GM / Math.max(tgt.soiRadius, tgt.radius + 1));
+          const k = escAtSoi / Math.max(tgt.soiRadius, 1);
+          const cruise = THREE.MathUtils.clamp(dist * k, 0.05, 1.6);
           const desiredVel = toTgt.clone().normalize().multiplyScalar(cruise);
           const correction = desiredVel.sub(tgtRel);
           if (correction.lengthSq() > 1e-10) this.aimToward(correction, up);
-          s.throttle = correction.length() > Math.max(0.02, cruise * 0.18) ? 1 : 0;
-        } else {
-          // Climb out of the launch world's well toward the target's lane.
-          s.attitude = 'prograde';
-          s.throttle = THREE.MathUtils.clamp((laneR - apoR) / (laneR * 0.12), 0, 1);
+          s.throttle = correction.length() > Math.max(0.03, cruise * 0.2) ? 1 : 0;
         }
       }
     }
@@ -644,7 +667,7 @@ export class Simulator {
 
     // --- Bookkeeping ---
     s.elapsed += dt;
-    const speed = s.velocity.length();
+    const speed = this.relVel(body).length();
     s.maxSpeed = Math.max(s.maxSpeed, speed);
     s.maxAltitude = Math.max(s.maxAltitude, this.altitude());
     if (this.altitude() > body.radius * 0.02) s.reachedBodyIds.add(body.id);
@@ -943,18 +966,29 @@ export class Simulator {
   // ---- forces ----
 
   private gravityAccel(pos: THREE.Vector3): THREE.Vector3 {
-    // Straight N-body sum over the whole live solar system. No tidal "Stark"
-    // correction is needed any more: the bodies genuinely move, and each one's
-    // prescribed circular orbit is keyed to its parent's GM (see bodies.ts), so a
-    // planet really does fall toward the Sun — and a moon toward its planet —
-    // alongside a craft orbiting it. The shared pull is absorbed by the
-    // co-accelerating frame, leaving only the real tide, so local orbits around a
-    // moving Moon (or any world) stay naturally stable.
+    // Patched-conic gravity (the KSP model). The craft feels its governing body
+    // — the SOI it's in, or the Sun in interplanetary space — at FULL strength,
+    // and every other body only as a TIDAL term: that body's pull on the craft
+    // minus its pull on the governing body. Subtracting the common (far-field)
+    // pull is what keeps a distant heavyweight from reaching across and hijacking
+    // the craft (Jupiter stealing a transfer, Venus stealing an Earth return),
+    // while preserving clean local orbits and clean heliocentric transfers. A
+    // pure N-body sum can't do this at arcade scale: the planets' dominance
+    // regions are far too broad relative to their spacing.
+    const dom = dominantBody(this.bodies, pos);
     const acc = new THREE.Vector3();
+    const domToC = new THREE.Vector3().subVectors(dom.center, pos);
+    const domDist = Math.max(domToC.length(), dom.radius + 0.001);
+    acc.addScaledVector(domToC.normalize(), dom.GM / (domDist * domDist));
     for (const b of this.bodies) {
-      const toC = new THREE.Vector3().subVectors(b.center, pos);
-      const dist = Math.max(toC.length(), b.radius + 0.001);
-      acc.addScaledVector(toC.normalize(), b.GM / (dist * dist));
+      if (b.id === dom.id) continue;
+      // Tidal term: pull on the craft minus pull on the governing body.
+      const toCraft = new THREE.Vector3().subVectors(b.center, pos);
+      const dCraft = Math.max(toCraft.length(), b.radius + 0.001);
+      acc.addScaledVector(toCraft.normalize(), b.GM / (dCraft * dCraft));
+      const toDom = new THREE.Vector3().subVectors(b.center, dom.center);
+      const dDom = Math.max(toDom.length(), b.radius + 0.001);
+      acc.addScaledVector(toDom.normalize(), -b.GM / (dDom * dDom));
     }
     return acc;
   }
@@ -1030,7 +1064,11 @@ export class Simulator {
    */
   private safeMaxOrbitR(body: Body): number {
     const minR = body.radius + this.minStableOrbitKm(body);
-    return Math.max(minR + 1, body.soiRadius * 0.22);
+    // The authored SOI now tracks each body's true gravitational dominance
+    // radius, so a comfortably large fraction of it holds a stable orbit (well
+    // inside the tidal edge). This must clear the surface + min-orbit floor for
+    // small worlds whose dominance reaches only a little above the ground.
+    return Math.max(minR + 1, body.soiRadius * 0.5);
   }
 
   /**
@@ -1067,10 +1105,14 @@ export class Simulator {
     const rho = 1.225 * Math.pow(t, 3);
     const cd = 0.5;
     const cross = s.deployedParachute ? CHUTE_CROSS : DRAG_COEFF;
-    const speedSq = s.velocity.lengthSq();
+    // Drag is against the atmosphere, which co-moves with the body — use the
+    // body-relative velocity, not the heliocentric one (which carries the whole
+    // world's orbital motion and would otherwise fake a constant gale).
+    const rel = this.relVel(body);
+    const speedSq = rel.lengthSq();
     if (speedSq < 1e-10) return new THREE.Vector3();
     const mag = 0.5 * rho * speedSq * cd * cross;
-    return s.velocity.clone().normalize().multiplyScalar(-mag);
+    return rel.normalize().multiplyScalar(-mag);
   }
 
   private stabilizeParachute(s: SimState, dt: number) {

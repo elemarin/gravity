@@ -68,7 +68,9 @@ export class Planet {
     }
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
-    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: body.gas ? 4 : 10 });
+    // fog:false so a distant world stays visible when the camera is pulled all
+    // the way back to frame the whole system (otherwise the fog fades it to black).
+    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: body.gas ? 4 : 10, fog: false });
     this.surface = new THREE.Mesh(geo, mat);
     this.mesh.add(this.surface);
 
@@ -85,6 +87,7 @@ export class Planet {
           side: THREE.BackSide,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
+          fog: false,
         }),
       );
       this.mesh.add(rim);
@@ -97,6 +100,7 @@ export class Planet {
           side: THREE.BackSide,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
+          fog: false,
         }),
       );
       this.mesh.add(middle);
