@@ -11,7 +11,8 @@ import type { SimState } from '../plan/Simulator';
 // on the launch pad (no part dips below y = 0).
 export const ROCKET_START_ALTITUDE = SIM_START_ALTITUDE;
 
-const BODY_R = 0.18;          // main stack radius
+const ROCKET_VISUAL_SCALE = 0.55;
+const BODY_R = 0.18;          // main stack radius before visual scale
 const stagePalette = 0x2a3550;
 
 /**
@@ -164,6 +165,7 @@ export class Rocket {
 
   private buildMesh(build: RocketBuild): THREE.Group {
     const group = new THREE.Group();
+    group.scale.setScalar(ROCKET_VISUAL_SCALE);
     this.stageMeshes = [];
     this.stageBaseY = [];
 
@@ -495,7 +497,7 @@ export class Rocket {
     );
     this.mesh.quaternion.copy(q).multiply(tilt);
     const activeBaseY = this.stageBaseY[this.meshActiveStage] ?? 0;
-    const baseOffset = new THREE.Vector3(0, activeBaseY, 0).applyQuaternion(this.mesh.quaternion);
+    const baseOffset = new THREE.Vector3(0, activeBaseY * ROCKET_VISUAL_SCALE, 0).applyQuaternion(this.mesh.quaternion);
     this.mesh.position.copy(this.position).sub(baseOffset);
   }
 

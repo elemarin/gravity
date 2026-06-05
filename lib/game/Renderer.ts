@@ -1,6 +1,11 @@
 import * as THREE from 'three';
 import { EARTH_RADIUS } from './constants';
 
+// How far the player can pull the camera back. Big enough to frame the whole
+// heliocentric system (the outer planets sit thousands of units out), paired
+// with the camera's large far-plane.
+const MAX_ZOOM = 320;
+
 export class Renderer {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
@@ -50,7 +55,7 @@ export class Renderer {
     this.scene.background = this.skyDay.clone();
     this.scene.fog = new THREE.Fog(this.skyDay.clone(), 600, 3200);
 
-    this.camera = new THREE.PerspectiveCamera(60, 1, 0.01, 10000);
+    this.camera = new THREE.PerspectiveCamera(60, 1, 0.05, 200000);
     this.camera.position.set(0, EARTH_RADIUS + 2, 8);
     this.camera.lookAt(0, EARTH_RADIUS + 1, 0);
 
@@ -234,7 +239,7 @@ export class Renderer {
   private onCamWheel = (e: WheelEvent) => {
     e.preventDefault();
     const factor = Math.exp(e.deltaY * 0.0015);
-    this.userZoom = Math.max(0.12, Math.min(18, this.userZoom * factor));
+    this.userZoom = Math.max(0.12, Math.min(MAX_ZOOM, this.userZoom * factor));
   };
 
   private onCamPointerDown = (e: PointerEvent) => {
@@ -263,7 +268,7 @@ export class Renderer {
         const ratio = dist / this.lastPinchDist;
         // Wide zoom range so the player can pull back far enough to see a whole
         // orbit, or push in close to the craft.
-        this.userZoom = Math.max(0.12, Math.min(18, this.userZoom / ratio));
+        this.userZoom = Math.max(0.12, Math.min(MAX_ZOOM, this.userZoom / ratio));
       }
       this.lastPinchDist = dist;
     }
@@ -331,8 +336,10 @@ export class Renderer {
   /** Configure the launch world's daytime sky and atmosphere depth. */
   setSky(dayHex: number, atmosphereHeight: number) {
     this.skyDay.setHex(dayHex);
-    // Airless worlds read almost like open space even at the surface.
-    this.skyFade = atmosphereHeight > 0 ? Math.max(120, atmosphereHeight * 1.6) : 30;
+    // Fade fully to space by the time the craft is at/above the atmosphere top,
+    // so a low orbit (above the Kármán line) reads as black space rather than a
+    // washed-out blue sky — even when the camera is pulled far back.
+    this.skyFade = atmosphereHeight > 0 ? Math.max(45, atmosphereHeight) : 22;
     this.updateSky(0);
   }
 

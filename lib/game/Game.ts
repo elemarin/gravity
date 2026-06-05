@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Renderer } from './Renderer';
 import { Planet } from './entities/Planet';
+import { OrbitRings } from './entities/OrbitRings';
 import { Rocket } from './entities/Rocket';
 import { Launchpad } from './entities/Launchpad';
 import { TrajectoryLine } from './TrajectoryLine';
@@ -8,7 +9,7 @@ import { TrailLine } from './TrailLine';
 import { MilestoneManager } from './career/Milestones';
 import { Simulator, SimConfig } from './plan/Simulator';
 import { FlightPlan, DEFAULT_PLAN, clonePlan, describeActions, describeTrigger } from './plan/FlightPlan';
-import { Body, dominantBody, bodyDef } from './bodies';
+import { Body, dominantBody, bodyDef, positionBodiesAt } from './bodies';
 import { orbitEllipse, orbitConic } from './orbit';
 import { buildFlightSimSetup, launchStartPosition } from './SimSetup';
 import {
@@ -38,6 +39,7 @@ export type GameOptions = {
 export class Game {
   renderer: Renderer;
   private planets: Planet[] = [];
+  private orbitRings: OrbitRings;
   rocket: Rocket;
   private trajectory: TrajectoryLine;
   private trail: TrailLine;
@@ -79,6 +81,7 @@ export class Game {
 
     this.renderer = new Renderer(opts.container);
     this.planets = this.bodies.map((b) => new Planet(this.renderer.scene, b));
+    this.orbitRings = new OrbitRings(this.renderer.scene, this.bodies);
     this.rocket = new Rocket(this.renderer.scene, this.build);
     this.trajectory = new TrajectoryLine(this.renderer.scene);
     this.trail = new TrailLine(this.renderer.scene);
@@ -279,6 +282,13 @@ export class Game {
 
   private dominant(): Body { return dominantBody(this.bodies, this.sim.state.position); }
 
+  /** Re-evaluate the orbiting bodies at sim time `t` and sync their meshes/rings. */
+  private syncBodies(t: number) {
+    positionBodiesAt(this.bodies, t);
+    for (const p of this.planets) p.syncPosition();
+    this.orbitRings.update(this.bodies);
+  }
+
   private loop = (time: number) => {
     if (!this.running) return;
     this.rafHandle = requestAnimationFrame(this.loop);
@@ -286,6 +296,11 @@ export class Game {
     const realDt = Math.min((time - this.lastTime) / 1000, 0.1);
     let rawDt = realDt;
     this.lastTime = time;
+
+    // Drive the live solar system off the flight clock so the planets orbit as
+    // the mission plays out. While planning, hold the system at t=0 so the launch
+    // world stays put under the rocket on its pad (all planets still render).
+    this.syncBodies(this.mode === 'sim' ? this.sim.state.elapsed : 0);
 
     if (this.mode === 'sim' && !this.ended) {
       rawDt *= this.timeScale;
@@ -299,6 +314,7 @@ export class Game {
         // player can deploy a base, relaunch, or finish the mission manually.
         if (this.sim.state.phase === 'destroyed') break;
       }
+      this.syncBodies(this.sim.state.elapsed);
       const center = this.dominant().center;
       this.rocket.applyState(this.sim.state, center, FIXED_DT);
       this.renderer.updateCameraOffset(this.sim.altitude());
@@ -412,7 +428,7 @@ export class Game {
   private buildFlightState(): FlightState {
     const s = this.sim.state;
     const altitude = this.sim.altitude();
-    const speed = s.velocity.length();
+    const speed = this.sim.relativeSpeed();
     const stageCount = this.cfg.stages.length;
     // Distance to the destination body (the non-launch body), if any.
     const target = this.bodies.find((b) => b.id !== this.launchBodyId);
@@ -614,6 +630,7 @@ export class Game {
     this.rocket.dispose();
     this.launchpad?.dispose();
     this.planets.forEach((p) => p.dispose());
+    this.orbitRings.dispose();
     this.renderer.dispose();
   }
 }

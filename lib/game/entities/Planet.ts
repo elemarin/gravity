@@ -16,6 +16,28 @@ export class Planet {
     this.body = body;
     this.mesh = new THREE.Group();
 
+    // The Sun: a luminous, self-lit sphere with a soft corona — not a shaded world.
+    if (body.star) {
+      const core = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(body.radius, 4),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color(body.color) }),
+      );
+      this.surface = core;
+      this.mesh.add(core);
+      for (const [scale, opacity] of [[1.18, 0.35], [1.45, 0.16], [1.9, 0.07]] as const) {
+        this.mesh.add(new THREE.Mesh(
+          new THREE.IcosahedronGeometry(body.radius * scale, 3),
+          new THREE.MeshBasicMaterial({
+            color: new THREE.Color(body.skyDay), transparent: true, opacity,
+            side: THREE.BackSide, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+          }),
+        ));
+      }
+      this.mesh.position.copy(body.center);
+      scene.add(this.mesh);
+      return;
+    }
+
     const detail = body.radius > 80 ? 3 : body.radius > 25 ? 2 : 1;
     const geo = new THREE.IcosahedronGeometry(body.radius, detail);
     const posAttr = geo.getAttribute('position');
@@ -46,7 +68,9 @@ export class Planet {
     }
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
-    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: body.gas ? 4 : 10 });
+    // fog:false so a distant world stays visible when the camera is pulled all
+    // the way back to frame the whole system (otherwise the fog fades it to black).
+    const mat = new THREE.MeshPhongMaterial({ vertexColors: true, flatShading: true, shininess: body.gas ? 4 : 10, fog: false });
     this.surface = new THREE.Mesh(geo, mat);
     this.mesh.add(this.surface);
 
@@ -63,6 +87,7 @@ export class Planet {
           side: THREE.BackSide,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
+          fog: false,
         }),
       );
       this.mesh.add(rim);
@@ -75,6 +100,7 @@ export class Planet {
           side: THREE.BackSide,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
+          fog: false,
         }),
       );
       this.mesh.add(middle);
@@ -98,6 +124,11 @@ export class Planet {
 
   update(dt: number) {
     this.surface.rotation.y += 0.0015 * dt;
+  }
+
+  /** Move the rendered world to its (orbiting) body's current position. */
+  syncPosition() {
+    this.mesh.position.copy(this.body.center);
   }
 
   dispose() {

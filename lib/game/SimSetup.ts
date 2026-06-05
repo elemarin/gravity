@@ -26,6 +26,9 @@ export function buildFlightSimSetup(build: RocketBuild, plan: FlightPlan): Fligh
   const launchBody = bodies[0];
   const sim = buildSimStages(build);
   const startPosition = launchStartPosition(launchBody);
+  // Ride along with the launch world: the craft starts already carrying its
+  // planet's orbital motion, so it isn't instantly left behind by a moving world.
+  const startVelocity = launchBody.velocity.clone();
 
   return {
     bodies,
@@ -41,6 +44,7 @@ export function buildFlightSimSetup(build: RocketBuild, plan: FlightPlan): Fligh
       hasStation: sim.hasStation,
       stationMass: sim.stationMass,
       startPosition,
+      startVelocity,
     },
   };
 }

@@ -11,8 +11,10 @@ const MIN_SEGMENT_KM = 0.4;
 export class TrailLine {
   line: THREE.Line;
   private positions: Float32Array;
+  private colors: Float32Array;
   private geometry: THREE.BufferGeometry;
   private material: THREE.LineBasicMaterial;
+  private trailColor = new THREE.Color(0x9fd2ff);
   private count = 0;
   private head = 0;
   private last = new THREE.Vector3();
@@ -20,14 +22,21 @@ export class TrailLine {
 
   constructor(scene: THREE.Scene) {
     this.positions = new Float32Array(MAX_POINTS * 3);
+    this.colors = new Float32Array(MAX_POINTS * 3);
     this.geometry = new THREE.BufferGeometry();
     this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3));
+    this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colors, 3));
     this.geometry.setDrawRange(0, 0);
 
+    // Vertex colours fade the trail from bright at the craft to dark at the
+    // oldest sample, so the flown path dissolves into a comet-like tail rather
+    // than a flat, uniform grey line.
     this.material = new THREE.LineBasicMaterial({
-      color: 0xffffff,
+      vertexColors: true,
       transparent: true,
-      opacity: 0.35,
+      opacity: 0.7,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
     });
 
     this.line = new THREE.Line(this.geometry, this.material);
@@ -46,6 +55,18 @@ export class TrailLine {
 
   setVisible(v: boolean) {
     this.line.visible = v && this.count > 1;
+  }
+
+  /** Recolour the buffer so the newest sample is brightest, oldest darkest. */
+  private refreshFade(total: number) {
+    for (let i = 0; i < total; i++) {
+      const t = total > 1 ? i / (total - 1) : 1; // 0 oldest → 1 newest
+      const fade = 0.04 + 0.96 * t * t;            // dark tail, bright head
+      this.colors[i * 3]     = this.trailColor.r * fade;
+      this.colors[i * 3 + 1] = this.trailColor.g * fade;
+      this.colors[i * 3 + 2] = this.trailColor.b * fade;
+    }
+    this.geometry.attributes.color.needsUpdate = true;
   }
 
   /**
@@ -68,6 +89,7 @@ export class TrailLine {
       this.count += 1;
       this.geometry.setDrawRange(0, this.count);
       this.geometry.attributes.position.needsUpdate = true;
+      this.refreshFade(this.count);
       this.line.visible = this.count > 1;
       return;
     }
@@ -81,6 +103,7 @@ export class TrailLine {
     this.positions[tail + 2] = pos.z;
     this.geometry.attributes.position.needsUpdate = true;
     this.geometry.setDrawRange(0, MAX_POINTS);
+    this.refreshFade(MAX_POINTS);
     this.line.visible = true;
   }
 
