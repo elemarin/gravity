@@ -13,7 +13,7 @@ import { MissionKind } from '../lib/game/plan/FlightPlan';
 import { buildFlightSimSetup } from '../lib/game/SimSetup';
 import { RocketBuild } from '../lib/game/types';
 import {
-  SYSTEM_BODY_IDS, bodyDef, isLandable, destinationTargetId,
+  SYSTEM_BODY_IDS, bodyDef, isLandable, destinationTargetId, bodyStateAt, SUN_GM,
 } from '../lib/game/bodies';
 import { estimateBuildDeltaV } from '../lib/game/BuildSpec';
 import { requiredDeltaV } from '../lib/game/career/Requirements';
@@ -136,14 +136,37 @@ export type RunResult = {
   simSeconds: number;
 };
 
-/** A generous, bounded sim-second budget for a scenario (only hit on failure). */
+/** Heliocentric lane radius (distance from the Sun) of a body at t=0. */
+function laneRadius(id: string): number {
+  return bodyStateAt(id, 0).pos.length();
+}
+
+/** Minimum-energy (Hohmann) time of flight, in sim seconds, launch lane → target lane. */
+function hohmannSeconds(launchId: string, targetId: string): number {
+  const r1 = laneRadius(launchId);
+  const r2 = laneRadius(targetId);
+  if (r1 < 1 || r2 < 1 || Math.abs(r1 - r2) < 1) return 4_000; // same lane (a moon hop)
+  const a = (r1 + r2) / 2;
+  return Math.PI * Math.sqrt((a * a * a) / SUN_GM);
+}
+
+/**
+ * A generous, bounded sim-second budget for a scenario (only hit on failure).
+ * The interplanetary leg is sized off the target's Hohmann time so far worlds
+ * like Neptune get the long cruise they genuinely need, while near hops stay
+ * short and fast to fail.
+ */
 function budgetSeconds(s: Scenario): number {
   if (s.maxSimSeconds) return s.maxSimSeconds;
   const targetId = destinationTargetId(s.destId, s.launchId);
   const isReturn = s.kind === 'orbit-return' || s.kind === 'land-return';
-  let secs = 30_000;                 // ascent + local orbit margin
-  if (targetId) secs += 70_000;      // one interplanetary/lunar cruise + capture
-  if (isReturn) secs += 80_000;      // the trip home
+  let secs = 30_000;                 // ascent + local orbit + capture/descent margin
+  if (targetId) {
+    // One cruise (≈1.5× Hohmann for phasing + capture), with a floor for moon hops.
+    const leg = Math.max(40_000, hohmannSeconds(s.launchId, targetId) * 1.5 + 25_000);
+    secs += leg;
+    if (isReturn) secs += leg;       // the trip home is a second cruise
+  }
   return secs;
 }
 

@@ -610,9 +610,15 @@ export class Simulator {
         const vEsc = Math.sqrt(2 * fromBody.GM / rNow) * 1.04;
         const vRel = this.relVel(fromBody).length();
         s.attitude = 'prograde';
+        // Proportional taper to zero (no throttle floor): the gentle escape must
+        // leave the SOI at barely above escape speed so the craft settles near the
+        // home world's lane. A fixed floor on a strong engine adds a big Δv chunk
+        // in the final step and overshoots, flinging the craft clear past home; a
+        // floor-free proportional burn eases any engine — weak or mammoth — onto
+        // escape speed without blowing past it.
         s.throttle = vRel >= vEsc
           ? 0
-          : THREE.MathUtils.clamp((vEsc - vRel) / (vEsc * 0.12), 0.2, 1);
+          : THREE.MathUtils.clamp((vEsc - vRel) / (vEsc * 0.06), 0, 1);
       } else {
         // Phase 2 — drop home. Lower the periapsis of the orbit AROUND THE TARGET
         // by burning retrograde *relative to the target* (not the instantaneous
@@ -770,10 +776,13 @@ export class Simulator {
           const pickArrival = () => {
             const a = (r1.length() + R) / 2;
             const tHohmann = Math.PI * Math.sqrt((a * a * a) / SUN_GM);
-            // Cap arrival time so distant targets fly a faster, higher-energy
-            // transfer that still fits the mission clock (the long-range builds
-            // carry the Δv for it) rather than a budget-busting minimum-energy one.
-            s.transferArriveT = s.elapsed + THREE.MathUtils.clamp(tHohmann, 1500, 52000);
+            // Aim for close to the minimum-energy (Hohmann) time of flight, only
+            // mildly compressed for very distant targets. Forcing a far world like
+            // Neptune to arrive far sooner than its Hohmann time demands a wildly
+            // high-energy transfer whose arc dives sunward first — the craft
+            // crashes into the Sun. Allowing up to ~85% above the floor keeps the
+            // transfer near minimum-energy and sane while still bounding the cruise.
+            s.transferArriveT = s.elapsed + THREE.MathUtils.clamp(tHohmann, 1500, 120000);
           };
           // (Re)pick the arrival on first entry, or after the window elapses on a
           // near miss so the closed loop keeps chasing a fresh intercept.
