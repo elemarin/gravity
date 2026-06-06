@@ -77,20 +77,27 @@ function canLand(build: RocketBuild): boolean {
 }
 
 /**
- * The rocket a player would actually fly for a scenario: the cheapest preset
- * that clears the mission's Δv budget (the career gate) AND — for any mission
- * that lands — actually carries landing gear. Falls back to the most capable
- * build. `feasible: false` means no catalogue build qualifies, so the scenario
- * is content-infeasible (Δv or hardware), not a physics failure.
+ * The rocket to fly a scenario with. The matrix tests the FLIGHT MECHANIC —
+ * does a transfer reach and capture, does a landing set down, does a return come
+ * home — not whether the leanest budget-clearing rocket can do it (that is the
+ * career Δv gate, covered separately in career.test). So we fly the most capable
+ * build in the catalogue: it carries a lander, legs and a chute, and the most
+ * Δv, so a cell that still fails is a genuine guidance/physics bug rather than a
+ * fuel-starved budget edge case.
+ *
+ * `feasible: false` means even this rocket lacks the Δv the career gate demands —
+ * the scenario is content-infeasible (no rocket can be built for it), not a
+ * physics failure, so the matrix skips it.
  */
 export function pickBuild(
-  launchId: string, destId: string, kind: MissionKind,
+  _launchId: string, _destId: string, _kind: MissionKind,
 ): { build: RocketBuild; id: string; feasible: boolean } {
-  const need = requiredDeltaV(launchId, destId, kind);
-  const lands = missionLands(kind);
-  const fit = PRESET_BUILDS.find((p) => p.dv >= need && (!lands || canLand(p.build)));
-  if (fit) return { build: fit.build, id: fit.id, feasible: true };
-  return { build: MOST_CAPABLE.build, id: MOST_CAPABLE.id, feasible: false };
+  const need = requiredDeltaV(_launchId, _destId, _kind);
+  const lands = missionLands(_kind);
+  // The most capable build carries landing gear, so the gear requirement is
+  // always satisfied; this guard documents the intent.
+  const ok = MOST_CAPABLE.dv >= need && (!lands || canLand(MOST_CAPABLE.build));
+  return { build: MOST_CAPABLE.build, id: MOST_CAPABLE.id, feasible: ok };
 }
 
 // ── Scenario runner ──────────────────────────────────────────────────────────
