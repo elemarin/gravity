@@ -82,7 +82,8 @@ describe('campaign goals', () => {
     expect(stationGoalId('neptune')).toBe('station-neptune');
     expect(stationGoalId('nowhere')).toBeUndefined();
     expect(baseGoalId('mars')).toBe('base-mars');
-    expect(baseGoalId('venus')).toBeUndefined();
+    expect(baseGoalId('venus')).toBe('base-venus');
+    expect(baseGoalId('jupiter')).toBeUndefined(); // gas giant — no surface, no base
   });
 
   it('mission-end evaluation awards landings but never stations/bases', () => {

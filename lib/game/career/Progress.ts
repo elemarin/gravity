@@ -88,6 +88,14 @@ export const CAMPAIGN_GOALS: CampaignGoal[] = [
   station('saturn',  'Saturn Station',   'Orbit a station among Saturn’s rings.',             ['capsule-cupola']),
   station('uranus',  'Uranus Station',   'Reach a station orbit around distant Uranus.',      ['engine-plasma']),
   station('neptune', 'Neptune Station',  'The final frontier — a station orbiting Neptune.',  ['lander-titan']),
+  // Outpost chain — a base on every other solid world makes it a launch site, so
+  // missions can stage onward from across the system (the launch-from selector
+  // lists every base you've established).
+  base('venus',      'Venus Base',       'Deliver a Station Module to the Venusian surface.', []),
+  base('mercury',    'Mercury Base',     'Establish a base on scorched Mercury.',             []),
+  base('ceres',      'Ceres Base',       'Found an outpost on the dwarf world Ceres.',        []),
+  base('titan',      'Titan Base',       'Set up a base on Titan, Saturn’s giant moon.',      []),
+  base('phobos',     'Phobos Base',      'Anchor a base on tiny Phobos, a moon of Mars.',     []),
 ];
 
 export function campaignGoal(id: string): CampaignGoal | undefined {

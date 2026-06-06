@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Body, dominantBody, positionBodiesAt, bodyStateAt, destinationTargetId, SUN_GM, SUN_ID } from '../bodies';
+import { Body, dominantBody, positionBodiesAt, bodyStateAt, destinationTargetId, bodyDef, SUN_GM, SUN_ID } from '../bodies';
 import { FlightPlan, Maneuver, Attitude } from './FlightPlan';
 import { StageStats } from '../BuildSpec';
 import { KARMAN_LINE } from '../constants';
@@ -1023,6 +1023,17 @@ export class Simulator {
         const current = this.body();
         if (current.star) return false;
         if (current.id === t.targetBodyId) return false;
+        // A moon-hop transfer (target orbits a host planet that isn't the launch
+        // world) must wait until that host has actually been reached — otherwise it
+        // fires back at the launch-world parking orbit and tries to cross straight
+        // to the moon, skipping the interplanetary leg to the host.
+        if (node.actions.transfer && t.targetBodyId) {
+          const td = bodyDef(t.targetBodyId);
+          if (td.parent && td.parent !== SUN_ID && td.parent !== this.plan.launchBodyId &&
+              !this.state.reachedBodyIds.has(td.parent)) {
+            return false;
+          }
+        }
         // Wait until the arrival/relaunch autopilot has finished settling the
         // orbit. Firing the departure burn mid-capture (while still braking
         // down toward periapsis) aims the burn into the body and crashes.
