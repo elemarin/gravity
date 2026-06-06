@@ -793,7 +793,15 @@ export class Simulator {
           if (v1) {
             const correction = v1.sub(s.velocity);
             if (correction.lengthSq() > 1e-10) this.aimToward(correction, up);
-            s.throttle = correction.length() > 0.015 ? 1 : 0;
+            // Proportional throttle: burn hard to inject onto the transfer arc,
+            // then ease to zero as heliocentric velocity reaches the Lambert
+            // solution. A bang-bang full-throttle burn overshoots v1 every step on
+            // a powerful engine — on an inward leg (a planet return, or an inner
+            // transfer) that excess drives the perihelion down into the Sun and the
+            // craft burns up. Easing off lets it settle ONTO the ballistic arc, so
+            // re-solving returns ~the current velocity and it coasts to the SOI.
+            const c = correction.length();
+            s.throttle = c < 0.01 ? 0 : THREE.MathUtils.clamp(c * 5, 0, 1);
           } else {
             // Lambert degenerate: nudge prograde toward the target lane and retry.
             const desiredVel = toTgt.clone().normalize().multiplyScalar(0.3);
