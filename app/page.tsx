@@ -54,6 +54,15 @@ export default function HomePage() {
           >
             ★ CAREER
           </Link>
+          {process.env.NODE_ENV === 'development' && (
+            <Link
+              href="/models"
+              className="btn btn-secondary w-full py-3.5 border-dashed border-cyan/60 text-cyan hover:border-cyan"
+              style={{ fontSize: 9, letterSpacing: '0.12em' }}
+            >
+              🛠 DEV: CELESTIAL MODELS
+            </Link>
+          )}
         </div>
 
         <footer
