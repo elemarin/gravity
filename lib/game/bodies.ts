@@ -183,9 +183,6 @@ export function positionBodiesAt(bodies: Body[], t: number): void {
   }
 }
 
-/** Canonical Earth body (snapshot at t=0). */
-export const EARTH_BODY: Body = makeBody(SOLAR_BODIES.earth, bodyStateAt('earth', 0));
-
 /**
  * Build the body list for a flight. Unlike the old two-body model, every flight
  * now runs against the *entire* solar system. The list is ordered launch-body
@@ -243,24 +240,6 @@ export function destinationTargetId(destinationId: string, launchId: string): st
   return targetId && targetId !== launchId ? targetId : null;
 }
 
-// ── Legacy scenario shim (kept so older saves/imports still resolve) ───────
-
-export type Scenario = {
-  id: string;
-  name: string;
-  bodies: Body[];
-  objective: string;
-};
-
-export const SCENARIOS: Scenario[] = [
-  { id: 'earth-orbit',   name: 'Earth Orbit',    bodies: buildFlightBodies('earth', null),   objective: DESTINATIONS[0].objective },
-  { id: 'moon-transfer', name: 'Lunar Transfer', bodies: buildFlightBodies('earth', 'moon'), objective: DESTINATIONS[1].objective },
-];
-
-export function getScenario(id: string): Scenario {
-  return SCENARIOS.find((s) => s.id === id) ?? SCENARIOS[0];
-}
-
 /**
  * Returns the body whose sphere of influence the position sits in — the
  * "patched-conic" governing body. SOIs are sized to each body's true
@@ -291,6 +270,3 @@ export function dominantBody(bodies: Body[], position: THREE.Vector3): Body {
   }
   return best;
 }
-
-/** Backwards-compatible Moon export (snapshot at t=0). */
-export const MOON_BODY: Body = makeBody(SOLAR_BODIES.moon, bodyStateAt('moon', 0));

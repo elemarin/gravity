@@ -13,7 +13,7 @@ import {
 import { MILESTONES } from '@/lib/game/career/Milestones';
 import { evaluateGoals, campaignGoal, stationGoalId, baseGoalId } from '@/lib/game/career/Progress';
 import { getPart } from '@/lib/game/career/Parts';
-import { estimateBuildDeltaV, computeStats } from '@/lib/game/BuildSpec';
+import { estimateBuildDeltaV } from '@/lib/game/BuildSpec';
 import {
   hapticThrust, hapticStage, hapticDeploy, hapticLanding, hapticCrash,
 } from '@/lib/haptics';
@@ -292,42 +292,15 @@ export default function GameScreen() {
   const handleDeployStation = useCallback(() => gameRef.current?.manualDeployStation(), []);
 
   const handleCopyLog = useCallback(() => {
-    const build = buildRef.current;
-    const p = planRef.current;
-    const fs = flightState;
-    if (!build || !p) return;
-    const stats = computeStats(build);
-    const dv = estimateBuildDeltaV(build);
-    const log = {
-      build,
-      stats: { ...stats, deltaV: Math.round(dv) },
-      plan: {
-        launchBodyId: p.launchBodyId,
-        destinationId: p.destinationId,
-        mission: p.mission,
-        launch: p.launch,
-        nodes: p.nodes.map((n) => ({
-          trigger: n.trigger,
-          actions: n.actions,
-        })),
-      },
-      flight: fs ? {
-        phase: fs.phase,
-        altitude: Math.round(fs.altitude * 1000) / 1000,
-        speed: Math.round(fs.speed * 10000) / 10000,
-        apoapsis: fs.apoapsis,
-        periapsis: fs.periapsis,
-        fuel: Math.round(fs.fuel * 10) / 10,
-        activeStage: fs.activeStage,
-        stageCount: fs.stageCount,
-        maxAltitude: Math.round(fs.maxAltitude * 100) / 100,
-        guidanceSteps: fs.guidanceSteps,
-      } : null,
-    };
+    // The full flight log — build, plan, system, final state, result, and the
+    // event timeline — assembled by the Game so a failing run can be shared and
+    // reproduced from a single paste.
+    const log = gameRef.current?.buildDebugLog();
+    if (!log) return;
     navigator.clipboard.writeText(JSON.stringify(log, null, 2));
     setLogCopied(true);
     setTimeout(() => setLogCopied(false), 2000);
-  }, [flightState]);
+  }, []);
 
   const handleRelaunch = useCallback(() => gameRef.current?.manualRelaunch(), []);
 

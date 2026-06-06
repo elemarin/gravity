@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Body, dominantBody, positionBodiesAt, bodyStateAt, destinationTargetId, SUN_GM, SUN_ID } from '../bodies';
 import { FlightPlan, Maneuver, Attitude } from './FlightPlan';
 import { StageStats } from '../BuildSpec';
+import { KARMAN_LINE } from '../constants';
 
 // ── Lambert's problem (universal-variable solution) ──────────────────────────
 // Given two position vectors and a time of flight under a central body of
@@ -58,7 +59,6 @@ function lambertV1(r1v: THREE.Vector3, r2v: THREE.Vector3, dt: number, mu: numbe
 export type SimPhase =
   | 'prelaunch' | 'flight' | 'orbit' | 'reentry' | 'landed' | 'destroyed';
 
-const KARMAN_LINE  = 100.0;        // km above surface
 const DRAG_COEFF   = 0.018;
 const CHUTE_CROSS  = 320;          // cross-section for deployed chute (~10 m/s terminal)
 const CHUTE_STABILIZE_RATE = 2.5;  // how quickly an open chute pulls the craft upright
@@ -292,6 +292,33 @@ export class Simulator {
 
   /** The live solar system at the current sim time (read-only view). */
   liveBodies(): Body[] { return this.bodies; }
+
+  /** A deep copy of the mutable flight state (clones every vector/array/set). */
+  private cloneState(): SimState {
+    const s = this.state;
+    return {
+      ...s,
+      position: s.position.clone(),
+      velocity: s.velocity.clone(),
+      stageFuel: [...s.stageFuel],
+      reachedBodyIds: new Set(s.reachedBodyIds),
+      firedNodeIds: new Set(s.firedNodeIds),
+    };
+  }
+
+  /**
+   * A detached simulator sharing this one's config + plan but carrying a
+   * snapshot of the current state. Stepping the fork forward-predicts the
+   * trajectory without disturbing the live flight — and keeps the trajectory
+   * preview in lockstep with the real physics instead of a hand-copied subset
+   * of the state that silently drifts whenever a field is added.
+   */
+  fork(): Simulator {
+    const f = new Simulator(this.cfg, this.plan);
+    f.state = this.cloneState();
+    f.positionBodies();
+    return f;
+  }
 
   altitude(): number {
     const b = this.body();

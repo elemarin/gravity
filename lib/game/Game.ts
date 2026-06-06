@@ -12,10 +12,32 @@ import { FlightPlan, DEFAULT_PLAN, clonePlan, describeActions, describeTrigger }
 import { Body, dominantBody, bodyDef, positionBodiesAt } from './bodies';
 import { orbitEllipse, orbitConic } from './orbit';
 import { buildFlightSimSetup, launchStartPosition } from './SimSetup';
+import { computeStats, estimateBuildDeltaV } from './BuildSpec';
 import {
   FlightState, FlightPhase, GameCallbacks, MissionResult, RocketBuild, DEFAULT_BUILD,
 } from './types';
 import { KARMAN_LINE } from './constants';
+
+/** One entry in the flight event timeline captured for the dev-mode debug log. */
+export type DebugEvent = {
+  t: number;          // sim seconds since launch
+  kind: string;       // 'ignition' | 'phase' | 'autopilot' | 'stage' | …
+  detail?: string;    // short human-readable note
+  snapshot?: FlightSnapshot;
+};
+
+/** A compact physics snapshot, recorded alongside notable flight events. */
+export type FlightSnapshot = {
+  phase: string;
+  body: string;
+  altKm: number;
+  speedKmS: number;
+  apoapsis: number;
+  periapsis: number;
+  stage: number;
+  fuelPct: number;
+  autopilots: string[];
+};
 
 const FIXED_DT = 1 / 60;
 
@@ -68,6 +90,11 @@ export class Game {
   private prevSimPhase = 'prelaunch';
   private simTrajectoryTimer = 0;
   private previewHandle = 0;
+
+  /** Flight event timeline for the dev-mode debug log (capped, reset per flight). */
+  private events: DebugEvent[] = [];
+  private prevAutopilots = '';
+  private lastResult: MissionResult | null = null;
 
   constructor(opts: GameOptions) {
     this.callbacks = opts.callbacks ?? {};
@@ -150,6 +177,12 @@ export class Game {
     this.ended = false;
     this.prevSimPhase = 'prelaunch';
     this.timeScale = 1;
+    this.events = [];
+    this.prevAutopilots = '';
+    this.lastResult = null;
+    this.logEvent('launch',
+      `${bodyDef(this.launchBodyId).name} → ${this.plan.destinationId} ` +
+      `(${this.plan.mission?.kind ?? 'orbit'}), Δv≈${Math.round(estimateBuildDeltaV(this.build))} m/s`);
     this.sim.reset();
     this.rocket.reset(this.startPosition());
     this.simTrajectoryTimer = 0; // update trajectory immediately
@@ -340,21 +373,80 @@ export class Game {
     this.renderer.render();
   };
 
+  // ── Dev-mode flight logging ────────────────────────────────────────────────
+
+  /** Autopilots currently engaged, as short tags (for the timeline). */
+  private activeAutopilots(): string[] {
+    const s = this.sim.state;
+    const a: string[] = [];
+    if (s.ascentAssist)      a.push('ascent');
+    if (s.circularizeAssist) a.push('circularize');
+    if (s.transferAssist)    a.push(`transfer→${s.transferTargetId}`);
+    if (s.captureAssist)     a.push(`capture→${s.captureTargetId}`);
+    if (s.deorbitAssist)     a.push('deorbit');
+    if (s.landingAssist)     a.push('descend');
+    if (s.departAssist)      a.push(`depart→${s.departTargetId}`);
+    return a;
+  }
+
+  private snapshot(): FlightSnapshot {
+    const s = this.sim.state;
+    const round = (x: number) => (Number.isFinite(x) ? Math.round(x * 100) / 100 : x);
+    return {
+      phase: s.phase,
+      body: this.dominant().id,
+      altKm: round(this.sim.altitude()),
+      speedKmS: Math.round(this.sim.relativeSpeed() * 10000) / 10000,
+      apoapsis: round(s.apoapsis),
+      periapsis: round(s.periapsis),
+      stage: s.activeStage,
+      fuelPct: Math.round((s.stageFuel[s.activeStage] ?? 0) * 10) / 10,
+      autopilots: this.activeAutopilots(),
+    };
+  }
+
+  /** Append an event to the (capped) flight timeline. */
+  private logEvent(kind: string, detail?: string, withSnapshot = true) {
+    this.events.push({
+      t: Math.round(this.sim.state.elapsed * 10) / 10,
+      kind,
+      detail,
+      snapshot: withSnapshot ? this.snapshot() : undefined,
+    });
+    // Events are sparse, but guard against a pathological run flooding memory.
+    if (this.events.length > 2000) this.events.splice(0, this.events.length - 2000);
+  }
+
   /** Per-step side effects: thrust haptics, milestones, mission end. */
   private afterStep(_dt: number, fireEvents: boolean) {
     const s = this.sim.state;
 
     if (fireEvents) {
-      if (s.justIgnited) this.callbacks.onThrustStart?.();
+      if (s.justIgnited) {
+        this.callbacks.onThrustStart?.();
+        this.logEvent('ignition');
+      }
       if (s.justStagedTo >= 0 && !s.justDeployedLander) {
         this.rocket.emitStageBurst();
         this.callbacks.onStageSeparation?.();
+        this.logEvent('stage', `→ stage ${s.justStagedTo}`);
       }
       if (s.justDeployedLander) {
         this.rocket.emitStageBurst();
         this.callbacks.onLanderDeploy?.();
+        this.logEvent('lander-deploy');
       }
-      if (s.justDeployedParachute) this.rocket.emitParachuteBurst();
+      if (s.justDeployedParachute) {
+        this.rocket.emitParachuteBurst();
+        this.logEvent('parachute-deploy');
+      }
+      // Record autopilot hand-offs and phase changes as timeline entries.
+      const auto = this.activeAutopilots().join(',');
+      if (auto !== this.prevAutopilots) {
+        this.prevAutopilots = auto;
+        this.logEvent('autopilot', auto || 'none');
+      }
+      if (s.phase !== this.prevSimPhase) this.logEvent('phase', `${this.prevSimPhase} → ${s.phase}`);
     }
 
     this.flightState = this.buildFlightState();
@@ -368,12 +460,22 @@ export class Game {
     this.prevSimPhase = s.phase;
     if (fireEvents && (justLanded || justDestroyed)) {
       this.callbacks.onTouchdown?.(justDestroyed ? 'crashed' : 'landed', s.lastImpactSpeedMs);
+      this.logEvent(justDestroyed ? 'crash' : 'touchdown',
+        `${this.dominant().id} @ ${s.lastImpactSpeedMs.toFixed(1)} m/s`);
     }
     if (s.phase === 'destroyed' && !this.missionEnded) {
       this.missionEnded = true;
       this.ended = true;
-      this.callbacks.onMissionEnd?.(this.buildMissionResult('crashed'));
+      this.endMission('crashed');
     }
+  }
+
+  /** Build the result, record it for the debug log, and notify listeners. */
+  private endMission(outcome: 'landed' | 'crashed') {
+    const result = this.buildMissionResult(outcome);
+    this.lastResult = result;
+    this.logEvent('mission-end', `${outcome} · ${result.rating} · score ${result.score}`);
+    this.callbacks.onMissionEnd?.(result);
   }
 
   /**
@@ -386,7 +488,7 @@ export class Game {
     this.ended = true;
     this.missionEnded = true;
     const outcome = this.sim.state.phase === 'destroyed' ? 'crashed' : 'landed';
-    this.callbacks.onMissionEnd?.(this.buildMissionResult(outcome));
+    this.endMission(outcome);
   }
 
   private buildMissionResult(outcome: 'landed' | 'crashed'): MissionResult {
@@ -511,6 +613,8 @@ export class Game {
     if (bodyId) {
       this.rocket.deployStation();
       this.callbacks.onStationDeploy?.(bodyId, this.sim.state.stationDeployedOnSurface);
+      this.logEvent('station-deploy',
+        `${bodyId} (${this.sim.state.stationDeployedOnSurface ? 'surface base' : 'orbit'})`);
     }
   }
 
@@ -520,12 +624,13 @@ export class Game {
   manualLand() {
     if (this.mode !== 'sim' || this.sim.finished) return;
     this.sim.manualDeorbit();
+    this.logEvent('manual-deorbit');
   }
 
   /** Lift off from the target surface and begin the return trip. */
   manualRelaunch() {
     if (this.mode !== 'sim') return;
-    this.sim.manualRelaunch();
+    if (this.sim.manualRelaunch()) this.logEvent('manual-relaunch');
   }
 
   /** True when the craft is landed and a return-trip relaunch is waiting for the player. */
@@ -556,48 +661,10 @@ export class Game {
       return;
     }
 
-    const preview = new Simulator(this.cfg, this.plan);
-    preview.reset();
-    const s = preview.state;
-    s.position.copy(cur.position);
-    s.velocity.copy(cur.velocity);
-    s.angle          = cur.angle;
-    s.attitude       = cur.attitude;
-    s.throttle       = cur.throttle;
-    s.activeStage    = cur.activeStage;
-    s.stageFuel      = [...cur.stageFuel];
-    s.deployedLander    = cur.deployedLander;
-    s.deployedParachute = cur.deployedParachute;
-    s.deployedStation   = cur.deployedStation;
-    s.stationBodyId     = cur.stationBodyId;
-    s.stationDeployedOnSurface = cur.stationDeployedOnSurface;
-    s.landingAssist     = cur.landingAssist;
-    s.landAfterCapture  = cur.landAfterCapture;
-    s.ascentAssist      = cur.ascentAssist;
-    s.captureAssist     = cur.captureAssist;
-    s.circularizeAssist = cur.circularizeAssist;
-    s.captureTargetId   = cur.captureTargetId;
-    s.captureOrbitSign  = cur.captureOrbitSign;
-    s.deorbitAssist     = cur.deorbitAssist;
-    s.departAssist      = cur.departAssist;
-    s.departFromId      = cur.departFromId;
-    s.departTargetId    = cur.departTargetId;
-    s.landedTime        = cur.landedTime;
-    s.relaunchStart     = cur.relaunchStart;
-    s.relaunchRequested = cur.relaunchRequested;
-    s.elapsed        = cur.elapsed;
-    s.phase          = cur.phase;
-    s.maxAltitude    = cur.maxAltitude;
-    s.maxSpeed       = cur.maxSpeed;
-    s.apoapsis       = cur.apoapsis;
-    s.periapsis      = cur.periapsis;
-    s.crashed        = cur.crashed;
-    s.everOrbit      = cur.everOrbit;
-    s.landedBodyId   = cur.landedBodyId;
-    s.lastImpactSpeedMs = cur.lastImpactSpeedMs;
-    s.prevRadialVel  = cur.prevRadialVel;
-    s.firedNodeIds   = new Set(cur.firedNodeIds);
-    s.reachedBodyIds = new Set(cur.reachedBodyIds);
+    // Fork the live simulator so the prediction runs the exact same physics
+    // from a snapshot of the current state (no hand-copied field subset to
+    // drift out of sync with SimState).
+    const preview = this.sim.fork();
 
     const points: THREE.Vector3[] = [cur.position.clone()];
     let touchdown = false;
@@ -621,6 +688,52 @@ export class Game {
   }
 
   getNextMilestone() { return this.milestones.getNextTarget(); }
+
+  /**
+   * A comprehensive, copy-pasteable snapshot of the whole flight — build, plan,
+   * the system it ran in, the final physics state, the mission result, and the
+   * full event timeline. This is what the dev-mode "Copy Log" button emits so a
+   * failing run can be reported and reproduced in one paste.
+   */
+  buildDebugLog() {
+    const s = this.sim.state;
+    const stats = computeStats(this.build);
+    return {
+      meta: {
+        when: new Date().toISOString(),
+        mode: this.mode,
+        fixedDt: FIXED_DT,
+        simSeconds: Math.round(s.elapsed * 10) / 10,
+      },
+      build: this.build,
+      stats: { ...stats, deltaV: Math.round(estimateBuildDeltaV(this.build)) },
+      plan: {
+        launchBodyId: this.plan.launchBodyId,
+        destinationId: this.plan.destinationId,
+        mission: this.plan.mission,
+        launch: this.plan.launch,
+        nodes: this.plan.nodes.map((n) => ({ trigger: n.trigger, actions: n.actions })),
+      },
+      system: this.bodies.map((b) => ({
+        id: b.id, GM: b.GM, radius: b.radius, soiRadius: b.soiRadius,
+        atmosphereHeight: b.atmosphereHeight,
+      })),
+      final: {
+        ...this.snapshot(),
+        maxAltitude: Math.round(s.maxAltitude * 100) / 100,
+        maxSpeed: Math.round(s.maxSpeed * 10000) / 10000,
+        everOrbit: s.everOrbit,
+        landedBodyId: s.landedBodyId,
+        reachedBodyIds: Array.from(s.reachedBodyIds),
+        lastImpactSpeedMs: Math.round(s.lastImpactSpeedMs * 10) / 10,
+        crashed: s.crashed,
+        firedNodes: this.plan.nodes.filter((n) => s.firedNodeIds.has(n.id)).length,
+        totalNodes: this.plan.nodes.length,
+      },
+      result: this.lastResult,
+      events: this.events,
+    };
+  }
 
   destroy() {
     this.stop();
