@@ -542,8 +542,24 @@ export class Simulator {
       // fuel) or has been circularized as low as the capture can get it (a heavy
       // world that settles in a high orbit and can't reach the band — deorbit
       // from there rather than loop forever).
+      // Don't hand a landing arrival off to de-orbit while its apoapsis still
+      // reaches a sibling moon's lane — it would swing back out, get recaptured by
+      // that moon, and land there instead (e.g. Moon→Earth falling back onto the
+      // Moon, or a Mars arrival snagged by Phobos). Circularize below the nearest
+      // moon first; worlds with no moons keep the old SOI ceiling.
+      let hasSiblingMoon = false;
+      for (const o of this.bodies) {
+        if (o.orbit && o.orbit.parentId === tgt.id) { hasSiblingMoon = true; break; }
+      }
+      // A target with a moon (Earth has the Moon, Mars has Phobos) must be
+      // circularized LOW — below that moon's lane — before de-orbiting, or the
+      // craft swings back out to its apoapsis at the moon's lane and gets
+      // recaptured by the moon, landing there instead. Moonless worlds keep the
+      // lenient handoff (a bound orbit is enough; the de-orbit finishes the job),
+      // so weak builds that settle high don't loop forever.
+      const fullyCircular = apoR <= safeMaxR * 1.15 && nearCircular && periR >= minR;
       const captured = this.body().id === tgt.id && Number.isFinite(apoR) && periR >= minR &&
-        (apoR <= tgt.soiRadius || nearCircular);
+        (hasSiblingMoon ? fullyCircular : (apoR <= tgt.soiRadius || nearCircular));
       if (s.landAfterCapture && captured) {
         s.throttle = 0;
         s.captureAssist = false;
@@ -826,7 +842,10 @@ export class Simulator {
     // engages in the rare moment a moon is actually in the way.
     if (s.transferAssist) {
       for (const m of this.bodies) {
-        if (m.id === s.transferTargetId || !m.orbit || m.orbit.parentId === SUN_ID) continue;
+        if (!m.orbit || m.orbit.parentId === SUN_ID) continue;
+        // Skip the target itself and any moon of the target's system — arriving
+        // there means flying *toward* that system, not dodging it.
+        if (m.id === s.transferTargetId || m.orbit.parentId === s.transferTargetId) continue;
         const toM = new THREE.Vector3().subVectors(m.center, s.position);
         const d = toM.length();
         if (d < 1e-6 || d > m.soiRadius * 2.2) continue;
@@ -1048,12 +1067,14 @@ export class Simulator {
         if (isReturnHome && outboundTarget && !this.state.reachedBodyIds.has(outboundTarget)) {
           return false;
         }
-        // Arrive when inside the authored SOI OR once the target's gravity
-        // actually dominates. The hand-authored SOI radii don't track each
-        // body's true dominance region (a massive world like Venus dominates
-        // far beyond its small SOI), so keying purely off the SOI lets the
-        // craft sail past and escape. Dominance is self-scaling per body.
-        if (this.state.position.distanceTo(tgt.center) <= tgt.soiRadius) return true;
+        // Launching from a moon toward its host planet, the craft STARTS inside
+        // the host's SOI (the moon orbits within it), so a plain containment test
+        // would fire on the pad. Require the host to actually dominate — i.e. the
+        // craft has escaped the moon — before "arriving".
+        const launchDef = bodyDef(this.plan.launchBodyId);
+        const targetIsHostOfLaunch = launchDef.parent === t.targetBodyId;
+        if (!targetIsHostOfLaunch &&
+            this.state.position.distanceTo(tgt.center) <= tgt.soiRadius) return true;
         return dominantBody(this.bodies, this.state.position).id === tgt.id;
       }
       case 'after-orbit': {

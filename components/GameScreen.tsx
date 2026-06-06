@@ -29,6 +29,7 @@ import MissionSummary from './MissionSummary';
 import MilestoneToast from './MilestoneToast';
 import NavDrawer from './NavDrawer';
 import SoundToggle from './SoundToggle';
+import Dropdown from './Dropdown';
 
 type ToastInfo = { id: number; title: string; subtitle: string };
 
@@ -360,21 +361,17 @@ export default function GameScreen() {
       <NavDrawer title="Flight Menu" />
       <SoundToggle />
 
-      {/* Launch-site chip (replaces the old scenario banner) */}
+      {/* Launch-site selector — a dropdown so it scales on mobile as more bases
+          (every landable world) become available. */}
       {mode === 'plan' && plan && bases.length > 1 && (
         <div className="absolute z-30 top-[calc(0.75rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2
-                        panel px-2 py-1.5 flex items-center gap-1">
-          <span className="text-[9px] text-dim px-1">LAUNCH&nbsp;FROM</span>
-          {bases.map((id) => (
-            <button
-              key={id}
-              onClick={() => handleLaunchSite(id)}
-              className={`text-[10px] font-black tracking-wider uppercase rounded-md px-2.5 py-1 border
-                ${id === plan.launchBodyId
-                  ? 'border-cyan/70 bg-cyan/20 text-cyan'
-                  : 'border-white/15 bg-white/[0.06] text-dim'}`}
-            >{bodyDef(id).name}</button>
-          ))}
+                        panel p-1 w-[min(72vw,16rem)]">
+          <Dropdown
+            label="LAUNCH FROM"
+            value={plan.launchBodyId}
+            options={bases.map((id) => ({ id, name: bodyDef(id).name }))}
+            onChange={handleLaunchSite}
+          />
         </div>
       )}
 

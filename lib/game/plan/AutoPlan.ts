@@ -120,6 +120,32 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
     return finish(launchId, destId, kind, orbitKm, nodes);
   }
 
+  // ── Moon → its host planet (e.g. Moon → Earth) ──────────────────────────────
+  // The launch world orbits the target, so the craft is already inside the host's
+  // SOI. Escape the moon with a depart burn, then capture (orbit) or descend
+  // (land) at the host — the at-soi-entry triggers are dominance-gated so they
+  // only fire once the moon has actually been left behind.
+  const launchDef = bodyDef(launchId);
+  const launchHost = launchDef.parent && launchDef.parent !== 'sun' ? launchDef.parent : null;
+  if (targetId === launchHost) {
+    // Escape the moon, then capture (orbit) or descend (land) at the host. The
+    // capture circularizes LOW — below the moon's own lane — before settling or
+    // de-orbiting, so the craft can't swing back out into the moon and get
+    // recaptured (which would land it back on the moon).
+    nodes.push(node('after-orbit', undefined, targetId, { depart: true }));
+    if (kind === 'orbit' || kind === 'orbit-return') {
+      nodes.push(node('at-soi-entry', undefined, targetId, { capture: true }));
+      if (kind === 'orbit-return') addReturnLeg(nodes, launchId, targetId);
+    } else {
+      nodes.push(node('at-soi-entry', undefined, targetId, { descend: true }));
+      if (kind === 'land-return') {
+        nodes.push(node('on-manual-relaunch', undefined, undefined, { ascend: true }));
+        addReturnLeg(nodes, launchId, targetId);
+      }
+    }
+    return finish(launchId, destId, kind, orbitKm, nodes);
+  }
+
   // ── Interplanetary / lunar transfer ────────────────────────────────────────
   // Once a parking orbit is established, hand the cruise to the homing transfer
   // autopilot: it climbs out of the launch world's well and chases the (orbiting)

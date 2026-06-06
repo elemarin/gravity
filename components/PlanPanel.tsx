@@ -6,9 +6,10 @@ import {
   MissionKind, MissionSpec, MISSION_LABELS,
   describeTrigger, describeActions, newNodeId,
 } from '@/lib/game/plan/FlightPlan';
-import { Body, DESTINATIONS, destinationTargetId, isLandable } from '@/lib/game/bodies';
+import { Body, availableDestinations, destinationTargetId, isLandable } from '@/lib/game/bodies';
 import { autoPlan, defaultOrbitKm, minimumOrbitKm } from '@/lib/game/plan/AutoPlan';
 import { requiredDeltaV } from '@/lib/game/career/Requirements';
+import Dropdown from './Dropdown';
 
 type Props = {
   plan: FlightPlan;
@@ -179,7 +180,7 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, buildDelta
               <div className="mt-1">
                 <Dropdown
                   value={plan.destinationId}
-                  options={DESTINATIONS.map((d) => ({ id: d.id, name: d.name }))}
+                  options={availableDestinations(plan.launchBodyId)}
                   onChange={setDestination}
                 />
               </div>
@@ -434,57 +435,6 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, buildDelta
       </div>
     );
   }
-}
-
-function Dropdown({
-  value, options, onChange,
-}: {
-  value: string;
-  options: { id: string; name: string }[];
-  onChange: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const current = options.find((o) => o.id === value);
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        className="flex w-full items-center justify-between gap-2 rounded-md border-2 border-cyan/45
-                   bg-cyan/[0.07] px-3 py-2 text-left transition hover:border-cyan/70 active:scale-[0.99]"
-      >
-        <span className="truncate text-[12px] font-black text-ink">{current?.name ?? 'Select…'}</span>
-        <span className={`shrink-0 text-cyan transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
-      </button>
-      {open && (
-        <>
-          <button type="button" aria-label="Close" onClick={() => setOpen(false)} className="fixed inset-0 z-40" />
-          <div
-            role="listbox"
-            className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-[40vh] overflow-y-auto
-                       rounded-md border-2 border-cyan/40 bg-bg/95 p-1 shadow-2xl backdrop-blur-xl"
-          >
-            {options.map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                role="option"
-                aria-selected={o.id === value}
-                onClick={() => { onChange(o.id); setOpen(false); }}
-                className={`flex w-full items-center justify-between rounded px-2.5 py-2 text-left text-[12px] font-bold transition
-                  ${o.id === value ? 'bg-cyan/15 text-cyan' : 'text-ink hover:bg-cyan/10'}`}
-              >
-                {o.name}
-                {o.id === value && <span className="text-[10px] text-cyan">✓</span>}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
 }
 
 function Toggle({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {

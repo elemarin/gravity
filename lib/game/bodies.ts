@@ -86,7 +86,7 @@ const DEFS: BodyDef[] = [
   { id: 'earth',   name: 'Earth',   radius: EARTH_RADIUS, surfaceG: 9.81, atmosphereHeight: ATMOSPHERE_HEIGHT, soiRadius: 720, color: 0x2e74e8, skyDay: 0x8ec9ff, orbitR: 3400, phase: 0.0 },
   { id: 'moon',    name: 'Moon',    radius: 17.4, surfaceG: 1.62, atmosphereHeight: 0,   soiRadius: 70,  color: 0xc2c7d2, skyDay: 0x0a0a12, parent: 'earth', orbitR: 560, phase: 0.7 },
   { id: 'mars',    name: 'Mars',    radius: 33.9, surfaceG: 3.71, atmosphereHeight: 60,  soiRadius: 240, color: 0xd06a44, skyDay: 0xe0a07a, orbitR: 4700, phase: 0.9 },
-  { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 34,  color: 0x9a8f84, skyDay: 0x07070a, parent: 'mars', orbitR: 140, phase: 1.5 },
+  { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 24,  color: 0x9a8f84, skyDay: 0x07070a, parent: 'mars', orbitR: 175, phase: 1.5 },
   { id: 'ceres',   name: 'Ceres',   radius: 13.5, surfaceG: 0.27, atmosphereHeight: 0,   soiRadius: 54,  color: 0x8d8a82, skyDay: 0x06060a, dwarf: true, orbitR: 6000, phase: 4.0 },
   { id: 'jupiter', name: 'Jupiter', radius: 120,  surfaceG: 24.79,atmosphereHeight: 240, soiRadius: 900, color: 0xd7b58a, skyDay: 0xc9a878, gas: true, orbitR: 8200, phase: 5.3 },
   { id: 'saturn',  name: 'Saturn',  radius: 105,  surfaceG: 10.44,atmosphereHeight: 220, soiRadius: 850, color: 0xe6d6a8, skyDay: 0xd8c790, gas: true, orbitR: 10600, phase: 2.0 },
@@ -236,8 +236,27 @@ export function isLandable(bodyId: string): boolean {
 
 /** Returns the transfer target, or null when the destination is the launch body itself. */
 export function destinationTargetId(destinationId: string, launchId: string): string | null {
+  // 'orbit' (or selecting the launch world itself) means "orbit/land here".
+  if (destinationId === 'orbit' || destinationId === launchId) return null;
+  // A destination id is just a body id — every body except the launch world is a
+  // valid target (including the home planet when launching from a moon/base).
+  if (SOLAR_BODIES[destinationId] && destinationId !== SUN_ID) return destinationId;
   const targetId = getDestination(destinationId).targetId;
   return targetId && targetId !== launchId ? targetId : null;
+}
+
+/**
+ * The destinations offered when launching from `launchId`: "Orbit" (the launch
+ * world itself) plus every other body in the system. This is dynamic so a base
+ * on the Moon can target Earth, a base on Mars can target Phobos, etc.
+ */
+export function availableDestinations(launchId: string): { id: string; name: string }[] {
+  const opts = [{ id: 'orbit', name: 'Orbit' }];
+  for (const id of SYSTEM_BODY_IDS) {
+    if (id === SUN_ID || id === launchId) continue;
+    opts.push({ id, name: bodyDef(id).name });
+  }
+  return opts;
 }
 
 /**
