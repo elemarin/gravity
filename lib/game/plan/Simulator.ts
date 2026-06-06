@@ -58,6 +58,20 @@ function lambertV1(r1v: THREE.Vector3, r2v: THREE.Vector3, dt: number, mu: numbe
 export type SimPhase =
   | 'prelaunch' | 'flight' | 'orbit' | 'reentry' | 'landed' | 'destroyed';
 
+/**
+ * Trigger types that mark the boundary between mission legs (cruise, capture,
+ * relaunch). These fire strictly in order relative to one another so a later
+ * leg can't start before the current one finishes; ascent/insertion triggers
+ * (altitude- and apsis-keyed) are deliberately excluded so they stay flexible.
+ */
+const LEG_GATE_TRIGGERS: ReadonlySet<string> = new Set([
+  'after-orbit', 'at-soi-entry', 'at-transfer-window', 'on-manual-relaunch',
+]);
+
+function isLegGate(node: Maneuver): boolean {
+  return LEG_GATE_TRIGGERS.has(node.trigger.type);
+}
+
 const KARMAN_LINE  = 100.0;        // km above surface
 const DRAG_COEFF   = 0.018;
 const CHUTE_CROSS  = 320;          // cross-section for deployed chute (~10 m/s terminal)
@@ -338,12 +352,27 @@ export class Simulator {
     }
 
     // --- Maneuver triggers ---
+    // Nodes fire in order, but with two different ordering rules so that ascent
+    // stays flexible while multi-leg cruises stay strictly sequenced:
+    //  • Ascent / insertion nodes (altitude- and apsis-keyed) may fire even if an
+    //    earlier such node has not — a powerful engine can reach the apoapsis-
+    //    altitude cutoff before an earlier heading waypoint, and that cutoff must
+    //    still fire or the craft burns straight to escape.
+    //  • "Leg-gate" nodes (after-orbit / at-soi-entry / relaunch / transfer-window)
+    //    are the boundaries between mission legs. One may only fire once every
+    //    earlier leg-gate has fired, so a later leg (e.g. the transfer to a moon)
+    //    can't fire while still parked at the launch world and hijack the current
+    //    leg's transfer.
     for (const node of this.plan.nodes) {
       if (s.firedNodeIds.has(node.id)) continue;
       if (this.triggerFired(node, altitude, radialVel)) {
         s.firedNodeIds.add(node.id);
         this.applyActions(node);
+        continue;
       }
+      // An unfired leg-gate blocks every later node until it fires; an unfired
+      // ascent/insertion node is simply skipped (later ones may still fire).
+      if (isLegGate(node)) break;
     }
 
     // --- De-orbit autopilot (the LAND button) ---

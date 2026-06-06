@@ -121,8 +121,24 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
   }
 
   // ── Interplanetary / lunar transfer ────────────────────────────────────────
+  // A target that is a MOON of another planet (e.g. Phobos around Mars, Titan
+  // around Saturn) can't be chased directly across interplanetary space: the
+  // homing/Lambert cruise keys off the body's orbit radius, which for a moon is
+  // its tiny radius around its parent — not its heliocentric distance — so the
+  // craft burns toward a phantom lane near the Sun and strands. Instead, route
+  // through the parent planet: transfer to and capture around the parent first,
+  // then run the ordinary phased-Hohmann moon rendezvous (which the simulator's
+  // "moonLike" transfer branch handles once parked around the parent).
+  const targetDef = bodyDef(targetId);
+  const parentId = targetDef.parent;
+  const targetIsDistantMoon = !!parentId && parentId !== 'sun' && parentId !== launchId;
+  if (targetIsDistantMoon) {
+    nodes.push(node('after-orbit', undefined, parentId, { transfer: true }));
+    nodes.push(node('at-soi-entry', undefined, parentId, { capture: true }));
+  }
+
   // Once a parking orbit is established, hand the cruise to the homing transfer
-  // autopilot: it climbs out of the launch world's well and chases the (orbiting)
+  // autopilot: it climbs out of the parked world's well and chases the (orbiting)
   // target until the target's gravity takes over. This replaces the old open-loop
   // "burn at a transfer window, coast to a fixed apoapsis", which could never hit
   // a target that is itself moving along its orbit.
