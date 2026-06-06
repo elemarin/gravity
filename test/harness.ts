@@ -65,17 +65,30 @@ const PRESET_BUILDS: { id: string; build: RocketBuild; dv: number }[] = ROCKET_P
 
 const MOST_CAPABLE = PRESET_BUILDS.reduce((a, b) => (b.dv > a.dv ? b : a));
 
+/** Any mission that ends on a surface needs landing hardware to touch down. */
+function missionLands(kind: MissionKind): boolean {
+  return kind === 'land' || kind === 'land-return' || kind === 'orbit-return';
+}
+
+/** True when a build carries gear that lets it survive a touchdown. */
+function canLand(build: RocketBuild): boolean {
+  const utils = build.utilityIds ?? [];
+  return !!build.landerId || utils.includes('landing-legs') || utils.includes('parachute');
+}
+
 /**
  * The rocket a player would actually fly for a scenario: the cheapest preset
- * that clears the mission's Δv budget (the career gate), falling back to the
- * most capable build. `null` means no build in the catalogue can carry the
- * budget — the scenario is Δv-infeasible, not a physics failure.
+ * that clears the mission's Δv budget (the career gate) AND — for any mission
+ * that lands — actually carries landing gear. Falls back to the most capable
+ * build. `feasible: false` means no catalogue build qualifies, so the scenario
+ * is content-infeasible (Δv or hardware), not a physics failure.
  */
 export function pickBuild(
   launchId: string, destId: string, kind: MissionKind,
 ): { build: RocketBuild; id: string; feasible: boolean } {
   const need = requiredDeltaV(launchId, destId, kind);
-  const fit = PRESET_BUILDS.find((p) => p.dv >= need);
+  const lands = missionLands(kind);
+  const fit = PRESET_BUILDS.find((p) => p.dv >= need && (!lands || canLand(p.build)));
   if (fit) return { build: fit.build, id: fit.id, feasible: true };
   return { build: MOST_CAPABLE.build, id: MOST_CAPABLE.id, feasible: false };
 }
