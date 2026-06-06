@@ -204,7 +204,6 @@ export class Planet {
       } else {
         // DEFAULT PLANETS (Venus, Uranus, Neptune, Phobos, etc.)
         const noise = Math.sin(x * 3.7 + y * 2.1 + z * 5.3) * 0.5 + 0.5;
-        const noise2 = Math.sin(x * 1.3 - z * 2.7 + y * 0.7) * 0.5 + 0.5;
         if (noise > 0.62) c = light;
         else if (noise > 0.42) c = base;
         else c = dark;
