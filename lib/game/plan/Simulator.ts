@@ -815,6 +815,35 @@ export class Simulator {
       }
     }
 
+    // --- Non-target moon collision avoidance (during a transfer) ---
+    // Escaping a world toward an interplanetary target, or cruising past one, the
+    // craft's path can cross one of a world's small moons exactly when the moon is
+    // there — the patched-conic then snaps to the moon and it slams into the
+    // surface (the "crashes into the Moon on the way to Mars" bug). Predicting the
+    // exact crossing is fiddly because the escape arc curves; instead, react: when
+    // closing on a non-target moon's sphere of influence, thrust perpendicular to
+    // the approach to widen the flyby until it's clear. Cheap, robust, and it only
+    // engages in the rare moment a moon is actually in the way.
+    if (s.transferAssist) {
+      for (const m of this.bodies) {
+        if (m.id === s.transferTargetId || !m.orbit || m.orbit.parentId === SUN_ID) continue;
+        const toM = new THREE.Vector3().subVectors(m.center, s.position);
+        const d = toM.length();
+        if (d < 1e-6 || d > m.soiRadius * 2.2) continue;
+        const mHat = toM.multiplyScalar(1 / d);
+        const vRel = this.relVel(m);
+        if (vRel.dot(mHat) <= 0) continue;               // not closing on the moon
+        // Steer along the velocity component perpendicular to the moon line —
+        // pushing the flyby wider — falling back to a fixed perpendicular if the
+        // approach is dead-on.
+        let perp = vRel.clone().addScaledVector(mHat, -vRel.dot(mHat));
+        if (perp.lengthSq() < 1e-8) perp.set(-mHat.y, mHat.x, 0);
+        this.aimToward(perp.normalize(), up);
+        s.throttle = 1;
+        break;
+      }
+    }
+
     // --- Automatic attitude hold (prograde / retrograde) ---
     // Convert the desired thrust direction into the up/east aim angle so the
     // existing thrust + mesh code "just works". Everything stays in the x-y
