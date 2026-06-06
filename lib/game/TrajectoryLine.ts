@@ -41,6 +41,8 @@ export class TrajectoryLine {
   private landingMarker: THREE.Mesh;
   private apoCanvas: HTMLCanvasElement;
   private periCanvas: HTMLCanvasElement;
+  private pointsMesh: THREE.Points;
+  private pointsMaterial: THREE.PointsMaterial;
 
   constructor(scene: THREE.Scene) {
     this.group = new THREE.Group();
@@ -87,7 +89,21 @@ export class TrajectoryLine {
     this.glow.frustumCulled = false;
     this.glow.renderOrder = 2;
 
-    this.group.add(this.glow, this.line);
+    this.pointsMaterial = new THREE.PointsMaterial({
+      vertexColors: true,
+      size: 3,
+      sizeAttenuation: false,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: false,
+    });
+    this.pointsMesh = new THREE.Points(this.geometry, this.pointsMaterial);
+    this.pointsMesh.frustumCulled = false;
+    this.pointsMesh.renderOrder = 4;
+
+    this.group.add(this.glow, this.line, this.pointsMesh);
     this.group.visible = false;
     scene.add(this.group);
 
@@ -319,6 +335,7 @@ export class TrajectoryLine {
     this.glowGeometry.dispose();
     this.material.dispose();
     this.glowMaterial.dispose();
+    this.pointsMaterial.dispose();
     [this.apoMarker, this.periMarker].forEach((sprite) => {
       const mat = sprite.material as THREE.SpriteMaterial;
       mat.map?.dispose();
