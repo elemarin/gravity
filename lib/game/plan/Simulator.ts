@@ -721,19 +721,11 @@ export class Simulator {
           } else {
             s.throttle = 0;                 // wrong phase — coast to the injection point
           }
-        } else if (dist < tgt.soiRadius * 1.5) {
-          // Rendezvous endgame — a thin safety net right at the SOI edge. The
-          // Lambert cruise has already delivered the craft to the target (so it is
-          // essentially co-moving with it here); we just null any residual velocity
-          // RELATIVE TO THE TARGET and ease the last little gap in, so the craft
-          // slips into the SOI at low relative speed for a cheap capture.
-          //
-          // Crucially this engages only at ~1.5 SOI radii, NOT several radii out:
-          // a planet crosses its own SOI-width in well under the time a slow ease-in
-          // takes, so triggering far out (where the craft has not yet matched the
-          // target's orbital velocity) lets the target simply outrun the approach —
-          // the craft drifts past and the cruise burn then pumps it onto an
-          // escape. Keeping Lambert in command until the edge avoids that.
+        } else if (dist < Math.max(tgt.soiRadius * 6, tgt.radius + 160)) {
+          // Rendezvous endgame. Once we're within a few SOI radii, stop chasing a
+          // fixed arrival point and instead null the velocity RELATIVE TO THE
+          // TARGET while easing in, so the craft slips into the SOI at low relative
+          // speed — a cheap arrival the capture autopilot can brake into orbit.
           s.transferClimbed = true;
           const tgtRel = this.relVel(tgt);
           const escAtSoi = Math.sqrt(2 * tgt.GM / Math.max(tgt.soiRadius, tgt.radius + 1));
