@@ -102,10 +102,46 @@ export class Renderer {
     };
   }
 
+  private makeStarTexture(): THREE.Texture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 16;
+    canvas.height = 16;
+    const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, 16, 16);
+    
+    // Draw a pixel-art star/cross:
+    // Center glow:
+    ctx.fillStyle = 'rgba(255, 255, 255, 1.0)';
+    ctx.fillRect(7, 7, 2, 2);
+    
+    // Horizontal and vertical flares (pixelated)
+    ctx.fillStyle = 'rgba(230, 245, 255, 0.7)';
+    ctx.fillRect(5, 7, 2, 2);
+    ctx.fillRect(9, 7, 2, 2);
+    ctx.fillRect(7, 5, 2, 2);
+    ctx.fillRect(7, 9, 2, 2);
+    
+    // Faint ends
+    ctx.fillStyle = 'rgba(180, 220, 255, 0.4)';
+    ctx.fillRect(3, 7, 2, 2);
+    ctx.fillRect(11, 7, 2, 2);
+    ctx.fillRect(7, 3, 2, 2);
+    ctx.fillRect(7, 11, 2, 2);
+    
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
+    return tex;
+  }
+
   private buildSpaceBackdrop() {
     this.scene.add(this.spaceBackdrop);
+    const starTex = this.makeStarTexture();
+    this.spaceTextures.push(starTex);
     this.buildStarLayer(1800, 4200, 1.15, 0xffffff, 0.22, 0x2f6b9d);
-    this.buildStarLayer(260, 4400, 2.25, 0xd9f0ff, 0.42, 0x8d52c8);
+    this.buildStarLayer(260, 4400, 14.0, 0xd9f0ff, 0.42, 0x8d52c8, starTex);
 
     const nebulae: Array<{ theta: number; phi: number; scale: [number, number, number]; color: number; kind: 'nebula' | 'galaxy'; rotation: number }> = [
       { theta: 0.25, phi: 1.05, scale: [720, 320, 1], color: 0x5bd8ff, kind: 'nebula', rotation: -0.35 },
@@ -143,7 +179,7 @@ export class Renderer {
     }
   }
 
-  private buildStarLayer(count: number, radius: number, size: number, color: number, hueJitter: number, seed: number) {
+  private buildStarLayer(count: number, radius: number, size: number, color: number, hueJitter: number, seed: number, map?: THREE.Texture) {
     const rand = this.seededRandom(seed);
     const geo = new THREE.BufferGeometry();
     const pos = new Float32Array(count * 3);
@@ -171,6 +207,8 @@ export class Renderer {
       depthWrite: false,
       depthTest: true,
       fog: false,
+      map: map,
+      blending: map ? THREE.AdditiveBlending : undefined,
     });
     this.starMaterials.push(mat);
     this.spaceBackdrop.add(new THREE.Points(geo, mat));
@@ -178,51 +216,90 @@ export class Renderer {
 
   private makeNebulaTexture(colorHex: number): THREE.Texture {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 256;
+    canvas.width = 128;
+    canvas.height = 128;
     const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
     const c = new THREE.Color(colorHex);
     const r = Math.round(c.r * 255), g = Math.round(c.g * 255), b = Math.round(c.b * 255);
-    const grad = ctx.createRadialGradient(128, 128, 8, 128, 128, 128);
+    const grad = ctx.createRadialGradient(64, 64, 4, 64, 64, 64);
     grad.addColorStop(0, `rgba(255,255,255,0.55)`);
     grad.addColorStop(0.18, `rgba(${r},${g},${b},0.35)`);
     grad.addColorStop(0.55, `rgba(${r},${g},${b},0.12)`);
     grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
     ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 256, 256);
+    ctx.fillRect(0, 0, 128, 128);
+
+    // Add chunky pixel dust/noise for retro dithered look
+    for (let i = 0; i < 400; i++) {
+      const px = Math.floor(Math.random() * 128);
+      const py = Math.floor(Math.random() * 128);
+      const dx = px - 64;
+      const dy = py - 64;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const maxDist = 64;
+      if (dist < maxDist) {
+        const factor = (1 - dist / maxDist);
+        if (Math.random() < factor * 0.7) {
+          ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.25 * factor})`;
+          ctx.fillRect(px, py, 1, 1);
+        }
+      }
+    }
+
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
     return tex;
   }
 
   private makeGalaxyTexture(colorHex: number): THREE.Texture {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 256;
+    canvas.width = 128;
+    canvas.height = 128;
     const ctx = canvas.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
     const c = new THREE.Color(colorHex);
     const r = Math.round(c.r * 255), g = Math.round(c.g * 255), b = Math.round(c.b * 255);
-    ctx.translate(128, 128);
+    ctx.translate(64, 64);
     ctx.scale(1, 0.32);
-    const glow = ctx.createRadialGradient(0, 0, 4, 0, 0, 120);
+    const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, 60);
     glow.addColorStop(0, 'rgba(255,255,255,0.9)');
-    glow.addColorStop(0.2, `rgba(${r},${g},${b},0.48)`);
+    glow.addColorStop(0.2, `rgba(${r},${g},${b},0.5)`);
     glow.addColorStop(0.75, `rgba(${r},${g},${b},0.16)`);
     glow.addColorStop(1, `rgba(${r},${g},${b},0)`);
     ctx.fillStyle = glow;
     ctx.beginPath();
-    ctx.arc(0, 0, 120, 0, Math.PI * 2);
+    ctx.arc(0, 0, 60, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = `rgba(255,255,255,0.45)`;
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = `rgba(${r},${g},${b},0.55)`;
+    ctx.lineWidth = 1;
     for (let i = 0; i < 4; i++) {
       ctx.rotate(Math.PI / 2);
       ctx.beginPath();
-      ctx.ellipse(0, 0, 78, 18 + i * 3, 0.2 + i * 0.28, 0, Math.PI * 1.45);
+      ctx.ellipse(0, 0, 38, 9 + i * 1.5, 0.2 + i * 0.28, 0, Math.PI * 1.45);
       ctx.stroke();
     }
+
+    // Add pixelated galaxy star dust
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // reset scale/rotation
+    for (let i = 0; i < 250; i++) {
+      const px = Math.floor(Math.random() * 128);
+      const py = Math.floor(Math.random() * 128);
+      const dx = px - 64;
+      const dy = (py - 64) / 0.32; // match the scale
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 60 && Math.random() < (1 - dist / 60) * 0.6) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.4})`;
+        ctx.fillRect(px, py, 1, 1);
+      }
+    }
+
     const tex = new THREE.CanvasTexture(canvas);
     tex.colorSpace = THREE.SRGBColorSpace;
+    tex.minFilter = THREE.NearestFilter;
+    tex.magFilter = THREE.NearestFilter;
     return tex;
   }
 

@@ -8,12 +8,22 @@ import { Body, SUN_ID } from '../bodies';
  */
 export class OrbitRings {
   private group = new THREE.Group();
-  private rings: { mesh: THREE.LineLoop; parentId: string }[] = [];
+  private rings: { mesh: THREE.LineLoop; points?: THREE.Points; parentId: string }[] = [];
   private material: THREE.LineBasicMaterial;
+  private pointsMaterial: THREE.PointsMaterial;
 
   constructor(scene: THREE.Scene, bodies: Body[]) {
     this.material = new THREE.LineBasicMaterial({
       color: 0x6f8bb5, transparent: true, opacity: 0.28, depthWrite: false, fog: false,
+    });
+    this.pointsMaterial = new THREE.PointsMaterial({
+      color: 0x6f8bb5,
+      size: 2,
+      sizeAttenuation: false,
+      transparent: true,
+      opacity: 0.35,
+      depthWrite: false,
+      fog: false,
     });
     for (const b of bodies) {
       if (!b.orbit) continue;
@@ -25,8 +35,9 @@ export class OrbitRings {
       }
       const geo = new THREE.BufferGeometry().setFromPoints(pts);
       const mesh = new THREE.LineLoop(geo, this.material);
-      this.rings.push({ mesh, parentId: b.orbit.parentId });
-      this.group.add(mesh);
+      const points = new THREE.Points(geo, this.pointsMaterial);
+      this.rings.push({ mesh, points, parentId: b.orbit.parentId });
+      this.group.add(mesh, points);
     }
     scene.add(this.group);
   }
@@ -36,12 +47,16 @@ export class OrbitRings {
     for (const r of this.rings) {
       if (r.parentId === SUN_ID) continue; // planet rings stay at the origin
       const parent = bodies.find((b) => b.id === r.parentId);
-      if (parent) r.mesh.position.copy(parent.center);
+      if (parent) {
+        r.mesh.position.copy(parent.center);
+        if (r.points) r.points.position.copy(parent.center);
+      }
     }
   }
 
   dispose() {
     for (const r of this.rings) r.mesh.geometry.dispose();
     this.material.dispose();
+    this.pointsMaterial.dispose();
   }
 }
