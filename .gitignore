@@ -10,3 +10,6 @@ dist
 next-env.d.ts
 .vite
 tsconfig.tsbuildinfo
+
+# Scratch diagnostics (temporary tsx scripts)
+/_*.ts

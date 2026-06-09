@@ -111,15 +111,6 @@ export function computeStats(build: RocketBuild): RocketStats {
   };
 }
 
-export function estimateDeltaV(stats: RocketStats): number {
-  // crude approximation of total acceleration capability
-  if (stats.burnRate <= 0 || stats.wetMass <= 0) return 0;
-  const isp = ISP; // s, average
-  const g0  = 9.81;
-  const massRatio = stats.wetMass / Math.max(stats.dryMass, 0.001);
-  return isp * g0 * Math.log(massRatio);
-}
-
 /**
  * Multi-stage delta-v: each stage burns while carrying the (full) stages above
  * it as dead payload, so staging yields more total delta-v than one big tank.

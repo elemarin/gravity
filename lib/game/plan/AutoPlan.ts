@@ -120,12 +120,53 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
     return finish(launchId, destId, kind, orbitKm, nodes);
   }
 
+  // ── Moon → its host planet (e.g. Moon → Earth) ──────────────────────────────
+  // The launch world orbits the target, so the craft is already inside the host's
+  // SOI. Escape the moon with a depart burn, then capture (orbit) or descend
+  // (land) at the host — the at-soi-entry triggers are dominance-gated so they
+  // only fire once the moon has actually been left behind.
+  const launchDef = bodyDef(launchId);
+  const launchHost = launchDef.parent && launchDef.parent !== 'sun' ? launchDef.parent : null;
+  if (targetId === launchHost) {
+    // Escape the moon, then capture (orbit) or descend (land) at the host. The
+    // capture circularizes LOW — below the moon's own lane — before settling or
+    // de-orbiting, so the craft can't swing back out into the moon and get
+    // recaptured (which would land it back on the moon).
+    nodes.push(node('after-orbit', undefined, targetId, { depart: true }));
+    if (kind === 'orbit' || kind === 'orbit-return') {
+      nodes.push(node('at-soi-entry', undefined, targetId, { capture: true }));
+      if (kind === 'orbit-return') addReturnLeg(nodes, launchId, targetId);
+    } else {
+      nodes.push(node('at-soi-entry', undefined, targetId, { descend: true }));
+      if (kind === 'land-return') {
+        nodes.push(node('on-manual-relaunch', undefined, undefined, { ascend: true }));
+        addReturnLeg(nodes, launchId, targetId);
+      }
+    }
+    return finish(launchId, destId, kind, orbitKm, nodes);
+  }
+
   // ── Interplanetary / lunar transfer ────────────────────────────────────────
   // Once a parking orbit is established, hand the cruise to the homing transfer
   // autopilot: it climbs out of the launch world's well and chases the (orbiting)
   // target until the target's gravity takes over. This replaces the old open-loop
   // "burn at a transfer window, coast to a fixed apoapsis", which could never hit
   // a target that is itself moving along its orbit.
+  //
+  // A moon of ANOTHER planet (e.g. Titan around Saturn) can't be hit directly
+  // across interplanetary space — its sphere of influence is a needle in the
+  // haystack of its host's. So route in two legs: cross to the host planet and
+  // capture into its system first, then hop to the moon from there (the same
+  // phased transfer the Earth→Moon route flies). The moon-hop's `after-orbit`
+  // trigger waits until the host has actually been reached (see the Simulator),
+  // so it can't fire prematurely back at the launch world's parking orbit.
+  const tDef = bodyDef(targetId);
+  const hostId = tDef.parent && tDef.parent !== 'sun' && tDef.parent !== launchId
+    ? tDef.parent : null;
+  if (hostId) {
+    nodes.push(node('after-orbit', undefined, hostId, { transfer: true }));
+    nodes.push(node('at-soi-entry', undefined, hostId, { capture: true }));
+  }
   nodes.push(node('after-orbit', undefined, targetId, { transfer: true }));
 
   if (kind === 'orbit' || kind === 'orbit-return') {
@@ -157,6 +198,9 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
  * For a MOON of the launch world (nested inside the launch world's SOI), a single
  * `depart` burn escapes the moon and drops into the launch world's atmosphere.
  *
+ * For a MOON of another planet (e.g. Titan), first escape the moon into its
+ * host's system, then fly the interplanetary cruise home and descend.
+ *
  * For a PLANET (its own heliocentric orbit), going home is a full interplanetary
  * transfer: home the craft back to the launch world with the same Lambert cruise
  * the outbound leg uses, then capture-descend into its atmosphere. A lone
@@ -165,9 +209,17 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
  */
 function addReturnLeg(nodes: Maneuver[], launchId: string, targetId: string) {
   const targetDef = bodyDef(targetId);
-  const targetIsMoon = !!targetDef.parent && targetDef.parent !== 'sun';
-  if (targetIsMoon) {
+  const host = targetDef.parent && targetDef.parent !== 'sun' ? targetDef.parent : null;
+  const hostIsLaunch = host === launchId;
+  if (host && hostIsLaunch) {
+    // A moon of the launch world (e.g. Earth's Moon): one depart burn drops home.
     nodes.push(node('after-orbit', undefined, launchId, { depart: true }));
+  } else if (host) {
+    // A moon of another planet: escape the moon into the host's system, then run
+    // the interplanetary cruise back to the launch world and descend.
+    nodes.push(node('after-orbit', undefined, host, { depart: true }));
+    nodes.push(node('after-orbit', undefined, launchId, { transfer: true }));
+    nodes.push(node('at-soi-entry', undefined, launchId, { descend: true }));
   } else {
     // Interplanetary return: transfer back to the launch world, then descend.
     nodes.push(node('after-orbit', undefined, launchId, { transfer: true }));

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { Body, dominantBody, positionBodiesAt, bodyStateAt, destinationTargetId, SUN_GM, SUN_ID } from '../bodies';
+import { Body, dominantBody, positionBodiesAt, bodyStateAt, destinationTargetId, bodyDef, SUN_GM, SUN_ID } from '../bodies';
 import { FlightPlan, Maneuver, Attitude } from './FlightPlan';
 import { StageStats } from '../BuildSpec';
+import { KARMAN_LINE } from '../constants';
 
 // ── Lambert's problem (universal-variable solution) ──────────────────────────
 // Given two position vectors and a time of flight under a central body of
@@ -58,7 +59,6 @@ function lambertV1(r1v: THREE.Vector3, r2v: THREE.Vector3, dt: number, mu: numbe
 export type SimPhase =
   | 'prelaunch' | 'flight' | 'orbit' | 'reentry' | 'landed' | 'destroyed';
 
-const KARMAN_LINE  = 100.0;        // km above surface
 const DRAG_COEFF   = 0.018;
 const CHUTE_CROSS  = 320;          // cross-section for deployed chute (~10 m/s terminal)
 const CHUTE_STABILIZE_RATE = 2.5;  // how quickly an open chute pulls the craft upright
@@ -277,6 +277,20 @@ export class Simulator {
     );
   }
 
+  /**
+   * A return-home leg (a transfer/depart/arrival whose target is the launch
+   * world) must not fire until the OUTBOUND landing + relaunch has happened —
+   * otherwise, on a land-return, it triggers the moment the craft first reaches a
+   * bound orbit at the destination and the craft heads home before ever landing.
+   * Gated on the plan's relaunch node having fired; orbit-return plans have no
+   * such node, so they're unaffected (their return waits on the arrival capture).
+   */
+  private returnLegBlocked(targetBodyId: string | undefined): boolean {
+    if (targetBodyId !== this.plan.launchBodyId) return false;
+    const relaunch = this.plan.nodes.find((n) => n.trigger.type === 'on-manual-relaunch');
+    return !!relaunch && !this.state.firedNodeIds.has(relaunch.id);
+  }
+
   /** Whether the active stage can currently produce thrust (engine + fuel). */
   private hasThrust(): boolean {
     const st = this.cfg.stages[this.state.activeStage];
@@ -292,6 +306,33 @@ export class Simulator {
 
   /** The live solar system at the current sim time (read-only view). */
   liveBodies(): Body[] { return this.bodies; }
+
+  /** A deep copy of the mutable flight state (clones every vector/array/set). */
+  private cloneState(): SimState {
+    const s = this.state;
+    return {
+      ...s,
+      position: s.position.clone(),
+      velocity: s.velocity.clone(),
+      stageFuel: [...s.stageFuel],
+      reachedBodyIds: new Set(s.reachedBodyIds),
+      firedNodeIds: new Set(s.firedNodeIds),
+    };
+  }
+
+  /**
+   * A detached simulator sharing this one's config + plan but carrying a
+   * snapshot of the current state. Stepping the fork forward-predicts the
+   * trajectory without disturbing the live flight — and keeps the trajectory
+   * preview in lockstep with the real physics instead of a hand-copied subset
+   * of the state that silently drifts whenever a field is added.
+   */
+  fork(): Simulator {
+    const f = new Simulator(this.cfg, this.plan);
+    f.state = this.cloneState();
+    f.positionBodies();
+    return f;
+  }
 
   altitude(): number {
     const b = this.body();
@@ -399,9 +440,15 @@ export class Simulator {
       if (this.cfg.landerIndex >= 0 && !s.deployedLander && !keepStageForReturn) {
         const lowEnough = altitude < Math.max(2, body.radius * 0.35);
         const slowEnough = speedMs < 90;
+        // Last resort on a small/airless world: a low orbit there is hundreds of
+        // m/s and there's little altitude to bleed it off, so the upper stage can
+        // still be fast when low. Drop to the lander anyway once very low — its
+        // fresh full tank and dedicated descent engine give the final braking
+        // authority (and a higher safe-landing speed) the spent upper stage lacks.
+        const desperatelyLow = altitude < Math.max(1.5, body.radius * 0.12);
         const onLanderStage = s.activeStage >= this.cfg.landerIndex;
         const activeStageEmpty = (s.stageFuel[s.activeStage] ?? 0) <= 0.5;
-        if (!onLanderStage && ((lowEnough && slowEnough) || activeStageEmpty)) {
+        if (!onLanderStage && ((lowEnough && slowEnough) || desperatelyLow || activeStageEmpty)) {
           this.doDeployLander();
         }
       }
@@ -515,8 +562,24 @@ export class Simulator {
       // fuel) or has been circularized as low as the capture can get it (a heavy
       // world that settles in a high orbit and can't reach the band — deorbit
       // from there rather than loop forever).
+      // Don't hand a landing arrival off to de-orbit while its apoapsis still
+      // reaches a sibling moon's lane — it would swing back out, get recaptured by
+      // that moon, and land there instead (e.g. Moon→Earth falling back onto the
+      // Moon, or a Mars arrival snagged by Phobos). Circularize below the nearest
+      // moon first; worlds with no moons keep the old SOI ceiling.
+      let hasSiblingMoon = false;
+      for (const o of this.bodies) {
+        if (o.orbit && o.orbit.parentId === tgt.id) { hasSiblingMoon = true; break; }
+      }
+      // A target with a moon (Earth has the Moon, Mars has Phobos) must be
+      // circularized LOW — below that moon's lane — before de-orbiting, or the
+      // craft swings back out to its apoapsis at the moon's lane and gets
+      // recaptured by the moon, landing there instead. Moonless worlds keep the
+      // lenient handoff (a bound orbit is enough; the de-orbit finishes the job),
+      // so weak builds that settle high don't loop forever.
+      const fullyCircular = apoR <= safeMaxR * 1.15 && nearCircular && periR >= minR;
       const captured = this.body().id === tgt.id && Number.isFinite(apoR) && periR >= minR &&
-        (apoR <= tgt.soiRadius || nearCircular);
+        (hasSiblingMoon ? fullyCircular : (apoR <= tgt.soiRadius || nearCircular));
       if (s.landAfterCapture && captured) {
         s.throttle = 0;
         s.captureAssist = false;
@@ -583,9 +646,15 @@ export class Simulator {
         const vEsc = Math.sqrt(2 * fromBody.GM / rNow) * 1.04;
         const vRel = this.relVel(fromBody).length();
         s.attitude = 'prograde';
+        // Proportional taper to zero (no throttle floor): the gentle escape must
+        // leave the SOI at barely above escape speed so the craft settles near the
+        // home world's lane. A fixed floor on a strong engine adds a big Δv chunk
+        // in the final step and overshoots, flinging the craft clear past home; a
+        // floor-free proportional burn eases any engine — weak or mammoth — onto
+        // escape speed without blowing past it.
         s.throttle = vRel >= vEsc
           ? 0
-          : THREE.MathUtils.clamp((vEsc - vRel) / (vEsc * 0.12), 0.2, 1);
+          : THREE.MathUtils.clamp((vEsc - vRel) / (vEsc * 0.06), 0, 1);
       } else {
         // Phase 2 — drop home. Lower the periapsis of the orbit AROUND THE TARGET
         // by burning retrograde *relative to the target* (not the instantaneous
@@ -593,7 +662,12 @@ export class Simulator {
         // send the craft the wrong way). Reentry + parachute / the landing
         // autopilot finishes the touchdown.
         const targetApsides = this.apsides(target);
-        const returnPeriapsis = target.atmosphereHeight > 0 ? target.atmosphereHeight * 0.65 : target.radius * 0.08;
+        // Aim the periapsis DEEP into the atmosphere, not just grazing its top: a
+        // shallow periapsis (e.g. 0.65·atmo) paired with a high apoapsis only skims
+        // the thin upper air and skips back out without landing. A deep periapsis
+        // bleeds enough speed on the first pass to commit to reentry, where the
+        // chute / landing autopilot finishes the touchdown.
+        const returnPeriapsis = target.atmosphereHeight > 0 ? target.atmosphereHeight * 0.2 : target.radius * 0.06;
         if (targetApsides.peri <= returnPeriapsis) {
           s.throttle = 0;
           s.departAssist = false;
@@ -743,10 +817,13 @@ export class Simulator {
           const pickArrival = () => {
             const a = (r1.length() + R) / 2;
             const tHohmann = Math.PI * Math.sqrt((a * a * a) / SUN_GM);
-            // Cap arrival time so distant targets fly a faster, higher-energy
-            // transfer that still fits the mission clock (the long-range builds
-            // carry the Δv for it) rather than a budget-busting minimum-energy one.
-            s.transferArriveT = s.elapsed + THREE.MathUtils.clamp(tHohmann, 1500, 52000);
+            // Aim for close to the minimum-energy (Hohmann) time of flight, only
+            // mildly compressed for very distant targets. Forcing a far world like
+            // Neptune to arrive far sooner than its Hohmann time demands a wildly
+            // high-energy transfer whose arc dives sunward first — the craft
+            // crashes into the Sun. Allowing up to ~85% above the floor keeps the
+            // transfer near minimum-energy and sane while still bounding the cruise.
+            s.transferArriveT = s.elapsed + THREE.MathUtils.clamp(tHohmann, 1500, 120000);
           };
           // (Re)pick the arrival on first entry, or after the window elapses on a
           // near miss so the closed loop keeps chasing a fresh intercept.
@@ -757,7 +834,15 @@ export class Simulator {
           if (v1) {
             const correction = v1.sub(s.velocity);
             if (correction.lengthSq() > 1e-10) this.aimToward(correction, up);
-            s.throttle = correction.length() > 0.015 ? 1 : 0;
+            // Proportional throttle: burn hard to inject onto the transfer arc,
+            // then ease to zero as heliocentric velocity reaches the Lambert
+            // solution. A bang-bang full-throttle burn overshoots v1 every step on
+            // a powerful engine — on an inward leg (a planet return, or an inner
+            // transfer) that excess drives the perihelion down into the Sun and the
+            // craft burns up. Easing off lets it settle ONTO the ballistic arc, so
+            // re-solving returns ~the current velocity and it coasts to the SOI.
+            const c = correction.length();
+            s.throttle = c < 0.01 ? 0 : THREE.MathUtils.clamp(c * 5, 0, 1);
           } else {
             // Lambert degenerate: nudge prograde toward the target lane and retry.
             const desiredVel = toTgt.clone().normalize().multiplyScalar(0.3);
@@ -768,6 +853,38 @@ export class Simulator {
           }
           }
         }
+      }
+    }
+
+    // --- Non-target moon collision avoidance (during a transfer) ---
+    // Escaping a world toward an interplanetary target, or cruising past one, the
+    // craft's path can cross one of a world's small moons exactly when the moon is
+    // there — the patched-conic then snaps to the moon and it slams into the
+    // surface (the "crashes into the Moon on the way to Mars" bug). Predicting the
+    // exact crossing is fiddly because the escape arc curves; instead, react: when
+    // closing on a non-target moon's sphere of influence, thrust perpendicular to
+    // the approach to widen the flyby until it's clear. Cheap, robust, and it only
+    // engages in the rare moment a moon is actually in the way.
+    if (s.transferAssist) {
+      for (const m of this.bodies) {
+        if (!m.orbit || m.orbit.parentId === SUN_ID) continue;
+        // Skip the target itself and any moon of the target's system — arriving
+        // there means flying *toward* that system, not dodging it.
+        if (m.id === s.transferTargetId || m.orbit.parentId === s.transferTargetId) continue;
+        const toM = new THREE.Vector3().subVectors(m.center, s.position);
+        const d = toM.length();
+        if (d < 1e-6 || d > m.soiRadius * 2.2) continue;
+        const mHat = toM.multiplyScalar(1 / d);
+        const vRel = this.relVel(m);
+        if (vRel.dot(mHat) <= 0) continue;               // not closing on the moon
+        // Steer along the velocity component perpendicular to the moon line —
+        // pushing the flyby wider — falling back to a fixed perpendicular if the
+        // approach is dead-on.
+        let perp = vRel.clone().addScaledVector(mHat, -vRel.dot(mHat));
+        if (perp.lengthSq() < 1e-8) perp.set(-mHat.y, mHat.x, 0);
+        this.aimToward(perp.normalize(), up);
+        s.throttle = 1;
+        break;
       }
     }
 
@@ -975,18 +1092,35 @@ export class Simulator {
         if (isReturnHome && outboundTarget && !this.state.reachedBodyIds.has(outboundTarget)) {
           return false;
         }
-        // Arrive when inside the authored SOI OR once the target's gravity
-        // actually dominates. The hand-authored SOI radii don't track each
-        // body's true dominance region (a massive world like Venus dominates
-        // far beyond its small SOI), so keying purely off the SOI lets the
-        // craft sail past and escape. Dominance is self-scaling per body.
-        if (this.state.position.distanceTo(tgt.center) <= tgt.soiRadius) return true;
+        // ...and not before the outbound landing + relaunch on a land-return.
+        if (this.returnLegBlocked(t.targetBodyId)) return false;
+        // Launching from a moon toward its host planet, the craft STARTS inside
+        // the host's SOI (the moon orbits within it), so a plain containment test
+        // would fire on the pad. Require the host to actually dominate — i.e. the
+        // craft has escaped the moon — before "arriving".
+        const launchDef = bodyDef(this.plan.launchBodyId);
+        const targetIsHostOfLaunch = launchDef.parent === t.targetBodyId;
+        if (!targetIsHostOfLaunch &&
+            this.state.position.distanceTo(tgt.center) <= tgt.soiRadius) return true;
         return dominantBody(this.bodies, this.state.position).id === tgt.id;
       }
       case 'after-orbit': {
         const current = this.body();
         if (current.star) return false;
         if (current.id === t.targetBodyId) return false;
+        // A return-home leg waits for the outbound landing + relaunch.
+        if (this.returnLegBlocked(t.targetBodyId)) return false;
+        // A moon-hop transfer (target orbits a host planet that isn't the launch
+        // world) must wait until that host has actually been reached — otherwise it
+        // fires back at the launch-world parking orbit and tries to cross straight
+        // to the moon, skipping the interplanetary leg to the host.
+        if (node.actions.transfer && t.targetBodyId) {
+          const td = bodyDef(t.targetBodyId);
+          if (td.parent && td.parent !== SUN_ID && td.parent !== this.plan.launchBodyId &&
+              !this.state.reachedBodyIds.has(td.parent)) {
+            return false;
+          }
+        }
         // Wait until the arrival/relaunch autopilot has finished settling the
         // orbit. Firing the departure burn mid-capture (while still braking
         // down toward periapsis) aims the burn into the body and crashes.

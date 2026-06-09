@@ -13,7 +13,7 @@ import {
 import { MILESTONES } from '@/lib/game/career/Milestones';
 import { evaluateGoals, campaignGoal, stationGoalId, baseGoalId } from '@/lib/game/career/Progress';
 import { getPart } from '@/lib/game/career/Parts';
-import { estimateBuildDeltaV, computeStats } from '@/lib/game/BuildSpec';
+import { estimateBuildDeltaV } from '@/lib/game/BuildSpec';
 import {
   hapticThrust, hapticStage, hapticDeploy, hapticLanding, hapticCrash,
 } from '@/lib/haptics';
@@ -29,6 +29,7 @@ import MissionSummary from './MissionSummary';
 import MilestoneToast from './MilestoneToast';
 import NavDrawer from './NavDrawer';
 import SoundToggle from './SoundToggle';
+import Dropdown from './Dropdown';
 
 type ToastInfo = { id: number; title: string; subtitle: string };
 
@@ -292,42 +293,15 @@ export default function GameScreen() {
   const handleDeployStation = useCallback(() => gameRef.current?.manualDeployStation(), []);
 
   const handleCopyLog = useCallback(() => {
-    const build = buildRef.current;
-    const p = planRef.current;
-    const fs = flightState;
-    if (!build || !p) return;
-    const stats = computeStats(build);
-    const dv = estimateBuildDeltaV(build);
-    const log = {
-      build,
-      stats: { ...stats, deltaV: Math.round(dv) },
-      plan: {
-        launchBodyId: p.launchBodyId,
-        destinationId: p.destinationId,
-        mission: p.mission,
-        launch: p.launch,
-        nodes: p.nodes.map((n) => ({
-          trigger: n.trigger,
-          actions: n.actions,
-        })),
-      },
-      flight: fs ? {
-        phase: fs.phase,
-        altitude: Math.round(fs.altitude * 1000) / 1000,
-        speed: Math.round(fs.speed * 10000) / 10000,
-        apoapsis: fs.apoapsis,
-        periapsis: fs.periapsis,
-        fuel: Math.round(fs.fuel * 10) / 10,
-        activeStage: fs.activeStage,
-        stageCount: fs.stageCount,
-        maxAltitude: Math.round(fs.maxAltitude * 100) / 100,
-        guidanceSteps: fs.guidanceSteps,
-      } : null,
-    };
+    // The full flight log — build, plan, system, final state, result, and the
+    // event timeline — assembled by the Game so a failing run can be shared and
+    // reproduced from a single paste.
+    const log = gameRef.current?.buildDebugLog();
+    if (!log) return;
     navigator.clipboard.writeText(JSON.stringify(log, null, 2));
     setLogCopied(true);
     setTimeout(() => setLogCopied(false), 2000);
-  }, [flightState]);
+  }, []);
 
   const handleRelaunch = useCallback(() => gameRef.current?.manualRelaunch(), []);
 
@@ -387,21 +361,17 @@ export default function GameScreen() {
       <NavDrawer title="Flight Menu" />
       <SoundToggle />
 
-      {/* Launch-site chip (replaces the old scenario banner) */}
+      {/* Launch-site selector — a dropdown so it scales on mobile as more bases
+          (every landable world) become available. */}
       {mode === 'plan' && plan && bases.length > 1 && (
         <div className="absolute z-30 top-[calc(0.75rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2
-                        panel px-2 py-1.5 flex items-center gap-1">
-          <span className="text-[9px] text-dim px-1">LAUNCH&nbsp;FROM</span>
-          {bases.map((id) => (
-            <button
-              key={id}
-              onClick={() => handleLaunchSite(id)}
-              className={`text-[10px] font-black tracking-wider uppercase rounded-md px-2.5 py-1 border
-                ${id === plan.launchBodyId
-                  ? 'border-cyan/70 bg-cyan/20 text-cyan'
-                  : 'border-white/15 bg-white/[0.06] text-dim'}`}
-            >{bodyDef(id).name}</button>
-          ))}
+                        panel p-1 w-[min(72vw,16rem)]">
+          <Dropdown
+            label="LAUNCH FROM"
+            value={plan.launchBodyId}
+            options={bases.map((id) => ({ id, name: bodyDef(id).name }))}
+            onChange={handleLaunchSite}
+          />
         </div>
       )}
 

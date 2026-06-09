@@ -82,15 +82,15 @@ const DEFS: BodyDef[] = [
   { id: 'sun',     name: 'Sun',     radius: 220,  surfaceG: 0,    atmosphereHeight: 0,   soiRadius: 99999, color: 0xffcf57, skyDay: 0xffe9a8, star: true },
 
   { id: 'mercury', name: 'Mercury', radius: 24.4, surfaceG: 3.70, atmosphereHeight: 0,   soiRadius: 90,  color: 0x9c9088, skyDay: 0x07070b, orbitR: 1100,  phase: 0.5 },
-  { id: 'venus',   name: 'Venus',   radius: 60.5, surfaceG: 8.87, atmosphereHeight: 180, soiRadius: 240, color: 0xd9b870, skyDay: 0xe8c878, orbitR: 2100,  phase: 2.6 },
+  { id: 'venus',   name: 'Venus',   radius: 60.5, surfaceG: 8.87, atmosphereHeight: 180, soiRadius: 520, color: 0xd9b870, skyDay: 0xe8c878, orbitR: 2100,  phase: 2.6 },
   { id: 'earth',   name: 'Earth',   radius: EARTH_RADIUS, surfaceG: 9.81, atmosphereHeight: ATMOSPHERE_HEIGHT, soiRadius: 720, color: 0x2e74e8, skyDay: 0x8ec9ff, orbitR: 3400, phase: 0.0 },
   { id: 'moon',    name: 'Moon',    radius: 17.4, surfaceG: 1.62, atmosphereHeight: 0,   soiRadius: 70,  color: 0xc2c7d2, skyDay: 0x0a0a12, parent: 'earth', orbitR: 560, phase: 0.7 },
   { id: 'mars',    name: 'Mars',    radius: 33.9, surfaceG: 3.71, atmosphereHeight: 60,  soiRadius: 240, color: 0xd06a44, skyDay: 0xe0a07a, orbitR: 4700, phase: 0.9 },
-  { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 10,  color: 0x9a8f84, skyDay: 0x07070a, parent: 'mars', orbitR: 140, phase: 1.5 },
+  { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 24,  color: 0x9a8f84, skyDay: 0x07070a, parent: 'mars', orbitR: 175, phase: 1.5 },
   { id: 'ceres',   name: 'Ceres',   radius: 13.5, surfaceG: 0.27, atmosphereHeight: 0,   soiRadius: 54,  color: 0x8d8a82, skyDay: 0x06060a, dwarf: true, orbitR: 6000, phase: 4.0 },
   { id: 'jupiter', name: 'Jupiter', radius: 120,  surfaceG: 24.79,atmosphereHeight: 240, soiRadius: 900, color: 0xd7b58a, skyDay: 0xc9a878, gas: true, orbitR: 8200, phase: 5.3 },
   { id: 'saturn',  name: 'Saturn',  radius: 105,  surfaceG: 10.44,atmosphereHeight: 220, soiRadius: 850, color: 0xe6d6a8, skyDay: 0xd8c790, gas: true, orbitR: 10600, phase: 2.0 },
-  { id: 'titan',   name: 'Titan',   radius: 25.8, surfaceG: 1.35, atmosphereHeight: 120, soiRadius: 65,  color: 0xd2a24c, skyDay: 0xc88a3a, parent: 'saturn', orbitR: 650, phase: 0.3 },
+  { id: 'titan',   name: 'Titan',   radius: 25.8, surfaceG: 1.35, atmosphereHeight: 120, soiRadius: 300, color: 0xd2a24c, skyDay: 0xc88a3a, parent: 'saturn', orbitR: 650, phase: 0.3 },
   { id: 'uranus',  name: 'Uranus',  radius: 72,   surfaceG: 8.69, atmosphereHeight: 200, soiRadius: 750, color: 0x9fe0e6, skyDay: 0x7fb8c4, gas: true, orbitR: 13000, phase: 3.4 },
   { id: 'neptune', name: 'Neptune', radius: 70,   surfaceG: 11.15,atmosphereHeight: 200, soiRadius: 750, color: 0x3f63d8, skyDay: 0x2a3f9c, gas: true, orbitR: 15400, phase: 5.9 },
 ];
@@ -183,9 +183,6 @@ export function positionBodiesAt(bodies: Body[], t: number): void {
   }
 }
 
-/** Canonical Earth body (snapshot at t=0). */
-export const EARTH_BODY: Body = makeBody(SOLAR_BODIES.earth, bodyStateAt('earth', 0));
-
 /**
  * Build the body list for a flight. Unlike the old two-body model, every flight
  * now runs against the *entire* solar system. The list is ordered launch-body
@@ -239,26 +236,27 @@ export function isLandable(bodyId: string): boolean {
 
 /** Returns the transfer target, or null when the destination is the launch body itself. */
 export function destinationTargetId(destinationId: string, launchId: string): string | null {
+  // 'orbit' (or selecting the launch world itself) means "orbit/land here".
+  if (destinationId === 'orbit' || destinationId === launchId) return null;
+  // A destination id is just a body id — every body except the launch world is a
+  // valid target (including the home planet when launching from a moon/base).
+  if (SOLAR_BODIES[destinationId] && destinationId !== SUN_ID) return destinationId;
   const targetId = getDestination(destinationId).targetId;
   return targetId && targetId !== launchId ? targetId : null;
 }
 
-// ── Legacy scenario shim (kept so older saves/imports still resolve) ───────
-
-export type Scenario = {
-  id: string;
-  name: string;
-  bodies: Body[];
-  objective: string;
-};
-
-export const SCENARIOS: Scenario[] = [
-  { id: 'earth-orbit',   name: 'Earth Orbit',    bodies: buildFlightBodies('earth', null),   objective: DESTINATIONS[0].objective },
-  { id: 'moon-transfer', name: 'Lunar Transfer', bodies: buildFlightBodies('earth', 'moon'), objective: DESTINATIONS[1].objective },
-];
-
-export function getScenario(id: string): Scenario {
-  return SCENARIOS.find((s) => s.id === id) ?? SCENARIOS[0];
+/**
+ * The destinations offered when launching from `launchId`: "Orbit" (the launch
+ * world itself) plus every other body in the system. This is dynamic so a base
+ * on the Moon can target Earth, a base on Mars can target Phobos, etc.
+ */
+export function availableDestinations(launchId: string): { id: string; name: string }[] {
+  const opts = [{ id: 'orbit', name: 'Orbit' }];
+  for (const id of SYSTEM_BODY_IDS) {
+    if (id === SUN_ID || id === launchId) continue;
+    opts.push({ id, name: bodyDef(id).name });
+  }
+  return opts;
 }
 
 /**
@@ -291,6 +289,3 @@ export function dominantBody(bodies: Body[], position: THREE.Vector3): Body {
   }
   return best;
 }
-
-/** Backwards-compatible Moon export (snapshot at t=0). */
-export const MOON_BODY: Body = makeBody(SOLAR_BODIES.moon, bodyStateAt('moon', 0));

@@ -55,41 +55,6 @@ export function requiredDeltaV(launchBodyId: string, destinationId: string, kind
   return Math.round(base * launchFactor + (KIND_DV[kind] ?? 0));
 }
 
-export type Feasibility = {
-  requiredDv: number;
-  haveDv: number;
-  ok: boolean;
-  shortfall: number; // m/s short of the budget (0 when ok)
-  margin: number;    // m/s of spare Δv (0 when short)
-};
-
-/** Whether a build carries enough Δv for a launchBody → destination mission. */
-export function missionFeasibility(
-  build: RocketBuild, launchBodyId: string, destinationId: string, kind: MissionKind,
-): Feasibility {
-  const requiredDv = requiredDeltaV(launchBodyId, destinationId, kind);
-  const haveDv = Math.round(estimateBuildDeltaV(build));
-  const diff = haveDv - requiredDv;
-  return {
-    requiredDv,
-    haveDv,
-    ok: diff >= 0,
-    shortfall: diff < 0 ? -diff : 0,
-    margin: diff > 0 ? diff : 0,
-  };
-}
-
-/**
- * Destination ids a build can currently *reach and orbit* from the given launch
- * world (the cheapest objective). Used by the builder to show a rocket's range.
- */
-export function reachableDestinations(build: RocketBuild, launchBodyId = 'earth'): string[] {
-  const have = estimateBuildDeltaV(build);
-  return DESTINATIONS
-    .filter((d) => have >= requiredDeltaV(launchBodyId, d.id, 'orbit'))
-    .map((d) => d.id);
-}
-
 /** The farthest destination (by budget) a build can reach to orbit, or null. */
 export function farthestReachable(build: RocketBuild, launchBodyId = 'earth'): string | null {
   const have = estimateBuildDeltaV(build);
