@@ -24,16 +24,21 @@ export function orbitEllipse(body: Body, pos: THREE.Vector3, vel: THREE.Vector3)
   const r = rel.length();
   if (r < 1e-6) return null;
 
-  const v2 = vel.lengthSq();
+  // Velocity RELATIVE to the (moving) body — the orbit is a two-body conic in the
+  // body's frame, so the body's own heliocentric motion must be removed first.
+  // Without this, a low Earth orbit inherits Earth's huge solar velocity and the
+  // drawn conic balloons into a wrong, ever-shifting arc.
+  const relVel = vel.clone().sub(body.velocity);
+  const v2 = relVel.lengthSq();
   const eps = v2 / 2 - mu / r;           // specific orbital energy
   if (eps >= -1e-9) return null;          // parabolic / hyperbolic → not closed
 
-  const hVec = new THREE.Vector3().crossVectors(rel, vel);
+  const hVec = new THREE.Vector3().crossVectors(rel, relVel);
   const h = hVec.length();
   if (h < 1e-9) return null;              // degenerate radial trajectory
 
   // Eccentricity vector points toward periapsis: e = (v×h)/µ − r̂.
-  const eVec = vel.clone().cross(hVec).multiplyScalar(1 / mu).sub(rel.clone().multiplyScalar(1 / r));
+  const eVec = relVel.clone().cross(hVec).multiplyScalar(1 / mu).sub(rel.clone().multiplyScalar(1 / r));
   const e = eVec.length();
   if (e >= 0.9999) return null;           // too eccentric to read as a loop
 
@@ -75,14 +80,19 @@ export function orbitConic(body: Body, pos: THREE.Vector3, vel: THREE.Vector3): 
   const r = rel.length();
   if (r < 1e-6) return null;
 
-  const v2 = vel.lengthSq();
+  // Velocity relative to the (moving) body — see note in orbitEllipse. This is
+  // what makes a settled orbit draw as a fixed, KSP-style closed ellipse instead
+  // of a wandering arc, since the relative state describes the same conic all the
+  // way around the orbit.
+  const relVel = vel.clone().sub(body.velocity);
+  const v2 = relVel.lengthSq();
   const eps = v2 / 2 - mu / r;
 
-  const hVec = new THREE.Vector3().crossVectors(rel, vel);
+  const hVec = new THREE.Vector3().crossVectors(rel, relVel);
   const h = hVec.length();
   if (h < 1e-9) return null;
 
-  const eVec = vel.clone().cross(hVec).multiplyScalar(1 / mu).sub(rel.clone().multiplyScalar(1 / r));
+  const eVec = relVel.clone().cross(hVec).multiplyScalar(1 / mu).sub(rel.clone().multiplyScalar(1 / r));
   const e = eVec.length();
 
   const hHat = hVec.clone().normalize();
