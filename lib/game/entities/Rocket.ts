@@ -12,8 +12,28 @@ import type { SimState } from '../plan/Simulator';
 export const ROCKET_START_ALTITUDE = SIM_START_ALTITUDE;
 
 const ROCKET_VISUAL_SCALE = 0.55;
-const BODY_R = 0.18;          // main stack radius before visual scale
+const BODY_R = 0.32;          // fallback stack radius before visual scale
 const stagePalette = 0x2a3550;
+
+/**
+ * Tank radius scales with fuel capacity so a Pony tank reads as a slim trim
+ * tank and a Mega tank as a fat drum — giving the stack real size variety and
+ * stout, KSP-like proportions instead of a single pencil-thin tube.
+ */
+function tankRadius(capacity: number): number {
+  return THREE.MathUtils.clamp(0.22 + 0.32 * Math.sqrt(capacity / 1900), 0.22, 0.55);
+}
+
+/** Tank height — chunky, growing far slower than the old linear formula. */
+function tankHeight(capacity: number): number {
+  return 0.34 + (Math.min(capacity, 1100) / 1100) * 0.7;
+}
+
+/** Representative radius of a stage, taken from its widest (bottom) tank. */
+function stageBaseRadius(tankIds: string[]): number {
+  const first = tankIds.map((id) => getPart(id)).find(Boolean);
+  return first ? tankRadius(first.fuelCapacity) : BODY_R;
+}
 
 /**
  * Visual rocket. All physics live in the deterministic {@link Simulator};
@@ -171,65 +191,84 @@ export class Rocket {
 
     const stages = getStages(build);
     let y = 0;
+    let curR = BODY_R;          // radius at the current top of the stack
+    let lastTankR: number | null = null;
 
     stages.forEach((stage, si) => {
       const stageGroup = new THREE.Group();
       const start = y;
       this.stageBaseY.push(start);
 
-      // Engine bell — silhouette varies by the engine's bell shape so each
-      // engine reads distinctly on the pad.
+      const baseR = stageBaseRadius(stage.tankIds);
+
+      // Engine bell — silhouette varies by the engine's bell shape and its size
+      // tracks the stage radius so each engine reads distinctly on the pad.
       const engine = getPart(stage.engineId);
       const bellColor = engine?.color ?? 0x9aa3b8;
       const bellShine = shininessFor(engine?.finish, 30);
-      this.addEngineBell(stageGroup, engine?.bell ?? 'standard', bellColor, engine?.accent, bellShine, y);
+      this.addEngineBell(stageGroup, engine?.bell ?? 'standard', bellColor, engine?.accent, bellShine, y, baseR);
       y += 0.26;
 
-      // Fuel tanks — surface pattern + accent vary by the tank's style.
+      // Fuel tanks — radius + height both scale with capacity for real variety.
       for (const tankId of stage.tankIds) {
         const tank = getPart(tankId);
         if (!tank) continue;
-        const h = 0.34 + Math.min(tank.fuelCapacity / 320, 0.9);
+        const r = tankRadius(tank.fuelCapacity);
+        // Conical adapter wherever the stack steps to a different diameter.
+        if (lastTankR !== null && Math.abs(r - lastTankR) > 0.012) {
+          const th = 0.09;
+          const taper = new THREE.Mesh(
+            new THREE.CylinderGeometry(r, lastTankR, th, 16),
+            mat(tank.color, shininessFor(tank.finish, 18)),
+          );
+          taper.position.y = y + th / 2;
+          stageGroup.add(taper);
+          y += th;
+        }
+        const h = tankHeight(tank.fuelCapacity);
         const body = new THREE.Mesh(
-          new THREE.CylinderGeometry(BODY_R, BODY_R, h, 12),
+          new THREE.CylinderGeometry(r, r, h, 16),
           mat(tank.color, shininessFor(tank.finish, 18)),
         );
         body.position.y = y + h / 2;
         stageGroup.add(body);
-        this.addTankBands(stageGroup, tank.style, tank.accent ?? 0xffffff, y, h);
+        this.addTankBands(stageGroup, tank.style, tank.accent ?? 0xffffff, y, h, r);
         y += h;
+        curR = r;
+        lastTankR = r;
       }
 
-      // Fins on the first stage
+      // Fins on the first stage, hugging the base tank.
       if (si === 0) {
+        const finColor = engine?.accent ?? 0xff7a3c;
         for (let i = 0; i < 4; i++) {
           const fin = new THREE.Mesh(
-            new THREE.BoxGeometry(0.03, 0.3, 0.2),
-            mat(0xff7a3c, 20),
+            new THREE.BoxGeometry(0.04, 0.34, 0.28),
+            mat(finColor, 20),
           );
           const a = (i / 4) * Math.PI * 2;
-          fin.position.set(Math.cos(a) * (BODY_R + 0.04), start + 0.22, Math.sin(a) * (BODY_R + 0.04));
+          fin.position.set(Math.cos(a) * (baseR + 0.02), start + 0.27, Math.sin(a) * (baseR + 0.02));
           fin.rotation.y = a;
           stageGroup.add(fin);
         }
       }
 
-      // Interstage decoupler ring
+      // Interstage decoupler ring at the current top radius.
       if (si < stages.length - 1 || build.landerId) {
         const ring = new THREE.Mesh(
-          new THREE.CylinderGeometry(BODY_R * 0.96, BODY_R * 0.96, 0.06, 12),
+          new THREE.CylinderGeometry(curR * 0.97, curR * 0.97, 0.07, 16),
           mat(stagePalette, 8),
         );
-        ring.position.y = y + 0.03;
+        ring.position.y = y + 0.035;
         stageGroup.add(ring);
-        y += 0.06;
+        y += 0.07;
       }
 
       group.add(stageGroup);
       this.stageMeshes.push(stageGroup);
 
       // Strap-on boosters ride alongside the first stage and drop with it.
-      if (si === 0) this.addBoosters(stageGroup, build, start, y);
+      if (si === 0) this.addBoosters(stageGroup, build, start, y, baseR);
     });
 
     // Lander forms an extra separable top "stage"
@@ -238,21 +277,23 @@ export class Rocket {
       if (lander) {
         const landerGroup = new THREE.Group();
         this.stageBaseY.push(y);
+        const topR = curR;
         const body = new THREE.Mesh(
-          new THREE.CylinderGeometry(BODY_R * 0.95, BODY_R * 0.8, 0.34, 8),
-          mat(lander.color, 24),
+          new THREE.CylinderGeometry(topR * 0.92, topR * 0.8, 0.36, 10),
+          mat(lander.color, shininessFor(lander.finish, 24)),
         );
-        body.position.y = y + 0.17;
+        body.position.y = y + 0.18;
         landerGroup.add(body);
         for (let i = 0; i < 3; i++) {
-          const leg = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.24, 0.03), mat(0xb8bcc8, 12));
+          const leg = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.28, 0.035), mat(lander.accent ?? 0xb8bcc8, 12));
           const a = (i / 3) * Math.PI * 2;
-          leg.position.set(Math.cos(a) * 0.16, y + 0.04, Math.sin(a) * 0.16);
+          leg.position.set(Math.cos(a) * topR * 0.9, y + 0.05, Math.sin(a) * topR * 0.9);
           leg.rotation.z = Math.cos(a) * 0.4;
           leg.rotation.x = Math.sin(a) * 0.4;
           landerGroup.add(leg);
         }
-        y += 0.36;
+        y += 0.38;
+        curR = topR * 0.8;
         group.add(landerGroup);
         this.stageMeshes.push(landerGroup);
       }
@@ -265,16 +306,28 @@ export class Rocket {
     if (nose) {
       const payload = new THREE.Group();
       const accent = nose.accent ?? 0x2b5cff;
+      const r = curR;          // nose sits on the current top-of-stack radius
+      // A short shoulder taper blends a wide upper tank into the nose so the
+      // payload never looks pinched onto an oversized barrel.
+      const noseBaseR = Math.min(r, 0.34);
+      if (r - noseBaseR > 0.02) {
+        const sh = 0.1;
+        const shoulder = new THREE.Mesh(
+          new THREE.CylinderGeometry(noseBaseR, r, sh, 16),
+          mat(nose.color, shininessFor(nose.finish, 24)),
+        );
+        shoulder.position.y = y + sh / 2; payload.add(shoulder); y += sh;
+      }
       if (nose.type === 'capsule') {
-        const capH = nose.id === 'capsule-command' ? 0.5 : nose.id === 'probe-core' ? 0.26 : 0.4;
+        const capH = nose.id === 'capsule-command' ? 0.5 : nose.id === 'probe-core' ? 0.26 : 0.42;
         const cap = new THREE.Mesh(
-          new THREE.CylinderGeometry(BODY_R * 0.6, BODY_R, capH, 12),
+          new THREE.CylinderGeometry(noseBaseR * 0.58, noseBaseR, capH, 16),
           mat(nose.color, shininessFor(nose.finish, 30)),
         );
         cap.position.y = y + capH / 2;
         payload.add(cap);
         // Accent collar band where the capsule meets the stack.
-        const collar = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R * 1.01, BODY_R * 1.01, 0.05, 12), mat(accent, 40));
+        const collar = new THREE.Mesh(new THREE.CylinderGeometry(noseBaseR * 1.02, noseBaseR * 1.02, 0.05, 16), mat(accent, 40));
         collar.position.y = y + 0.03;
         payload.add(collar);
         // Deployable solar wings on the array-bearing payloads.
@@ -283,32 +336,35 @@ export class Rocket {
         if (hasWings) {
           for (const sgn of [-1, 1]) {
             const panel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.01), mat(0x2b5cff, 70));
-            panel.position.set(sgn * 0.36, y + capH / 2, 0);
+            panel.position.set(sgn * (noseBaseR + 0.27), y + capH / 2, 0);
             payload.add(panel);
           }
         }
         // Probe core gets a dish; command pod gets a docking ring on top.
         if (nose.id === 'probe-core') {
-          const dish = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.02, 0.04, 12), mat(accent, 70));
-          dish.position.set(0.28, y + capH / 2, 0); dish.rotation.z = Math.PI / 2.4;
+          const dish = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.02, 0.04, 14), mat(accent, 70));
+          dish.position.set(noseBaseR + 0.12, y + capH / 2, 0); dish.rotation.z = Math.PI / 2.4;
           payload.add(dish);
         } else if (nose.id === 'capsule-command') {
-          const dock = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R * 0.34, BODY_R * 0.34, 0.08, 12), mat(accent, 60));
+          const dock = new THREE.Mesh(new THREE.CylinderGeometry(noseBaseR * 0.36, noseBaseR * 0.36, 0.08, 14), mat(accent, 60));
           dock.position.y = y + capH + 0.04; payload.add(dock);
         }
         y += capH;
       } else if (nose.id === 'nose-fairing') {
         // Tall, slightly bulged aerodynamic fairing.
-        const cone = new THREE.Mesh(new THREE.ConeGeometry(BODY_R * 1.05, 0.62, 14), mat(nose.color, shininessFor(nose.finish, 36)));
-        cone.position.y = y + 0.31; payload.add(cone);
-        const seam = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R * 1.02, BODY_R * 1.02, 0.04, 14), mat(accent, 40));
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(noseBaseR * 1.06, 0.68, 18), mat(nose.color, shininessFor(nose.finish, 36)));
+        cone.position.y = y + 0.34; payload.add(cone);
+        const seam = new THREE.Mesh(new THREE.CylinderGeometry(noseBaseR * 1.03, noseBaseR * 1.03, 0.04, 18), mat(accent, 40));
         seam.position.y = y + 0.02; payload.add(seam);
-        y += 0.62;
+        y += 0.68;
       } else {
-        const cone = new THREE.Mesh(new THREE.ConeGeometry(BODY_R, 0.42, 12), mat(nose.color, shininessFor(nose.finish, 36)));
-        cone.position.y = y + 0.21;
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(noseBaseR, 0.5, 16), mat(nose.color, shininessFor(nose.finish, 36)));
+        cone.position.y = y + 0.25;
         payload.add(cone);
-        y += 0.42;
+        // A slim accent tip-band so the plain nose cone isn't a flat colour.
+        const band = new THREE.Mesh(new THREE.CylinderGeometry(noseBaseR * 0.62, noseBaseR * 0.62, 0.04, 16), mat(accent, 40));
+        band.position.y = y + 0.16; payload.add(band);
+        y += 0.5;
       }
       group.add(payload);
       this.payloadGroup = payload;
@@ -328,37 +384,38 @@ export class Rocket {
   /** Build an engine bell whose silhouette matches the engine's bell shape. */
   private addEngineBell(
     group: THREE.Group, shape: string, color: number, accent: number | undefined,
-    shininess: number, y: number,
+    shininess: number, y: number, baseR: number,
   ) {
+    const R = baseR;
     const lipColor = accent ?? 0x20242e;
     const addLip = (topR: number, botR: number) => {
       const lip = new THREE.Mesh(
-        new THREE.CylinderGeometry(topR, botR, 0.06, 10), mat(lipColor, 12),
+        new THREE.CylinderGeometry(topR, botR, 0.06, 12), mat(lipColor, 12),
       );
       lip.position.y = y + 0.02;
       group.add(lip);
     };
     switch (shape) {
       case 'wide': {
-        const bell = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R * 0.75, BODY_R * 1.12, 0.26, 12), mat(color, shininess));
-        bell.position.y = y + 0.13; group.add(bell); addLip(BODY_R * 1.12, BODY_R * 0.9);
+        const bell = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.75, R * 1.12, 0.26, 16), mat(color, shininess));
+        bell.position.y = y + 0.13; group.add(bell); addLip(R * 1.12, R * 0.9);
         break;
       }
       case 'long': {
-        const bell = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R * 0.5, BODY_R * 0.92, 0.38, 12), mat(color, shininess));
-        bell.position.y = y + 0.16; group.add(bell); addLip(BODY_R * 0.92, BODY_R * 0.7);
+        const bell = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.5, R * 0.92, 0.38, 16), mat(color, shininess));
+        bell.position.y = y + 0.16; group.add(bell); addLip(R * 0.92, R * 0.7);
         break;
       }
       case 'compact': {
-        const bell = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R * 0.6, BODY_R * 0.78, 0.16, 10), mat(color, shininess));
-        bell.position.y = y + 0.09; group.add(bell); addLip(BODY_R * 0.78, BODY_R * 0.66);
+        const bell = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.6, R * 0.78, 0.16, 14), mat(color, shininess));
+        bell.position.y = y + 0.09; group.add(bell); addLip(R * 0.78, R * 0.66);
         break;
       }
       case 'ring': {
         // Aerospike / plasma — a toroidal plug nozzle.
-        const torus = new THREE.Mesh(new THREE.TorusGeometry(BODY_R * 0.7, BODY_R * 0.28, 8, 16), mat(color, shininess));
+        const torus = new THREE.Mesh(new THREE.TorusGeometry(R * 0.7, R * 0.28, 10, 20), mat(color, shininess));
         torus.rotation.x = Math.PI / 2; torus.position.y = y + 0.12; group.add(torus);
-        const plug = new THREE.Mesh(new THREE.ConeGeometry(BODY_R * 0.4, 0.22, 12), mat(accent ?? color, shininess));
+        const plug = new THREE.Mesh(new THREE.ConeGeometry(R * 0.4, 0.22, 14), mat(accent ?? color, shininess));
         plug.position.y = y + 0.1; plug.rotation.x = Math.PI; group.add(plug);
         break;
       }
@@ -366,25 +423,25 @@ export class Rocket {
         // Mammoth — a ring of small bells around a central one.
         for (let i = 0; i < 6; i++) {
           const a = (i / 6) * Math.PI * 2;
-          const small = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R * 0.26, BODY_R * 0.34, 0.22, 8), mat(color, shininess));
-          small.position.set(Math.cos(a) * BODY_R * 0.6, y + 0.11, Math.sin(a) * BODY_R * 0.6);
+          const small = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.26, R * 0.34, 0.22, 10), mat(color, shininess));
+          small.position.set(Math.cos(a) * R * 0.6, y + 0.11, Math.sin(a) * R * 0.6);
           group.add(small);
         }
-        const center = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R * 0.34, BODY_R * 0.44, 0.24, 10), mat(accent ?? color, shininess));
+        const center = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.34, R * 0.44, 0.24, 12), mat(accent ?? color, shininess));
         center.position.y = y + 0.12; group.add(center);
         break;
       }
       default: {
-        const bell = new THREE.Mesh(new THREE.CylinderGeometry(BODY_R * 0.7, BODY_R * 0.95, 0.28, 10), mat(color, shininess));
-        bell.position.y = y + 0.14; group.add(bell); addLip(BODY_R * 0.95, BODY_R * 0.78);
+        const bell = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.7, R * 0.95, 0.28, 14), mat(color, shininess));
+        bell.position.y = y + 0.14; group.add(bell); addLip(R * 0.95, R * 0.78);
       }
     }
   }
 
   /** Decorative rings on a tank, in number/spacing set by its surface style. */
-  private addTankBands(group: THREE.Group, style: string | undefined, accent: number, y: number, h: number) {
-    const ring = (yy: number, thickness: number, r = BODY_R * 1.02) => {
-      const band = new THREE.Mesh(new THREE.CylinderGeometry(r, r, thickness, 12), mat(accent, 40));
+  private addTankBands(group: THREE.Group, style: string | undefined, accent: number, y: number, h: number, tankR: number) {
+    const ring = (yy: number, thickness: number, r = tankR * 1.02) => {
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(r, r, thickness, 16), mat(accent, 40));
       band.position.y = yy;
       group.add(band);
     };
@@ -403,10 +460,10 @@ export class Rocket {
       }
       case 'panelled':
       case 'metallic': {
-        ring(y + 0.05, 0.05, BODY_R * 1.03);
-        ring(y + h - 0.05, 0.05, BODY_R * 1.03);
+        ring(y + 0.05, 0.05, tankR * 1.03);
+        ring(y + h - 0.05, 0.05, tankR * 1.03);
         // A thin mid seam.
-        ring(y + h / 2, 0.025, BODY_R * 1.03);
+        ring(y + h / 2, 0.025, tankR * 1.03);
         break;
       }
       case 'checkered': {
@@ -419,11 +476,14 @@ export class Rocket {
     }
   }
 
-  private addBoosters(stageGroup: THREE.Group, build: RocketBuild, startY: number, endY: number) {
+  private addBoosters(stageGroup: THREE.Group, build: RocketBuild, startY: number, endY: number, baseR: number) {
     const ids = build.boosterIds ?? [];
     if (ids.length === 0) return;
     const h = Math.max(0.6, (endY - startY) * 0.92);
     const midY = startY + (endY - startY) * 0.5;
+    // Booster girth and stand-off scale with the core so they nestle against a
+    // fat first stage instead of floating beside a thin one.
+    const bR = Math.max(0.11, baseR * 0.42);
     ids.forEach((id, i) => {
       const part = getPart(id);
       const color = part?.color ?? 0xf2f2f5;
@@ -431,21 +491,21 @@ export class Rocket {
       const shine = shininessFor(part?.finish, 18);
       // Spread the strap-ons evenly around the core (handles 1–4 cleanly).
       const a = (i / ids.length) * Math.PI * 2 + Math.PI / 4;
-      const off = BODY_R + 0.12;
+      const off = baseR + bR + 0.04;
       const bg = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, h, 8), mat(color, shine));
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(bR, bR, h, 12), mat(color, shine));
       body.position.y = midY;
       bg.add(body);
-      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.18, 8), mat(accent, 24));
-      cone.position.y = midY + h / 2 + 0.09;
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(bR, 0.2, 12), mat(accent, 24));
+      cone.position.y = midY + h / 2 + 0.1;
       bg.add(cone);
       // A couple of accent bands so heavier boosters read as segmented.
       for (const f of [0.3, 0.7]) {
-        const band = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.105, 0.03, 8), mat(accent, 30));
+        const band = new THREE.Mesh(new THREE.CylinderGeometry(bR * 1.05, bR * 1.05, 0.03, 12), mat(accent, 30));
         band.position.y = midY - h / 2 + h * f;
         bg.add(band);
       }
-      const noz = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 0.1, 8), mat(0x20242e, 10));
+      const noz = new THREE.Mesh(new THREE.CylinderGeometry(bR * 0.7, bR, 0.1, 12), mat(0x20242e, 10));
       noz.position.y = midY - h / 2 - 0.05;
       bg.add(noz);
       bg.position.set(Math.cos(a) * off, 0, Math.sin(a) * off);

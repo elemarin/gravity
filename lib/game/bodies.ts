@@ -32,8 +32,19 @@ export type Body = {
   gas?: boolean;
   /** True for the Sun — a luminous star at the centre of the system. */
   star?: boolean;
+  /** Decorative planetary ring system (Saturn's bold ring, Uranus' faint one). */
+  rings?: PlanetRings;
   /** Orbital parameters (null/undefined for the fixed central Sun). */
   orbit?: BodyOrbit;
+};
+
+/** A flat ring system rendered around a body, sized in surface-radius multiples. */
+export type PlanetRings = {
+  innerScale: number;  // inner edge as a multiple of the body radius
+  outerScale: number;  // outer edge as a multiple of the body radius
+  color: number;       // base ring colour
+  tilt: number;        // ring-plane tilt from the equator (radians)
+  opacity: number;     // peak opacity of the banding
 };
 
 /** A body's circular orbit around its parent (the Sun, or a host planet). */
@@ -54,6 +65,8 @@ type BodyDef = {
   atmosphereHeight: number; soiRadius: number; color: number; skyDay: number;
   gas?: boolean;
   star?: boolean;
+  /** Decorative ring system, if the world has one. */
+  rings?: PlanetRings;
   /** Heliocentric orbit radius (planets) or orbit radius around `parent` (moons). */
   orbitR?: number;
   /** Initial orbital angle (radians) at t=0. */
@@ -89,9 +102,9 @@ const DEFS: BodyDef[] = [
   { id: 'phobos',  name: 'Phobos',  radius: 6.0,  surfaceG: 0.30, atmosphereHeight: 0,   soiRadius: 24,  color: 0x9a8f84, skyDay: 0x07070a, parent: 'mars', orbitR: 175, phase: 1.5 },
   { id: 'ceres',   name: 'Ceres',   radius: 13.5, surfaceG: 0.27, atmosphereHeight: 0,   soiRadius: 54,  color: 0x8d8a82, skyDay: 0x06060a, dwarf: true, orbitR: 6000, phase: 4.0 },
   { id: 'jupiter', name: 'Jupiter', radius: 120,  surfaceG: 24.79,atmosphereHeight: 240, soiRadius: 900, color: 0xd7b58a, skyDay: 0xc9a878, gas: true, orbitR: 8200, phase: 5.3 },
-  { id: 'saturn',  name: 'Saturn',  radius: 105,  surfaceG: 10.44,atmosphereHeight: 220, soiRadius: 850, color: 0xe6d6a8, skyDay: 0xd8c790, gas: true, orbitR: 10600, phase: 2.0 },
+  { id: 'saturn',  name: 'Saturn',  radius: 105,  surfaceG: 10.44,atmosphereHeight: 220, soiRadius: 850, color: 0xe6d6a8, skyDay: 0xd8c790, gas: true, orbitR: 10600, phase: 2.0, rings: { innerScale: 1.32, outerScale: 2.35, color: 0xe7d6ad, tilt: 0.42, opacity: 0.92 } },
   { id: 'titan',   name: 'Titan',   radius: 25.8, surfaceG: 1.35, atmosphereHeight: 120, soiRadius: 300, color: 0xd2a24c, skyDay: 0xc88a3a, parent: 'saturn', orbitR: 650, phase: 0.3 },
-  { id: 'uranus',  name: 'Uranus',  radius: 72,   surfaceG: 8.69, atmosphereHeight: 200, soiRadius: 750, color: 0x9fe0e6, skyDay: 0x7fb8c4, gas: true, orbitR: 13000, phase: 3.4 },
+  { id: 'uranus',  name: 'Uranus',  radius: 72,   surfaceG: 8.69, atmosphereHeight: 200, soiRadius: 750, color: 0x9fe0e6, skyDay: 0x7fb8c4, gas: true, orbitR: 13000, phase: 3.4, rings: { innerScale: 1.55, outerScale: 1.95, color: 0xbfe6ec, tilt: 1.3, opacity: 0.4 } },
   { id: 'neptune', name: 'Neptune', radius: 70,   surfaceG: 11.15,atmosphereHeight: 200, soiRadius: 750, color: 0x3f63d8, skyDay: 0x2a3f9c, gas: true, orbitR: 15400, phase: 5.9 },
 ];
 
@@ -153,6 +166,7 @@ function makeBody(def: BodyDef, state: BodyState): Body {
     gravityScale: def.surfaceG / 9.81,
     gas: def.gas,
     star: def.star,
+    rings: def.rings,
   };
   if (def.orbitR !== undefined && def.id !== SUN_ID) {
     const parentId = def.parent ?? SUN_ID;
