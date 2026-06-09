@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Body } from '../bodies';
+import { Body, PlanetRings } from '../bodies';
 
 /**
  * Renders any celestial {@link Body} as a low-poly sphere with a soft
@@ -19,7 +19,7 @@ export class Planet {
     // The Sun: a luminous, self-lit sphere with a soft corona — not a shaded world.
     if (body.star) {
       const core = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(body.radius, 4),
+        new THREE.IcosahedronGeometry(body.radius, 5),
         new THREE.MeshBasicMaterial({ color: new THREE.Color(body.color) }),
       );
       this.surface = core;
@@ -38,7 +38,9 @@ export class Planet {
       return;
     }
 
-    const detail = body.radius > 80 ? 3 : body.radius > 25 ? 2 : 1;
+    // Higher subdivision across the board so worlds read as smooth-but-faceted
+    // rather than the old chunky 80-face blobs, scaled by apparent size.
+    const detail = body.radius > 80 ? 5 : body.radius > 40 ? 4 : body.radius > 18 ? 3 : 2;
     const geo = new THREE.IcosahedronGeometry(body.radius, detail);
     const posAttr = geo.getAttribute('position');
     const base = new THREE.Color(body.color);
@@ -52,10 +54,13 @@ export class Planet {
         const normal = new THREE.Vector3(x, y, z).normalize();
         let rOffset = 0;
         
-        // Multi-frequency noise for rocky/bumpy mountain and valley terrains
+        // Multi-frequency noise for rocky/bumpy mountain and valley terrains.
+        // A third, finer octave adds crisp surface roughness now that the mesh
+        // carries enough vertices to resolve it.
         const terrainNoise1 = Math.sin(x * 0.15 + y * 0.08 + z * 0.12);
         const terrainNoise2 = Math.sin(x * 0.45 - y * 0.32 + z * 0.25) * 0.35;
-        rOffset += (terrainNoise1 + terrainNoise2) * (body.radius * 0.04);
+        const terrainNoise3 = Math.sin(x * 1.05 - y * 0.92 + z * 0.78) * 0.16;
+        rOffset += (terrainNoise1 + terrainNoise2 + terrainNoise3) * (body.radius * 0.045);
         
         // Large scale deformation for Phobos potato-shape!
         if (body.id === 'phobos') {
@@ -223,7 +228,7 @@ export class Planet {
       const visualAtmosphere = Math.max(10, body.atmosphereHeight * 0.35);
       const middleAtmosphere = Math.max(5, body.atmosphereHeight * 0.18);
       const rim = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(body.radius + visualAtmosphere, 2),
+        new THREE.IcosahedronGeometry(body.radius + visualAtmosphere, 3),
         new THREE.MeshBasicMaterial({
           color: new THREE.Color(body.skyDay),
           transparent: true,
@@ -236,7 +241,7 @@ export class Planet {
       );
       this.mesh.add(rim);
       const middle = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(body.radius + middleAtmosphere, 2),
+        new THREE.IcosahedronGeometry(body.radius + middleAtmosphere, 3),
         new THREE.MeshBasicMaterial({
           color: new THREE.Color(body.skyDay).lerp(new THREE.Color(0xffffff), 0.25),
           transparent: true,
@@ -249,7 +254,7 @@ export class Planet {
       );
       this.mesh.add(middle);
       const inner = new THREE.Mesh(
-        new THREE.IcosahedronGeometry(body.radius + Math.max(2, body.atmosphereHeight * 0.05), 2),
+        new THREE.IcosahedronGeometry(body.radius + Math.max(2, body.atmosphereHeight * 0.05), 3),
         new THREE.MeshPhongMaterial({
           color: new THREE.Color(body.skyDay),
           transparent: true,
@@ -262,8 +267,61 @@ export class Planet {
       this.mesh.add(inner);
     }
 
+    // Decorative ring system (Saturn's bold band, Uranus' faint set).
+    if (body.rings) this.addRings(body.rings, body.radius);
+
     this.mesh.position.copy(body.center);
     scene.add(this.mesh);
+  }
+
+  /**
+   * A flat, banded ring disk laid in the body's equatorial plane and tilted so
+   * it reads at a glance. Banding (and a Cassini-style gap) is baked into vertex
+   * colours; the unlit material keeps the rings evenly bright in any scene.
+   */
+  private addRings(rings: PlanetRings, radius: number) {
+    const inner = radius * rings.innerScale;
+    const outer = radius * rings.outerScale;
+    const geo = new THREE.RingGeometry(inner, outer, 128, 6);
+    const pos = geo.getAttribute('position');
+    const base = new THREE.Color(rings.color);
+    const dark = base.clone().multiplyScalar(0.5);
+    const light = base.clone().lerp(new THREE.Color(0xffffff), 0.35);
+
+    const colors: number[] = [];
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), y = pos.getY(i);
+      const r = Math.hypot(x, y);
+      const t = THREE.MathUtils.clamp((r - inner) / (outer - inner), 0, 1);
+      // Layered ringlets: a broad brightness sweep plus fine concentric bands.
+      const broad = Math.sin(t * 5.5) * 0.5 + 0.5;
+      const fine = Math.sin(t * 34) * 0.5 + 0.5;
+      const shade = 0.25 + 0.6 * broad + 0.15 * fine;
+      const c = dark.clone().lerp(light, THREE.MathUtils.clamp(shade, 0, 1));
+      // Cassini division — a darker gap about two-thirds out.
+      const gap = Math.exp(-((t - 0.62) * (t - 0.62)) / 0.0012);
+      c.lerp(dark, gap * 0.9);
+      // Fade the very inner/outer edges so the band doesn't end abruptly.
+      const edge = Math.min(t / 0.06, (1 - t) / 0.08, 1);
+      c.multiplyScalar(0.35 + 0.65 * THREE.MathUtils.clamp(edge, 0, 1));
+      colors.push(c.r, c.g, c.b);
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: rings.opacity,
+      side: THREE.DoubleSide,
+      depthWrite: rings.opacity >= 0.8,
+      fog: false,
+    });
+    const ring = new THREE.Mesh(geo, mat);
+    // Lay the disk horizontal (equatorial), then open it toward the viewer by
+    // the body's tilt so it shows as an ellipse rather than an edge-on line.
+    ring.rotation.x = Math.PI / 2 - rings.tilt;
+    ring.rotation.z = 0.12;
+    this.mesh.add(ring);
   }
 
   update(dt: number) {

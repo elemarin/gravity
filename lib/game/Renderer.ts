@@ -14,6 +14,9 @@ export class Renderer {
   private container: HTMLElement;
   private cameraTarget = new THREE.Vector3();
   private cameraOffset = new THREE.Vector3(0, 2, 8);
+  // Target framing offset (distance/height/angle); the live offset eases toward
+  // it so zoom/orbit changes are smooth while the look target stays locked.
+  private desiredOffset = new THREE.Vector3(0, 2, 8);
   private resizeObserver?: ResizeObserver;
 
   // Sky gradient: bright day at the surface → deep space with altitude.
@@ -367,16 +370,21 @@ export class Renderer {
 
   followTarget(targetPos: THREE.Vector3, dt: number, up?: THREE.Vector3) {
     const aim = this.liftedTarget(targetPos, up);
-    if (this.cameraTarget.distanceTo(aim) > 24) this.cameraTarget.copy(aim);
-    else this.cameraTarget.lerp(aim, 1 - Math.exp(-9 * dt));
-    const desired = this.cameraTarget.clone().add(this.cameraOffset);
-    this.camera.position.lerp(desired, 1 - Math.exp(-7 * dt));
+    // Rigidly lock the look target to the craft so it stays centred at any time
+    // warp; only the framing offset (distance/height/angle) eases toward its
+    // desired value. This removes the lag-then-snap jitter the old target
+    // smoothing produced when the craft moved far per frame under heavy warp,
+    // and makes the easing frame-rate independent via the real frame dt.
+    this.cameraTarget.copy(aim);
+    this.cameraOffset.lerp(this.desiredOffset, 1 - Math.exp(-7 * dt));
+    this.camera.position.copy(this.cameraTarget).add(this.cameraOffset);
     this.camera.lookAt(this.cameraTarget);
   }
 
   /** Snap the camera straight to its framed pose (no easing) — used on launch. */
   snapTo(targetPos: THREE.Vector3, up?: THREE.Vector3) {
     this.cameraTarget.copy(this.liftedTarget(targetPos, up));
+    this.cameraOffset.copy(this.desiredOffset);
     this.camera.position.copy(this.cameraTarget).add(this.cameraOffset);
     this.camera.lookAt(this.cameraTarget);
   }
@@ -403,7 +411,7 @@ export class Renderer {
     // the camera tracks the craft itself at altitude.
     this.targetLift = THREE.MathUtils.lerp(this.rocketHeight * 0.5, 0, Math.min(altitude / 8, 1));
     const dist     = baseDist * this.userZoom;
-    this.cameraOffset.set(
+    this.desiredOffset.set(
       Math.sin(this.userAzimuth) * dist,
       upOff,
       Math.cos(this.userAzimuth) * dist,

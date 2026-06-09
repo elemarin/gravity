@@ -43,6 +43,9 @@ export class TrajectoryLine {
   private periCanvas: HTMLCanvasElement;
   private pointsMesh: THREE.Points;
   private pointsMaterial: THREE.PointsMaterial;
+  /** Number of live points in the current path, and a scrolling flow phase. */
+  private n = 0;
+  private flowPhase = 0;
 
   constructor(scene: THREE.Scene) {
     this.group = new THREE.Group();
@@ -120,25 +123,15 @@ export class TrajectoryLine {
 
   update(points: THREE.Vector3[], color = 0x00e5ff, focus?: THREE.Vector3, radius = 0, showLandingSite = false) {
     const n = Math.min(points.length, MAX_POINTS);
+    this.n = n;
     this.baseColor.setHex(color);
     for (let i = 0; i < n; i++) {
       const p = points[i];
       this.positions[i * 3]     = p.x;
       this.positions[i * 3 + 1] = p.y;
       this.positions[i * 3 + 2] = p.z;
-      // Head→tail gradient: the segment nearest the craft (the path's start) is
-      // brightest and fades along its length, so the orbit line has direction and
-      // depth instead of a flat uniform stroke.
-      const t = n > 1 ? i / (n - 1) : 0;
-      const fade = 0.25 + 0.75 * (1 - t);            // 1.0 at head → 0.25 at tail
-      this.colors[i * 3]     = this.baseColor.r * fade;
-      this.colors[i * 3 + 1] = this.baseColor.g * fade;
-      this.colors[i * 3 + 2] = this.baseColor.b * fade;
-      const glowFade = fade * 0.6;
-      this.glowColors[i * 3]     = this.baseColor.r * glowFade;
-      this.glowColors[i * 3 + 1] = this.baseColor.g * glowFade;
-      this.glowColors[i * 3 + 2] = this.baseColor.b * glowFade;
     }
+    this.writeFlowColors();
     this.geometry.setDrawRange(0, n);
     this.geometry.attributes.position.needsUpdate = true;
     this.geometry.attributes.color.needsUpdate = true;
@@ -156,6 +149,42 @@ export class TrajectoryLine {
     this.apoMarker.visible = v && this.apoMarker.visible;
     this.periMarker.visible = v && this.periMarker.visible;
     this.landingMarker.visible = v && this.landingMarker.visible;
+  }
+
+  /**
+   * Advance the flowing-energy animation. Called every frame; cheap (writes the
+   * colour buffer) and skipped when the line is hidden.
+   */
+  tickFlow(dt: number) {
+    if (!this.group.visible || this.n < 2) return;
+    this.flowPhase = (this.flowPhase + dt * 0.45) % 1;
+    this.writeFlowColors();
+  }
+
+  /**
+   * Paint the colour buffer: a head→tail brightness gradient (the segment by the
+   * craft is brightest) modulated by a travelling pulse so the path reads as
+   * energy flowing toward the craft rather than a flat stroke.
+   */
+  private writeFlowColors() {
+    const n = this.n;
+    const r = this.baseColor.r, g = this.baseColor.g, b = this.baseColor.b;
+    const PULSES = 3;     // travelling highlights along the path
+    for (let i = 0; i < n; i++) {
+      const t = n > 1 ? i / (n - 1) : 0;
+      const fade = 0.25 + 0.75 * (1 - t);                 // 1.0 at head → 0.25 at tail
+      const wave = 0.5 + 0.5 * Math.sin((t * PULSES - this.flowPhase) * Math.PI * 2);
+      const bright = fade * (0.72 + 0.5 * wave);
+      this.colors[i * 3]     = r * bright;
+      this.colors[i * 3 + 1] = g * bright;
+      this.colors[i * 3 + 2] = b * bright;
+      const glow = bright * 0.6;
+      this.glowColors[i * 3]     = r * glow;
+      this.glowColors[i * 3 + 1] = g * glow;
+      this.glowColors[i * 3 + 2] = b * glow;
+    }
+    this.geometry.attributes.color.needsUpdate = true;
+    this.glowGeometry.attributes.color.needsUpdate = true;
   }
 
   private makeMarker(label: string, color: string) {

@@ -466,6 +466,22 @@ function colorFor(id: string): string {
 
 function hex(n: number): string { return `#${n.toString(16).padStart(6, '0')}`; }
 
+// Blueprint tank dimensions scale with fuel capacity, mirroring the 3D mesh so
+// the preview shows the same slim-to-fat size variety (no more uniform tubes).
+const TANK_BASE_W = 52;
+function capacityOf(id: string): number {
+  return PARTS_CATALOG.find((x) => x.id === id)?.fuelCapacity ?? 160;
+}
+function tankWidthFor(id: string): number {
+  const cap = capacityOf(id);
+  const r = Math.min(0.55, Math.max(0.22, 0.22 + 0.32 * Math.sqrt(cap / 1900)));
+  return Math.round((r / 0.32) * TANK_BASE_W);
+}
+function tankHeightFor(id: string): number {
+  const cap = capacityOf(id);
+  return Math.round(32 + (Math.min(cap, 1100) / 1100) * 26);
+}
+
 /** Blueprint fill for a tank — surface pattern + accent vary by its style. */
 function tankFill(id: string): React.CSSProperties {
   const p = PARTS_CATALOG.find((x) => x.id === id);
@@ -514,17 +530,19 @@ function BlueprintRocket({
 }) {
   const noseColor = colorFor(noseId);
   const lander = landerId ? PARTS_CATALOG.find((x) => x.id === landerId) : undefined;
-  const TANK_H = 44;
-  const TANK_W = 52;
+  // Nose tapers onto the top-most tank's width so the payload sits flush.
+  const topStage = stages[stages.length - 1];
+  const topTankId = topStage?.tankIds[topStage.tankIds.length - 1];
+  const noseHalf = Math.round((topTankId ? tankWidthFor(topTankId) : 44) / 2);
 
   return (
     <div className="flex flex-col items-center select-none w-full" style={{ maxWidth: 150 }}>
-      {/* Nose */}
+      {/* Nose — width matches the top tank for a clean taper */}
       <div className="w-0 h-0 mb-0"
            style={{
-             borderLeft: '22px solid transparent',
-             borderRight: '22px solid transparent',
-             borderBottom: `44px solid ${noseColor}`,
+             borderLeft: `${noseHalf}px solid transparent`,
+             borderRight: `${noseHalf}px solid transparent`,
+             borderBottom: `${Math.round(noseHalf * 1.9)}px solid ${noseColor}`,
              filter: 'drop-shadow(0 -2px 6px rgba(255,255,255,0.15))',
            }} />
 
@@ -560,11 +578,11 @@ function BlueprintRocket({
               <span className="absolute -left-5 top-1 text-[8px] font-black text-dim/50">S{si + 1}</span>
             )}
 
-            {/* Tanks */}
+            {/* Tanks — width + height scale with capacity (slim → fat) */}
             {stage.tankIds.map((id, ti) => (
               <div key={ti}
                    className="relative flex items-center justify-center border-x border-black/20"
-                   style={{ width: TANK_W, height: TANK_H, ...tankFill(id) }}>
+                   style={{ width: tankWidthFor(id), height: tankHeightFor(id), ...tankFill(id) }}>
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onRemoveTank(si, ti); }}
@@ -575,10 +593,10 @@ function BlueprintRocket({
               </div>
             ))}
 
-            {/* Engine nozzle shape */}
+            {/* Engine nozzle — flares from the bottom tank's width */}
             <div className="mt-0"
                  style={{
-                   width: TANK_W + 8,
+                   width: (stage.tankIds[0] ? tankWidthFor(stage.tankIds[0]) : TANK_BASE_W) + 8,
                    height: 18,
                    background: colorFor(stage.engineId),
                    clipPath: 'polygon(6% 0, 94% 0, 100% 100%, 0 100%)',
@@ -629,7 +647,7 @@ function BlueprintRocket({
         disabled={atStageLimit}
         className={`mt-2 w-full rounded-md border border-dashed text-[11px] font-bold py-1.5 active:scale-95
           ${atStageLimit ? 'border-white/15 text-dim/50 cursor-not-allowed' : 'border-cyan/40 text-cyan hover:bg-cyan/10'}`}
-        style={{ maxWidth: TANK_W + 20 }}
+        style={{ maxWidth: TANK_BASE_W + 28 }}
       >{atStageLimit ? '🔒' : '＋ Stage'}</button>
 
       {/* Utility badges */}

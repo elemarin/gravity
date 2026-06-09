@@ -353,7 +353,9 @@ export class Game {
       this.renderer.updateCameraOffset(this.sim.altitude());
       this.renderer.updateSky(this.sim.altitude());
       const up = this.rocket.position.clone().sub(center).normalize();
-      this.renderer.followTarget(this.rocket.position, FIXED_DT, up);
+      // Camera smoothing uses the REAL frame dt (not the fixed sim step) so the
+      // follow stays fluid and jitter-free under time warp.
+      this.renderer.followTarget(this.rocket.position, realDt, up);
       this.flightState = this.buildFlightState();
       this.callbacks.onState?.(this.flightState);
 
@@ -367,9 +369,10 @@ export class Game {
       this.rocket.applyState(this.sim.state, center, FIXED_DT);
       this.renderer.updateCameraOffset(this.sim.altitude());
       const up = this.rocket.position.clone().sub(center).normalize();
-      this.renderer.followTarget(this.rocket.position, FIXED_DT, up);
+      this.renderer.followTarget(this.rocket.position, realDt, up);
     }
 
+    this.trajectory.tickFlow(realDt);
     this.renderer.render();
   };
 
