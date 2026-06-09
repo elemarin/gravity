@@ -104,11 +104,17 @@ export class Rocket {
     this.syncMesh();
   }
 
-  /** Drive the visual rocket from the deterministic simulation state. */
-  applyState(s: SimState, upCenter: THREE.Vector3, dt: number) {
+  /**
+   * Drive the visual rocket from the deterministic simulation state. The optional
+   * `renderPos` / `renderAngle` let the caller pass a render-interpolated pose
+   * (between fixed sim steps) so the craft moves smoothly regardless of how the
+   * frame rate lines up with the fixed timestep; discrete state (staging, fuel,
+   * parachute) still comes from the authoritative `s`.
+   */
+  applyState(s: SimState, upCenter: THREE.Vector3, dt: number, renderPos?: THREE.Vector3, renderAngle?: number) {
     this.upCenter.copy(upCenter);
-    this.position.copy(s.position);
-    this.angle = s.angle;
+    this.position.copy(renderPos ?? s.position);
+    this.angle = renderAngle ?? s.angle;
     this.throttle = s.throttle;
 
     while (this.meshActiveStage < s.activeStage) {

@@ -81,6 +81,12 @@ export class Game {
   private callbacks: GameCallbacks;
   private flightState!: FlightState;
   private accumulator = 0;
+  // Render-interpolation snapshot: the craft pose one fixed step behind the
+  // latest sim state, so the visual can be lerped between steps (smooth motion
+  // independent of how frames line up with the fixed timestep).
+  private renderPrevPos = new THREE.Vector3();
+  private renderPrevAngle = 0;
+  private hasRenderPrev = false;
   private lastTime = 0;
   private rafHandle = 0;
   private running = false;
@@ -185,6 +191,8 @@ export class Game {
       `(${this.plan.mission?.kind ?? 'orbit'}), Δv≈${Math.round(estimateBuildDeltaV(this.build))} m/s`);
     this.sim.reset();
     this.rocket.reset(this.startPosition());
+    this.accumulator = 0;
+    this.hasRenderPrev = false;       // don't interpolate across the reset jump
     this.simTrajectoryTimer = 0; // update trajectory immediately
     this.trail.reset();
     this.flightState = this.buildFlightState();
@@ -202,6 +210,8 @@ export class Game {
     this.timeScale = 1;
     this.sim.reset();
     this.rocket.reset(this.startPosition());
+    this.accumulator = 0;
+    this.hasRenderPrev = false;
     this.trail.reset();
     this.flightState = this.buildFlightState();
     this.updatePreview();
@@ -339,6 +349,11 @@ export class Game {
       rawDt *= this.timeScale;
       this.accumulator += rawDt;
       while (this.accumulator >= FIXED_DT) {
+        // Snapshot the pose before stepping so the render can interpolate
+        // between this and the post-step state (smooth motion between steps).
+        this.renderPrevPos.copy(this.sim.state.position);
+        this.renderPrevAngle = this.sim.state.angle;
+        this.hasRenderPrev = true;
         this.sim.step(FIXED_DT);
         this.afterStep(FIXED_DT, true);
         this.trail.push(this.sim.state.position);
@@ -349,7 +364,16 @@ export class Game {
       }
       this.syncBodies(this.sim.state.elapsed);
       const center = this.dominant().center;
-      this.rocket.applyState(this.sim.state, center, FIXED_DT);
+      // Interpolate the rendered pose by the leftover accumulator fraction so the
+      // craft glides smoothly even when frames don't align with the fixed step.
+      const alpha = THREE.MathUtils.clamp(this.accumulator / FIXED_DT, 0, 1);
+      const renderPos = this.hasRenderPrev
+        ? this.renderPrevPos.clone().lerp(this.sim.state.position, alpha)
+        : this.sim.state.position;
+      const renderAngle = this.hasRenderPrev
+        ? THREE.MathUtils.lerp(this.renderPrevAngle, this.sim.state.angle, alpha)
+        : this.sim.state.angle;
+      this.rocket.applyState(this.sim.state, center, FIXED_DT, renderPos, renderAngle);
       this.renderer.updateCameraOffset(this.sim.altitude());
       this.renderer.updateSky(this.sim.altitude());
       const up = this.rocket.position.clone().sub(center).normalize();
