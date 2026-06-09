@@ -277,6 +277,20 @@ export class Simulator {
     );
   }
 
+  /**
+   * A return-home leg (a transfer/depart/arrival whose target is the launch
+   * world) must not fire until the OUTBOUND landing + relaunch has happened —
+   * otherwise, on a land-return, it triggers the moment the craft first reaches a
+   * bound orbit at the destination and the craft heads home before ever landing.
+   * Gated on the plan's relaunch node having fired; orbit-return plans have no
+   * such node, so they're unaffected (their return waits on the arrival capture).
+   */
+  private returnLegBlocked(targetBodyId: string | undefined): boolean {
+    if (targetBodyId !== this.plan.launchBodyId) return false;
+    const relaunch = this.plan.nodes.find((n) => n.trigger.type === 'on-manual-relaunch');
+    return !!relaunch && !this.state.firedNodeIds.has(relaunch.id);
+  }
+
   /** Whether the active stage can currently produce thrust (engine + fuel). */
   private hasThrust(): boolean {
     const st = this.cfg.stages[this.state.activeStage];
@@ -642,7 +656,12 @@ export class Simulator {
         // send the craft the wrong way). Reentry + parachute / the landing
         // autopilot finishes the touchdown.
         const targetApsides = this.apsides(target);
-        const returnPeriapsis = target.atmosphereHeight > 0 ? target.atmosphereHeight * 0.65 : target.radius * 0.08;
+        // Aim the periapsis DEEP into the atmosphere, not just grazing its top: a
+        // shallow periapsis (e.g. 0.65·atmo) paired with a high apoapsis only skims
+        // the thin upper air and skips back out without landing. A deep periapsis
+        // bleeds enough speed on the first pass to commit to reentry, where the
+        // chute / landing autopilot finishes the touchdown.
+        const returnPeriapsis = target.atmosphereHeight > 0 ? target.atmosphereHeight * 0.2 : target.radius * 0.06;
         if (targetApsides.peri <= returnPeriapsis) {
           s.throttle = 0;
           s.departAssist = false;
@@ -1067,6 +1086,8 @@ export class Simulator {
         if (isReturnHome && outboundTarget && !this.state.reachedBodyIds.has(outboundTarget)) {
           return false;
         }
+        // ...and not before the outbound landing + relaunch on a land-return.
+        if (this.returnLegBlocked(t.targetBodyId)) return false;
         // Launching from a moon toward its host planet, the craft STARTS inside
         // the host's SOI (the moon orbits within it), so a plain containment test
         // would fire on the pad. Require the host to actually dominate — i.e. the
@@ -1081,6 +1102,8 @@ export class Simulator {
         const current = this.body();
         if (current.star) return false;
         if (current.id === t.targetBodyId) return false;
+        // A return-home leg waits for the outbound landing + relaunch.
+        if (this.returnLegBlocked(t.targetBodyId)) return false;
         // A moon-hop transfer (target orbits a host planet that isn't the launch
         // world) must wait until that host has actually been reached — otherwise it
         // fires back at the launch-world parking orbit and tries to cross straight
