@@ -440,9 +440,15 @@ export class Simulator {
       if (this.cfg.landerIndex >= 0 && !s.deployedLander && !keepStageForReturn) {
         const lowEnough = altitude < Math.max(2, body.radius * 0.35);
         const slowEnough = speedMs < 90;
+        // Last resort on a small/airless world: a low orbit there is hundreds of
+        // m/s and there's little altitude to bleed it off, so the upper stage can
+        // still be fast when low. Drop to the lander anyway once very low — its
+        // fresh full tank and dedicated descent engine give the final braking
+        // authority (and a higher safe-landing speed) the spent upper stage lacks.
+        const desperatelyLow = altitude < Math.max(1.5, body.radius * 0.12);
         const onLanderStage = s.activeStage >= this.cfg.landerIndex;
         const activeStageEmpty = (s.stageFuel[s.activeStage] ?? 0) <= 0.5;
-        if (!onLanderStage && ((lowEnough && slowEnough) || activeStageEmpty)) {
+        if (!onLanderStage && ((lowEnough && slowEnough) || desperatelyLow || activeStageEmpty)) {
           this.doDeployLander();
         }
       }
