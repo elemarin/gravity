@@ -29,6 +29,10 @@ type Props = {
   hasStation?: boolean;
   /** True when the build's payload is a capsule (tourists demand seats). */
   hasCapsule?: boolean;
+  /** True when the build carries a Satellite Bus (satellite contracts require one). */
+  hasSatelliteBus?: boolean;
+  /** True when the build carries a Payload Fairing nose (cargo contracts require one). */
+  hasPayloadFairing?: boolean;
   onChange: (plan: FlightPlan) => void;
   onPlay: () => void;
 };
@@ -61,7 +65,7 @@ function fmtKm(km: number): string {
 }
 
 export default function PlanPanel({
-  plan, bodies, hasLander, preview, buildDeltaV, contract, hasStation, hasCapsule, onChange, onPlay,
+  plan, bodies, hasLander, preview, buildDeltaV, contract, hasStation, hasCapsule, hasSatelliteBus, hasPayloadFairing, onChange, onPlay,
 }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [open, setOpen] = useState(true);
@@ -202,7 +206,6 @@ export default function PlanPanel({
                 </div>
                 <div className="mt-0.5 text-[10px] text-dim leading-snug">
                   {PAYLOAD_LABELS[contract.payloadType]} → {destinationName(contract.destinationId, contract.launchBodyId)}
-                  {contract.payloadType === 'satellite' && ' · auto-deploys at orbit'}
                 </div>
                 {!contractMatches && (
                   <button
@@ -212,6 +215,16 @@ export default function PlanPanel({
                   >
                     ⚠ Re-plan → {destinationName(contract.destinationId, contract.launchBodyId)}
                   </button>
+                )}
+                {contract.payloadType === 'cargo' && hasPayloadFairing === false && (
+                  <div className="mt-1 text-[10px] text-orange/90">
+                    📦 Needs Payload Fairing nose — add one in Builder.
+                  </div>
+                )}
+                {contract.payloadType === 'satellite' && hasSatelliteBus === false && (
+                  <div className="mt-1 text-[10px] text-orange/90">
+                    🛰 Needs Satellite Bus nose — add one in Builder.
+                  </div>
                 )}
                 {(contract.payloadType === 'station' || contract.payloadType === 'base') && hasStation === false && (
                   <div className="mt-1 text-[10px] text-orange/90">

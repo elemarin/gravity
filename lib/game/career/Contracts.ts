@@ -303,6 +303,12 @@ export type FulfillmentContext = {
   /** Whether the build carries a capsule-type payload (tourists demand seats).
    *  Omitted = assumed true. */
   hasCapsule?: boolean;
+  /** Whether the build carries a Satellite Bus (satellite contracts require one).
+   *  Omitted = assumed true. */
+  hasSatelliteBus?: boolean;
+  /** Whether the build carries a Payload Fairing nose (cargo contracts require one).
+   *  Omitted = assumed true. */
+  hasPayloadFairing?: boolean;
 };
 
 /**
@@ -327,8 +333,24 @@ export function evaluateContract(
     case 'base':
       completed = ctx.surfaceDeployBodyId === target;
       break;
+    case 'satellite':
+      // Satellite Bus must be aboard; reaching the target deploys it automatically.
+      completed = ctx.hasSatelliteBus !== false && (
+        c.missionKind === 'land'
+          ? result.outcome === 'landed' && result.landedBody === target
+          : reachedTarget && result.outcome !== 'crashed'
+      );
+      break;
+    case 'cargo':
+      // Payload Fairing must be on the nose to haul cargo.
+      completed = ctx.hasPayloadFairing !== false && (
+        c.missionKind === 'land'
+          ? result.outcome === 'landed' && result.landedBody === target
+          : reachedTarget && result.outcome !== 'crashed'
+      );
+      break;
     default:
-      // Cargo / satellite / tourist: deliver intact to the required spot.
+      // Tourist: deliver intact to the required spot (capsule check follows below).
       completed = c.missionKind === 'land'
         ? result.outcome === 'landed' && result.landedBody === target
         : reachedTarget && result.outcome !== 'crashed';

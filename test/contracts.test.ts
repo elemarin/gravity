@@ -123,6 +123,29 @@ describe('contract fulfillment', () => {
     reputation: 2, rankRequired: 1,
   };
 
+  it('cargo to orbit: requires Payload Fairing in the build', () => {
+    const r = result({ reachedBodies: ['earth', 'moon'] });
+    // No context → treated as "has fairing" (backward compat), succeeds.
+    expect(evaluateContract(cargo, r).completed).toBe(true);
+    // Explicit false → no fairing, fails even with perfect orbit.
+    expect(evaluateContract(cargo, r, { hasPayloadFairing: false }).completed).toBe(false);
+    // Explicit true → fairing aboard, succeeds.
+    expect(evaluateContract(cargo, r, { hasPayloadFairing: true }).completed).toBe(true);
+  });
+
+  it('satellite to orbit: requires Satellite Bus in the build', () => {
+    const sat: Contract = { ...cargo, id: 't:sat', payloadType: 'satellite' };
+    const r = result({ reachedBodies: ['earth', 'moon'] });
+    // No context → treated as "has bus" (backward compat), succeeds.
+    expect(evaluateContract(sat, r).completed).toBe(true);
+    // Explicit false → no satellite bus, fails even with perfect orbit.
+    expect(evaluateContract(sat, r, { hasSatelliteBus: false }).completed).toBe(false);
+    // Explicit true → bus aboard, target reached, succeeds.
+    expect(evaluateContract(sat, r, { hasSatelliteBus: true }).completed).toBe(true);
+    // Bus aboard but crashed → fails.
+    expect(evaluateContract(sat, result({ reachedBodies: ['earth', 'moon'], outcome: 'crashed' }), { hasSatelliteBus: true }).completed).toBe(false);
+  });
+
   it('cargo to orbit: completed by reaching the body intact', () => {
     const ok = evaluateContract(cargo, result({ reachedBodies: ['earth', 'moon'] }));
     expect(ok.completed).toBe(true);

@@ -104,6 +104,8 @@ export default function GameScreen() {
   const [logCopied, setLogCopied] = useState(false);
   const [contract, setContract] = useState<Contract | null>(null);
   const [hasCapsule, setHasCapsule] = useState(false);
+  const [hasSatelliteBus, setHasSatelliteBus] = useState(false);
+  const [hasPayloadFairing, setHasPayloadFairing] = useState(false);
   const [payout, setPayout] = useState<{ title: string; amount: number; line: string } | null>(null);
   const [money, setMoney] = useState(0);
   const [rankTitle, setRankTitle] = useState('');
@@ -139,6 +141,8 @@ export default function GameScreen() {
     setBuildDeltaV(estimateBuildDeltaV(build));
     setHasLander(!!build.landerId);
     setHasCapsule(getPart(build.noseId)?.type === 'capsule');
+    setHasSatelliteBus(build.noseId === 'satellite-bus');
+    setHasPayloadFairing(build.noseId === 'nose-fairing');
     setBases(loadBases());
     setDevModeState(loadDevMode());
     const activeContract = loadActiveContract();
@@ -259,6 +263,8 @@ export default function GameScreen() {
     const ev = evaluateContract(c, result, {
       surfaceDeployBodyId: surfaceDeployRef.current,
       hasCapsule: build ? getPart(build.noseId)?.type === 'capsule' : false,
+      hasSatelliteBus: build?.noseId === 'satellite-bus',
+      hasPayloadFairing: build?.noseId === 'nose-fairing',
     });
     if (ev.completed) {
       addMoney(ev.payout);
@@ -458,6 +464,8 @@ export default function GameScreen() {
           contract={contract}
           hasStation={hasStation}
           hasCapsule={hasCapsule}
+          hasSatelliteBus={hasSatelliteBus}
+          hasPayloadFairing={hasPayloadFairing}
           onChange={handlePlanChange}
           onPlay={handlePlay}
         />
