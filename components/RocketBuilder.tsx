@@ -5,8 +5,13 @@ import { useRouter } from 'next/navigation';
 import { PARTS_CATALOG, RocketPart, PartType } from '@/lib/game/career/Parts';
 import { RocketBuild, StageSpec, DEFAULT_BUILD } from '@/lib/game/types';
 import { computeStats, estimateBuildDeltaV, getStages, buildPartIds } from '@/lib/game/BuildSpec';
-import { loadBuild, saveBuild, loadUnlockedParts, loadFacilityLevel, loadDevMode } from '@/lib/storage';
+import {
+  loadBuild, saveBuild, loadUnlockedParts, addUnlockedParts, loadFacilityLevel, loadDevMode,
+  loadMoney, spendMoney, loadReputation,
+} from '@/lib/storage';
 import { facilityTier, FACILITY_TIERS } from '@/lib/game/career/Progress';
+import { rankForReputation } from '@/lib/game/career/Rank';
+import { checkPurchase, fmtMoney } from '@/lib/game/career/Economy';
 import { farthestReachable } from '@/lib/game/career/Requirements';
 import { DESTINATIONS } from '@/lib/game/bodies';
 import { ROCKET_PRESETS, RocketPreset } from '@/lib/game/career/Presets';
@@ -40,6 +45,8 @@ export default function RocketBuilder() {
   const [facilityLevel, setFacilityLevel] = useState(0);
   const [presetId, setPresetId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [money, setMoney] = useState(0);
+  const [rankLevel, setRankLevel] = useState(0);
 
   useEffect(() => {
     setBuild(loadBuild());
@@ -48,7 +55,19 @@ export default function RocketBuilder() {
     PARTS_CATALOG.forEach((p) => { if (p.unlockedByDefault || devMode) ids.add(p.id); });
     setUnlocked(ids);
     setFacilityLevel(devMode ? FACILITY_TIERS.length - 1 : loadFacilityLevel());
+    setMoney(loadMoney());
+    setRankLevel(rankForReputation(loadReputation()).level);
   }, []);
+
+  /** Buy a locked part with contract money (rank- and funds-gated). */
+  const buyPart = (p: RocketPart): boolean => {
+    const chk = checkPurchase(p, money, rankLevel);
+    if (!chk.ok || !spendMoney(chk.price)) return false;
+    addUnlockedParts([p.id]);
+    setMoney(loadMoney());
+    setUnlocked((prev) => new Set(prev).add(p.id));
+    return true;
+  };
 
   const tier    = facilityTier(facilityLevel);
   const stages  = useMemo(() => getStages(build), [build]);
@@ -145,7 +164,10 @@ export default function RocketBuilder() {
     }));
 
   const handlePartTap = (p: RocketPart) => {
-    if (!unlocked.has(p.id)) return;
+    if (!unlocked.has(p.id)) {
+      buyPart(p); // bought parts equip on the next tap, like any owned part
+      return;
+    }
     markCustom();
     if (p.type === 'engine')  setStageEngine(p.id);
     else if (p.type === 'booster') addBooster(p.id);
@@ -206,6 +228,7 @@ export default function RocketBuilder() {
             onSelect={loadPreset}
           />
           <div className="flex min-w-0 flex-1 items-stretch gap-1.5 overflow-x-auto no-scrollbar">
+            <StatCard label="FUNDS" value={fmtMoney(money)} highlight />
             <StatCard label={`MASS / ${tier.maxMass}t`} value={`${stats.wetMass.toFixed(1)} t`} warn={overMass} />
             <StatCard label="THRUST" value={`${stats.thrust.toFixed(0)} kN`} />
             <StatCard label="TWR" value={twr.toFixed(2)} warn={twr < 1.1} highlight={twr >= 1.1} />
@@ -270,6 +293,8 @@ export default function RocketBuilder() {
             )}
             {categoryParts.map((p) => {
               const isUnlk = unlocked.has(p.id);
+              const purchase = isUnlk ? null : checkPurchase(p, money, rankLevel);
+              const canBuy = !!purchase?.ok;
               const sel = isSelected(p);
               const isBooster = p.type === 'booster';
               const count = isBooster ? boosterCount(p.id) : 0;
@@ -278,7 +303,7 @@ export default function RocketBuilder() {
               return (
                 <button
                   key={p.id}
-                  disabled={!isUnlk || boosterFull}
+                  disabled={(!isUnlk && !canBuy) || boosterFull}
                   onClick={() => handlePartTap(p)}
                   className={`flex w-full items-center gap-3 rounded-md border-2 px-3 py-2.5 text-left
                               transition-all active:scale-[0.99]
@@ -286,7 +311,9 @@ export default function RocketBuilder() {
                                 ? 'border-cyan bg-cyan/[0.1] shadow-[0_0_12px_rgba(31,217,255,0.22)]'
                                 : isUnlk && !boosterFull
                                   ? 'border-white/12 bg-white/[0.04] hover:border-white/30'
-                                  : 'border-white/5 bg-white/[0.02] opacity-40 cursor-not-allowed'}`}
+                                  : canBuy && !boosterFull
+                                    ? 'border-green/30 bg-green/[0.03] hover:border-green/60'
+                                    : 'border-white/5 bg-white/[0.02] opacity-40 cursor-not-allowed'}`}
                 >
                   <span className="shrink-0 text-2xl leading-none"
                         style={{ color: `#${p.color.toString(16).padStart(6, '0')}` }}>
@@ -299,7 +326,20 @@ export default function RocketBuilder() {
                         <span className="text-[8px] font-black text-purple bg-purple/15 border border-purple/40 rounded px-1 leading-tight">TOP</span>
                       )}
                       {sel && !isBooster && <span className="text-[9px] font-black text-cyan">✓ ON</span>}
-                      {!isUnlk && <span className="ml-auto text-[11px] text-dim/60">🔒</span>}
+                      {purchase && (purchase.ok ? (
+                        <span className="ml-auto shrink-0 rounded border border-green/50 bg-green/10 px-1.5 py-0.5
+                                         text-[9px] font-black text-green">
+                          BUY {fmtMoney(purchase.price)}
+                        </span>
+                      ) : purchase.reason === 'rank' ? (
+                        <span className="ml-auto shrink-0 text-[8px] font-bold text-dim/70">
+                          🔒 RANK: {purchase.rankNeeded?.title.toUpperCase()}
+                        </span>
+                      ) : (
+                        <span className="ml-auto shrink-0 text-[9px] font-bold text-orange/80">
+                          🔒 {fmtMoney(purchase.price)}
+                        </span>
+                      ))}
                     </span>
                     <span className="mt-0.5 block text-[9px] leading-snug text-dim">{p.description}</span>
                     <PartChips part={p} />
@@ -342,7 +382,7 @@ export default function RocketBuilder() {
         )}
         <button
           disabled={overMass}
-          onClick={() => { if (overMass) return; saveBuild(build); router.push('/play'); }}
+          onClick={() => { if (overMass) return; saveBuild(build); router.push('/'); }}
           className={`btn w-full text-base py-3.5 ${overMass ? 'btn-secondary opacity-50 cursor-not-allowed' : 'btn-primary'}`}
         >
           🚀 Save &amp; Launch

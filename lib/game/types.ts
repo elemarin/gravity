@@ -112,7 +112,7 @@ export type RocketStats = {
 
 export type GameCallbacks = {
   onState?:             (state: FlightState) => void;
-  onMilestoneComplete?: (milestoneId: string, unlocks: string[]) => void;
+  onMilestoneComplete?: (milestoneId: string) => void;
   onModeChange?:        (mode: 'plan' | 'sim') => void;
   onPreview?:           (info: { apoapsis: number; periapsis: number; impact: boolean }) => void;
   onThrustStart?:       () => void;

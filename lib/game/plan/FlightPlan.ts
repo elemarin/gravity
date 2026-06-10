@@ -67,8 +67,9 @@ export type LaunchVector = {
   power: number;   // 0..1 initial throttle held until the first node fires
 };
 
-/** What the player wants to do at the destination. Drives the auto-planner. */
-export type MissionKind = 'orbit' | 'orbit-return' | 'land' | 'land-return';
+/** What the player wants to do at the destination. Drives the auto-planner.
+ *  Missions are one-way deliveries — nobody pays for the trip home. */
+export type MissionKind = 'orbit' | 'land';
 
 export type MissionSpec = {
   kind: MissionKind;
@@ -77,10 +78,8 @@ export type MissionSpec = {
 };
 
 export const MISSION_LABELS: Record<MissionKind, string> = {
-  'orbit':        'Orbit',
-  'orbit-return': 'Orbit & return',
-  'land':         'Land',
-  'land-return':  'Land & return',
+  'orbit': 'Orbit',
+  'land':  'Land',
 };
 
 export type FlightPlan = {

@@ -1,113 +1,118 @@
 import { FlightState } from '../types';
 import { EARTH_CENTER, GM } from '../constants';
 
+/**
+ * Flight-skill milestones — one-time tutorial beats that pay a small cash
+ * bonus. They no longer hand out parts (the catalog is bought with contract
+ * money and gated by rank); they exist to teach the basics and fund the first
+ * few purchases.
+ */
 export type Milestone = {
   id: string;
   name: string;
   description: string;
   check: (s: FlightState) => boolean;
-  unlocks: string[];
+  /** One-time cash bonus on completion. */
+  cash: number;
 };
 
 export const MILESTONES: Milestone[] = [
   {
     id: 'first-flight',
-    name: 'First Flight',
-    description: 'Reach 1 km altitude',
+    name: 'It Goes Up',
+    description: 'Reach 1 km altitude — the sky’s first kilometre is free. This one isn’t.',
     check: (s) => s.altitude >= 1,
-    unlocks: ['tank-medium'],
+    cash: 400,
   },
   {
     id: 'high-altitude',
-    name: 'High Altitude',
-    description: 'Reach 25 km altitude',
+    name: 'Above the Weather',
+    description: 'Reach 25 km. The clouds are now someone else’s problem.',
     check: (s) => s.altitude >= 25,
-    unlocks: ['tank-large'],
+    cash: 600,
   },
   {
     id: 'staging',
-    name: 'Stage Separation',
-    description: 'Separate a spent stage in flight',
+    name: 'Litterbug',
+    description: 'Separate a spent stage in flight. It’s not littering if it’s aerodynamic.',
     check: (s) => s.activeStage >= 1 && s.altitude >= 1,
-    unlocks: ['parachute', 'engine-heavy'],
+    cash: 800,
   },
   {
     id: 'karman',
-    name: 'Kármán Line',
-    description: 'Reach 100 km — the edge of space',
+    name: 'Officially Space',
+    description: 'Cross 100 km — the Kármán line. Bragging rights now legally enforceable.',
     check: (s) => s.altitude >= 100,
-    unlocks: ['engine-vacuum', 'heat-shield'],
+    cash: 1000,
   },
   {
     id: 'safe-return',
-    name: 'Safe Return',
-    description: 'Land safely after reaching space',
+    name: 'Both Pieces, Same Rocket',
+    description: 'Land safely after reaching space. The insurance people are weeping with joy.',
     check: (s) => s.phase === 'landed' && s.maxAltitude >= 100,
-    unlocks: ['landing-legs', 'booster-liquid'],
+    cash: 1200,
   },
   {
     id: 'orbit',
-    name: 'Orbit Achieved',
-    description: 'Achieve a stable orbit above 100 km',
+    name: 'Falling With Style',
+    description: 'Hold a stable orbit above 100 km. You are now missing the ground professionally.',
     check: (s) =>
       s.phase === 'orbit' &&
       s.altitude >= 100 &&
       (s.periapsis ?? 0) >= 80,
-    unlocks: ['tank-xl', 'station-module'],
+    cash: 1500,
   },
   {
     id: 'high-orbit',
-    name: 'High Orbit',
-    description: 'Raise your orbit above 400 km',
+    name: 'Premium Altitude',
+    description: 'Raise your orbit above 400 km. Better view, same vacuum.',
     check: (s) => s.phase === 'orbit' && (s.periapsis ?? 0) >= 400,
-    unlocks: ['engine-nuclear'],
+    cash: 1500,
   },
   {
     id: 'lander-deploy',
-    name: 'Lander Away',
-    description: 'Deploy a separable lander payload in flight',
+    name: 'Drop It Like It’s Throttled',
+    description: 'Deploy a separable lander payload in flight.',
     check: (s) => !!s.landerDeployed && s.altitude >= 50,
-    unlocks: ['lander-heavy'],
+    cash: 1500,
   },
   {
     id: 'transfer',
-    name: 'Interplanetary Transfer',
-    description: 'Reach the vicinity of another body',
+    name: 'Are We There Yet',
+    description: 'Reach the vicinity of another body. The kids in the back are a navball.',
     check: (s) =>
       !!s.reachedBodyIds &&
       s.reachedBodyIds.some((id) => id !== (s.launchBodyId ?? '')),
-    unlocks: ['engine-ion'],
+    cash: 2500,
   },
   {
     id: 'soft-landing',
-    name: 'Soft Landing',
-    description: 'Touch down safely on another body',
+    name: 'Stuck the Landing',
+    description: 'Touch down safely on another body. The body did not consent, but it’s fine.',
     check: (s) =>
       s.phase === 'landed' &&
       s.landedBodyId != null &&
       s.landedBodyId !== (s.launchBodyId ?? ''),
-    // A flight-skill checkpoint; the matching world's campaign goal grants parts.
-    unlocks: [],
+    cash: 3000,
   },
   {
     id: 'crewed',
-    name: 'Crewed Mission',
-    description: 'Reach orbital speed and return safely',
-    // Landed after reaching space at near-orbital speed — a crewed orbit & return.
+    name: 'Humans Included',
+    description: 'Reach orbital speed and land intact. The crew gives it three stars: “loud”.',
     check: (s) => s.phase === 'landed' && s.maxAltitude >= 100 && s.maxSpeed >= 0.7,
-    unlocks: ['capsule-crew'],
+    cash: 2500,
   },
   {
     id: 'deep-space',
-    name: 'Deep Space',
-    description: 'Exceed escape velocity and leave Earth',
+    name: 'Goodbye, Gravity Well',
+    description: 'Exceed escape velocity and leave Earth behind. Earth will text occasionally.',
     check: (s) => {
       if (s.altitude < 500) return false;
       const r = s.position.distanceTo(EARTH_CENTER);
       const vEsc = Math.sqrt((2 * GM) / r); // km/s
       return s.speed >= vEsc;
     },
-    unlocks: [],
+    cash: 3000,
   },
 ];
 

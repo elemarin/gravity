@@ -6,9 +6,14 @@ import {
   MissionKind, MissionSpec, MISSION_LABELS,
   describeTrigger, describeActions, newNodeId,
 } from '@/lib/game/plan/FlightPlan';
+import Link from 'next/link';
 import { Body, availableDestinations, destinationTargetId, isLandable } from '@/lib/game/bodies';
 import { autoPlan, defaultOrbitKm, minimumOrbitKm } from '@/lib/game/plan/AutoPlan';
 import { requiredDeltaV } from '@/lib/game/career/Requirements';
+import {
+  Contract, PAYLOAD_LABELS, destinationName, contractTargetBodyId,
+} from '@/lib/game/career/Contracts';
+import { fmtMoney } from '@/lib/game/career/Economy';
 import Dropdown from './Dropdown';
 
 type Props = {
@@ -18,6 +23,12 @@ type Props = {
   preview: { apoapsis: number; periapsis: number; impact: boolean } | null;
   /** Estimated Δv (m/s) of the loaded rocket — gates the launch by budget. */
   buildDeltaV: number;
+  /** The accepted contract being flown, if any. */
+  contract?: Contract | null;
+  /** True when the build carries a Station Module (station/base contracts). */
+  hasStation?: boolean;
+  /** True when the build's payload is a capsule (tourists demand seats). */
+  hasCapsule?: boolean;
   onChange: (plan: FlightPlan) => void;
   onPlay: () => void;
 };
@@ -49,7 +60,9 @@ function fmtKm(km: number): string {
   return `${Math.round(km)} km`;
 }
 
-export default function PlanPanel({ plan, bodies, hasLander, preview, buildDeltaV, onChange, onPlay }: Props) {
+export default function PlanPanel({
+  plan, bodies, hasLander, preview, buildDeltaV, contract, hasStation, hasCapsule, onChange, onPlay,
+}: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [open, setOpen] = useState(true);
 
@@ -89,12 +102,10 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, buildDelta
   // Mission objective + target orbit drive the auto-planner.
   const mission: MissionSpec = plan.mission ?? { kind: 'orbit', orbitKm: defaultOrbitKm(plan.launchBodyId) };
   // Which objectives make sense for the chosen destination. Gas giants have no
-  // surface, so they only offer orbit objectives.
+  // surface, so they only offer orbit objectives. Missions are one-way.
   const canLand = targetId ? isLandable(targetId) : isLandable(plan.launchBodyId);
-  const missionKinds: MissionKind[] = targetId
-    ? (canLand ? ['orbit', 'orbit-return', 'land', 'land-return'] : ['orbit', 'orbit-return'])
-    : (canLand ? ['orbit', 'land'] : ['orbit']);
-  const showOrbitKm = mission.kind === 'orbit' || mission.kind === 'orbit-return';
+  const missionKinds: MissionKind[] = canLand ? ['orbit', 'land'] : ['orbit'];
+  const showOrbitKm = mission.kind === 'orbit';
 
   // Δv budget gate — the rocket must carry enough delta-v for the chosen mission.
   const requiredDv = requiredDeltaV(plan.launchBodyId, plan.destinationId, mission.kind);
@@ -114,16 +125,25 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, buildDelta
   const setDestination = (id: string) => {
     const nextTargetId = destinationTargetId(id, plan.launchBodyId);
     const landable = nextTargetId ? isLandable(nextTargetId) : isLandable(plan.launchBodyId);
-    const isLand = mission.kind === 'land' || mission.kind === 'land-return';
-    let valid: MissionKind = mission.kind;
-    if (!nextTargetId && isLand) valid = 'land';           // orbiting the launch world
-    if (isLand && !landable) valid = nextTargetId ? 'orbit-return' : 'orbit';
-    if (!isLand && !nextTargetId) valid = 'orbit';
+    const valid: MissionKind = mission.kind === 'land' && landable ? 'land' : 'orbit';
     regen(id, { ...mission, kind: valid });
   };
   const setMissionKind = (kind: MissionKind) => regen(plan.destinationId, { ...mission, kind });
   const setOrbitKm = (orbitKm: number) => regen(plan.destinationId, { ...mission, orbitKm });
   const regenerate = () => regen(plan.destinationId, mission);
+
+  // Does the current plan actually fly the accepted contract's job?
+  const contractMatches = !!contract &&
+    plan.destinationId === contract.destinationId &&
+    mission.kind === contract.missionKind &&
+    (contract.destinationId !== 'orbit' ||
+      plan.launchBodyId === contractTargetBodyId(contract));
+  // One tap re-plans the whole route to the contract's destination + objective.
+  const planContractRoute = () => {
+    if (!contract) return;
+    onChange(autoPlan(contract.launchBodyId ?? 'earth', contract.destinationId,
+      { kind: contract.missionKind, orbitKm: mission.orbitKm }));
+  };
   const setLaunch = (patch: Partial<FlightPlan['launch']>) =>
     onChange({ ...plan, launch: { ...plan.launch, ...patch } });
 
@@ -168,6 +188,48 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, buildDelta
 
         {open && (
           <div className="max-h-[46vh] min-h-0 md:max-h-none md:flex-1 overflow-y-auto px-3 py-3 flex flex-col gap-2">
+            {/* Active contract */}
+            {contract ? (
+              <div className={`rounded-lg border p-2 ${contractMatches
+                ? 'border-yellow/40 bg-yellow/[0.06]'
+                : 'border-orange/50 bg-orange/[0.08]'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[9px] tracking-[0.2em] uppercase text-yellow/80 font-black">📋 Contract</span>
+                  <span className="text-[10px] font-black text-green tabular-nums">{fmtMoney(contract.reward)}</span>
+                </div>
+                <div className="mt-0.5 text-[11px] font-bold text-ink leading-snug">{contract.title}</div>
+                <div className="text-[10px] text-dim leading-snug">
+                  {PAYLOAD_LABELS[contract.payloadType]} → {destinationName(contract.destinationId, contract.launchBodyId)}
+                  {' · '}{MISSION_LABELS[contract.missionKind]}
+                </div>
+                {!contractMatches && (
+                  <button
+                    onClick={planContractRoute}
+                    className="mt-1.5 w-full rounded-md border border-orange/60 bg-orange/15 py-1
+                               text-[10px] font-black text-orange active:scale-95"
+                  >
+                    ⚠ Plan doesn’t match the contract — tap to plan {destinationName(contract.destinationId, contract.launchBodyId)} · {MISSION_LABELS[contract.missionKind]}
+                  </button>
+                )}
+                {(contract.payloadType === 'station' || contract.payloadType === 'base') && hasStation === false && (
+                  <div className="mt-1 text-[10px] text-orange/90 leading-snug">
+                    🏗 This job needs a Station Module on top — fit one in the Builder (Payload tab).
+                  </div>
+                )}
+                {contract.requiredPartType === 'capsule' && hasCapsule === false && (
+                  <div className="mt-1 text-[10px] text-orange/90 leading-snug">
+                    🧳 The tourist insists on a seat — fit a capsule-type payload in the Builder.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <Link href="/career"
+                className="rounded-lg border border-dashed border-yellow/40 bg-yellow/[0.04] p-2
+                           text-[10px] text-yellow/90 leading-snug hover:bg-yellow/10">
+                📋 No contract accepted — free flying pays exactly $0. Visit the <b>Contract Board</b> to get a job →
+              </Link>
+            )}
+
             {/* Destination */}
             <div>
               <div className="flex items-center justify-between">
@@ -220,14 +282,9 @@ export default function PlanPanel({ plan, bodies, hasLander, preview, buildDelta
                   </span>
                 </div>
               </div>
-              {(mission.kind === 'land-return' || mission.kind === 'orbit-return') && (
-                <div className="mt-1 text-[10px] text-orange/90 leading-snug">
-                  ↩ Return trips are ambitious — pack extra fuel{mission.kind === 'land-return' ? ' and a lander that can fly back up' : ''}. Launch, then warp.
-                </div>
-              )}
               {targetId && (
                 <div className="mt-1 text-[10px] text-cyan/90 leading-snug">
-                  ✨ Auto-plan flies the whole route. Build a capable rocket{(mission.kind === 'land' || mission.kind === 'land-return') ? ' with a lander' : ''}, then launch &amp; warp.
+                  ✨ Auto-plan flies the whole route. Build a capable rocket{mission.kind === 'land' ? ' with a lander' : ''}, then launch &amp; warp.
                 </div>
               )}
             </div>

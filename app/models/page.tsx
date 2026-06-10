@@ -43,7 +43,7 @@ export default function ModelsPage() {
           </p>
         </div>
         <Link href="/" className="btn btn-secondary py-2 px-4 text-xs">
-          ◀ BACK HOME
+          ◀ BACK TO LAUNCH
         </Link>
       </header>
 

@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { MissionResult } from '@/lib/game/types';
+import { missionHeadline } from '@/lib/game/career/Flavor';
+import { fmtMoney } from '@/lib/game/career/Economy';
 
 const RATING_COLOR: Record<string, string> = {
   S: '#2ee59d',
@@ -11,10 +13,14 @@ const RATING_COLOR: Record<string, string> = {
   D: '#ff5577',
 };
 
+/** Contract settlement to show alongside the flight stats, if one was flown. */
+export type PayoutInfo = { title: string; amount: number; line: string };
+
 export default function MissionSummary({
-  result, onRestart, onCopyLog, logCopied,
+  result, payout, onRestart, onCopyLog, logCopied,
 }: {
   result: MissionResult;
+  payout?: PayoutInfo | null;
   onRestart: () => void;
   onCopyLog?: () => void;
   logCopied?: boolean;
@@ -22,11 +28,7 @@ export default function MissionSummary({
   const crashed = result.outcome === 'crashed';
   const inOrbit = !crashed && !result.landedBody && result.reachedOrbit;
   const icon = crashed ? '💥' : result.stationDeployed ? '🛰' : inOrbit ? '🛰' : '🚀';
-  const headline = crashed
-    ? 'Hard Impact'
-    : result.landedBody ? 'Safe Landing'
-    : inOrbit ? 'In Orbit'
-    : 'Flight Ended';
+  const headline = missionHeadline(result);
   const ratingColor = RATING_COLOR[result.rating] ?? '#e8f4ff';
 
   return (
@@ -43,6 +45,20 @@ export default function MissionSummary({
         <h2 className="text-2xl font-black text-ink mb-4">{headline}</h2>
         {result.stationDeployed && !crashed && (
           <div className="-mt-2 mb-3 text-[11px] font-bold text-cyan">🛰 Station deployed</div>
+        )}
+
+        {/* Contract payout */}
+        {payout && (
+          <div className={`mb-4 rounded-lg border px-3 py-2.5 text-left
+            ${payout.amount > 0 ? 'border-green/45 bg-green/[0.07]' : 'border-orange/40 bg-orange/[0.06]'}`}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="min-w-0 truncate text-[11px] font-black text-ink">📋 {payout.title}</span>
+              <span className={`shrink-0 text-base font-black tabular-nums ${payout.amount > 0 ? 'text-green' : 'text-orange'}`}>
+                {payout.amount > 0 ? `+${fmtMoney(payout.amount)}` : '$0'}
+              </span>
+            </div>
+            <div className="mt-1 text-[10px] leading-snug text-dim">{payout.line}</div>
+          </div>
         )}
 
         {/* Rating */}
@@ -81,7 +97,7 @@ export default function MissionSummary({
           </button>
           <div className="flex gap-3">
             <Link href="/builder" className="btn btn-secondary flex-1 text-sm">🛠 Builder</Link>
-            <Link href="/" className="btn btn-secondary flex-1 text-sm">☰ Menu</Link>
+            <Link href="/career" className="btn btn-secondary flex-1 text-sm">📋 Contracts</Link>
           </div>
           {onCopyLog && (
             <button

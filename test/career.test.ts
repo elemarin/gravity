@@ -13,7 +13,8 @@ import {
 } from '../lib/game/career/Progress';
 import { RocketBuild, DEFAULT_BUILD, MissionResult } from '../lib/game/types';
 import { PARTS_CATALOG } from '../lib/game/career/Parts';
-import { MILESTONES } from '../lib/game/career/Milestones';
+import { partPrice, partTier, checkPurchase } from '../lib/game/career/Economy';
+import { RANKS, canPurchaseTier } from '../lib/game/career/Rank';
 import { requiredDeltaV } from '../lib/game/career/Requirements';
 import { buildPartIds, estimateBuildDeltaV } from '../lib/game/BuildSpec';
 import { ROCKET_PRESETS, ROUTE_PROVER_BUILD } from '../lib/game/career/Presets';
@@ -49,22 +50,42 @@ describe('Δv progression gate', () => {
 });
 
 describe('part & preset reachability', () => {
-  const unlockable = new Set<string>(PARTS_CATALOG.filter((p) => p.unlockedByDefault).map((p) => p.id));
-  for (const m of MILESTONES) for (const id of m.unlocks) unlockable.add(id);
-  for (const g of CAMPAIGN_GOALS) for (const id of g.partUnlocks ?? []) unlockable.add(id);
+  // A part is obtainable when it is a free starter or purchasable with money
+  // at some rank on the ladder.
+  const topRank = RANKS[RANKS.length - 1];
+  const obtainable = (id: string): boolean => {
+    const p = PARTS_CATALOG.find((x) => x.id === id);
+    if (!p) return false;
+    return p.unlockedByDefault ||
+      (partPrice(p) > 0 && canPurchaseTier(topRank.level, partTier(p)));
+  };
 
   it('every preset is buildable through career progress', () => {
     for (const preset of ROCKET_PRESETS) {
       for (const id of buildPartIds(preset.build)) {
-        expect(unlockable.has(id), `preset '${preset.id}' needs unreachable part '${id}'`).toBe(true);
+        expect(obtainable(id), `preset '${preset.id}' needs unreachable part '${id}'`).toBe(true);
       }
     }
   });
 
   it('every catalogue part is unlockable (no orphans)', () => {
     for (const p of PARTS_CATALOG) {
-      expect(unlockable.has(p.id), `part '${p.id}' is never unlocked`).toBe(true);
+      expect(obtainable(p.id), `part '${p.id}' is never obtainable`).toBe(true);
     }
+  });
+
+  it('purchases are gated by rank, then funds', () => {
+    const tier4 = PARTS_CATALOG.find((p) => (p.tier ?? 0) >= 4)!;
+    const broke = checkPurchase(tier4, 0, 0);
+    expect(broke.ok).toBe(false);
+    expect(!broke.ok && broke.reason).toBe('rank'); // rank blocks before money
+    const richLowRank = checkPurchase(tier4, 1_000_000, 0);
+    expect(richLowRank.ok).toBe(false);
+    const poorHighRank = checkPurchase(tier4, 0, topRank.level);
+    expect(poorHighRank.ok).toBe(false);
+    expect(!poorHighRank.ok && poorHighRank.reason).toBe('funds');
+    const ok = checkPurchase(tier4, partPrice(tier4), topRank.level);
+    expect(ok.ok).toBe(true);
   });
 });
 

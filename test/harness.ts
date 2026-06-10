@@ -43,18 +43,12 @@ export function destinationsFrom(launchId: string): string[] {
   return ['orbit', ...PLANET_AND_MOON_IDS.filter((id) => id !== launchId)];
 }
 
-/** The mission kinds valid for a destination, mirroring the plan-panel rules. */
+/** The mission kinds valid for a destination, mirroring the plan-panel rules.
+ *  Missions are one-way: orbit, or land where there's a surface. */
 export function kindsFor(launchId: string, destId: string): MissionKind[] {
   const targetId = destinationTargetId(destId, launchId);
   const landTarget = targetId ?? launchId;
-  const canLand = isLandable(landTarget);
-  if (targetId) {
-    return canLand
-      ? ['orbit', 'orbit-return', 'land', 'land-return']
-      : ['orbit', 'orbit-return'];
-  }
-  // Orbiting the launch world itself: orbit, or land back on it.
-  return canLand ? ['orbit', 'land'] : ['orbit'];
+  return isLandable(landTarget) ? ['orbit', 'land'] : ['orbit'];
 }
 
 // ── Build selection ──────────────────────────────────────────────────────────
@@ -67,7 +61,7 @@ const MOST_CAPABLE = PRESET_BUILDS.reduce((a, b) => (b.dv > a.dv ? b : a));
 
 /** Any mission that ends on a surface needs landing hardware to touch down. */
 function missionLands(kind: MissionKind): boolean {
-  return kind === 'land' || kind === 'land-return' || kind === 'orbit-return';
+  return kind === 'land';
 }
 
 /** True when a build carries gear that lets it survive a touchdown. */
@@ -159,13 +153,10 @@ function hohmannSeconds(launchId: string, targetId: string): number {
 function budgetSeconds(s: Scenario): number {
   if (s.maxSimSeconds) return s.maxSimSeconds;
   const targetId = destinationTargetId(s.destId, s.launchId);
-  const isReturn = s.kind === 'orbit-return' || s.kind === 'land-return';
   let secs = 30_000;                 // ascent + local orbit + capture/descent margin
   if (targetId) {
     // One cruise (≈1.5× Hohmann for phasing + capture), with a floor for moon hops.
-    const leg = Math.max(40_000, hohmannSeconds(s.launchId, targetId) * 1.5 + 25_000);
-    secs += leg;
-    if (isReturn) secs += leg;       // the trip home is a second cruise
+    secs += Math.max(40_000, hohmannSeconds(s.launchId, targetId) * 1.5 + 25_000);
   }
   return secs;
 }

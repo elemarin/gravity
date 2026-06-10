@@ -119,7 +119,7 @@ export class Game {
     this.trajectory = new TrajectoryLine(this.renderer.scene);
     this.trail = new TrailLine(this.renderer.scene);
     this.milestones = new MilestoneManager(opts.completedMilestoneIds ?? []);
-    this.milestones.onComplete = (m) => this.callbacks.onMilestoneComplete?.(m.id, m.unlocks);
+    this.milestones.onComplete = (m) => this.callbacks.onMilestoneComplete?.(m.id);
 
     // Launchpad at the surface of the first/launch body
     const lb = this.launchBody();

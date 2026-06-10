@@ -2,23 +2,23 @@ import { MissionResult, RocketBuild } from '../types';
 
 /**
  * Launch-facility tiers. Upgrading the base lets you assemble heavier and more
- * complex rockets. Upgrades are gated on the number of milestones completed
- * (career progression doubles as the "tech" currency).
+ * complex rockets. Upgrades are bought with contract money — the career's
+ * currency — so a bigger pad is a purchase, not a participation award.
  */
 export type FacilityTier = {
   level: number;
   name: string;
   maxMass: number;        // tonnes the pad can lift
   maxStages: number;      // assembly bay stage slots
-  milestonesNeeded: number;
+  cost: number;           // money to upgrade INTO this tier
 };
 
 export const FACILITY_TIERS: FacilityTier[] = [
-  { level: 0, name: 'Launch Pad',     maxMass: 14,  maxStages: 2, milestonesNeeded: 0 },
-  { level: 1, name: 'Pad Mk II',      maxMass: 28,  maxStages: 3, milestonesNeeded: 2 },
-  { level: 2, name: 'Assembly Bay',   maxMass: 50,  maxStages: 4, milestonesNeeded: 4 },
-  { level: 3, name: 'Vehicle Hangar', maxMass: 90,  maxStages: 5, milestonesNeeded: 7 },
-  { level: 4, name: 'Orbital Yard',   maxMass: 180, maxStages: 6, milestonesNeeded: 10 },
+  { level: 0, name: 'Launch Pad',     maxMass: 14,  maxStages: 2, cost: 0 },
+  { level: 1, name: 'Pad Mk II',      maxMass: 28,  maxStages: 3, cost: 3000 },
+  { level: 2, name: 'Assembly Bay',   maxMass: 50,  maxStages: 4, cost: 10000 },
+  { level: 3, name: 'Vehicle Hangar', maxMass: 90,  maxStages: 5, cost: 25000 },
+  { level: 4, name: 'Orbital Yard',   maxMass: 180, maxStages: 6, cost: 50000 },
 ];
 
 export function facilityTier(level: number): FacilityTier {
@@ -29,13 +29,13 @@ export function nextFacilityTier(level: number): FacilityTier | null {
   return FACILITY_TIERS[level + 1] ?? null;
 }
 
-/** Can the player upgrade to the next tier yet? */
-export function canUpgradeFacility(level: number, milestonesDone: number): boolean {
+/** Can the player afford the next facility tier? */
+export function canUpgradeFacility(level: number, money: number): boolean {
   const next = nextFacilityTier(level);
-  return !!next && milestonesDone >= next.milestonesNeeded;
+  return !!next && money >= next.cost;
 }
 
-// ── Campaign goal chain (the end game) ─────────────────────────────────────
+// ── Campaign goal chain (the long game) ─────────────────────────────────────
 
 export type GoalKind = 'station' | 'landing' | 'base';
 
@@ -49,53 +49,52 @@ export type CampaignGoal = {
   body: string;
   /** Body id unlocked as a launch base when this goal completes. */
   baseUnlock?: string;
-  /**
-   * Parts unlocked when this goal completes. The campaign — not the quick
-   * flight-skill milestones — is the long game: every station, landing and
-   * base across the solar system hands out a new part, so progression is paced
-   * across many distinct missions instead of a handful of early flights.
-   */
-  partUnlocks?: string[];
+  /** One-time cash bonus on completion. */
+  cash: number;
+  /** Reputation granted on completion (feeds the rank ladder). */
+  reputation: number;
 };
 
-const station = (body: string, name: string, description: string, partUnlocks: string[]): CampaignGoal =>
-  ({ id: `station-${body}`, kind: 'station', body, name, description, partUnlocks });
-const landing = (body: string, name: string, description: string, partUnlocks: string[]): CampaignGoal =>
-  ({ id: `land-${body}`, kind: 'landing', body, name, description, partUnlocks });
-const base = (body: string, name: string, description: string, partUnlocks: string[]): CampaignGoal =>
-  ({ id: `base-${body}`, kind: 'base', body, name, description, baseUnlock: body, partUnlocks });
+const station = (body: string, cash: number, rep: number, name: string, description: string): CampaignGoal =>
+  ({ id: `station-${body}`, kind: 'station', body, name, description, cash, reputation: rep });
+const landing = (body: string, cash: number, rep: number, name: string, description: string): CampaignGoal =>
+  ({ id: `land-${body}`, kind: 'landing', body, name, description, cash, reputation: rep });
+const base = (body: string, cash: number, rep: number, name: string, description: string): CampaignGoal =>
+  ({ id: `base-${body}`, kind: 'base', body, name, description, baseUnlock: body, cash, reputation: rep });
 
 /**
  * The campaign, ordered roughly by difficulty (delta-v). Stations only need an
  * orbit + a Station Module, so every world — even the gas giants you can't land
  * on — can host one. Landings and bases are reserved for the solid worlds.
+ * Goals pay cash + reputation (and bases open new launch sites); the parts
+ * catalog itself is bought with money, rank-gated.
  */
 export const CAMPAIGN_GOALS: CampaignGoal[] = [
-  station('earth',   'Earth Station',    'Carry a Station Module to Earth orbit.',            ['probe-core']),
-  landing('moon',    'Moon Landing',     'Land a craft safely on the Moon.',                  ['satellite-bus']),
-  station('moon',    'Lunar Station',    'Establish a station in orbit around the Moon.',     ['nose-fairing']),
-  station('mercury', 'Mercury Station',  'Orbit a station around scorched Mercury.',          ['engine-aerospike']),
-  station('venus',   'Venus Station',    'Orbit a station above the clouds of Venus.',        ['solar-array']),
-  landing('venus',   'Venus Landing',    'Survive a landing on the surface of Venus.',        ['rcs-pack']),
-  landing('mercury', 'Mercury Landing',  'Touch down on airless Mercury.',                    ['tank-jumbo']),
-  station('mars',    'Mars Station',     'Orbit a station around Mars.',                      ['engine-vector']),
-  landing('mars',    'Mars Landing',     'Land a craft safely on Mars.',                      ['lander-rover']),
-  base('moon',       'Moon Base',        'Deliver a Station Module to the Moon surface.',     ['engine-mammoth']),
-  landing('ceres',   'Ceres Landing',    'Set down on the dwarf world Ceres.',                ['booster-srb-heavy']),
-  base('mars',       'Mars Base',        'Deliver a Station Module to the Mars surface.',     ['tank-mega']),
-  landing('titan',   'Titan Landing',    'Descend through Titan’s haze to its surface.',      ['booster-liquid-xl']),
-  station('jupiter', 'Jupiter Station',  'Hold a station in orbit around mighty Jupiter.',    ['capsule-command']),
-  station('saturn',  'Saturn Station',   'Orbit a station among Saturn’s rings.',             ['capsule-cupola']),
-  station('uranus',  'Uranus Station',   'Reach a station orbit around distant Uranus.',      ['engine-plasma']),
-  station('neptune', 'Neptune Station',  'The final frontier — a station orbiting Neptune.',  ['lander-titan']),
+  station('earth', 1500, 1, 'Earth Station',  'Put a Station Module in Earth orbit. Like a treehouse, but worse to reach.'),
+  landing('moon',  2500, 2, 'Moon Landing',   'Land on the Moon. Small step, giant invoice.'),
+  station('moon',  2500, 2, 'Lunar Station',  'A station around the Moon — for people who find the Moon too crowded.'),
+  station('mercury', 4000, 2, 'Mercury Station', 'Orbit scorched Mercury. Sunscreen is structural here.'),
+  station('venus', 4000, 2, 'Venus Station',  'Hold a station above the clouds of Venus. Do not look down. Or breathe.'),
+  landing('venus', 5000, 3, 'Venus Landing',  'Survive a landing on Venus, the solar system’s angriest sauna.'),
+  landing('mercury', 5000, 3, 'Mercury Landing', 'Touch down on airless Mercury. Parking is free; everything else costs.'),
+  station('mars',  5000, 3, 'Mars Station',   'Orbit a station around Mars. The red planet now has an HOA.'),
+  landing('mars',  6000, 3, 'Mars Landing',   'Land on Mars. Bring snacks; the local cuisine is regolith.'),
+  base('moon',     6000, 3, 'Moon Base',      'Deliver a Station Module to the Moon’s surface — your first off-world launch pad.'),
+  landing('ceres', 7000, 3, 'Ceres Landing',  'Set down on Ceres, a dwarf world with big ambitions.'),
+  base('mars',     8000, 4, 'Mars Base',      'A base on Mars: real estate slogan, “location, location, radiation”.'),
+  landing('titan', 9000, 4, 'Titan Landing',  'Descend through Titan’s orange haze. The haze does not descend back.'),
+  station('jupiter', 9000, 4, 'Jupiter Station', 'Orbit the king of planets without becoming part of it.'),
+  station('saturn', 10000, 4, 'Saturn Station', 'A station among Saturn’s rings. Mind the gravel.'),
+  station('uranus', 11000, 5, 'Uranus Station', 'Reach distant Uranus. Yes, the jokes are also gated by rank.'),
+  station('neptune', 12000, 5, 'Neptune Station', 'A station around Neptune — the edge of the map, the top of the resume.'),
   // Outpost chain — a base on every other solid world makes it a launch site, so
   // missions can stage onward from across the system (the launch-from selector
   // lists every base you've established).
-  base('venus',      'Venus Base',       'Deliver a Station Module to the Venusian surface.', []),
-  base('mercury',    'Mercury Base',     'Establish a base on scorched Mercury.',             []),
-  base('ceres',      'Ceres Base',       'Found an outpost on the dwarf world Ceres.',        []),
-  base('titan',      'Titan Base',       'Set up a base on Titan, Saturn’s giant moon.',      []),
-  base('phobos',     'Phobos Base',      'Anchor a base on tiny Phobos, a moon of Mars.',     []),
+  base('venus',   9000, 4, 'Venus Base',   'A base on Venus. The brochure says “tropical”. The brochure is sweating.'),
+  base('mercury', 9000, 4, 'Mercury Base', 'An outpost on Mercury, where every day is several days long.'),
+  base('ceres',   9000, 4, 'Ceres Base',   'Found an outpost on Ceres and become big in the asteroid belt, literally.'),
+  base('titan',  11000, 5, 'Titan Base',   'A base on Titan: lakeside property, methane lakes, no swimming.'),
+  base('phobos', 10000, 4, 'Phobos Base',  'Anchor a base to Phobos before someone skips it across Mars.'),
 ];
 
 export function campaignGoal(id: string): CampaignGoal | undefined {
