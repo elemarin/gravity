@@ -38,10 +38,8 @@ const TARGET_DV: Record<string, number> = {
 
 /** Extra budget for the objective on top of simply reaching the body. */
 const KIND_DV: Record<MissionKind, number> = {
-  'orbit':        0,
-  'land':         500,
-  'orbit-return': 1800,
-  'land-return':  2700,
+  'orbit': 0,
+  'land':  500,
 };
 
 /** Δv (m/s) a build must carry to attempt launchBody → destination with kind. */

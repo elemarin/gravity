@@ -278,12 +278,12 @@ export class Simulator {
   }
 
   /**
-   * A return-home leg (a transfer/depart/arrival whose target is the launch
-   * world) must not fire until the OUTBOUND landing + relaunch has happened —
-   * otherwise, on a land-return, it triggers the moment the craft first reaches a
-   * bound orbit at the destination and the craft heads home before ever landing.
-   * Gated on the plan's relaunch node having fired; orbit-return plans have no
-   * such node, so they're unaffected (their return waits on the arrival capture).
+   * A homeward leg (a transfer/depart/arrival whose target is the launch world)
+   * in a manually-authored land-then-relaunch plan must not fire until the
+   * OUTBOUND landing + relaunch has happened — otherwise it triggers the moment
+   * the craft first reaches a bound orbit at the destination and the craft heads
+   * home before ever landing. Gated on the plan's relaunch node having fired;
+   * plans without such a node are unaffected.
    */
   private returnLegBlocked(targetBodyId: string | undefined): boolean {
     if (targetBodyId !== this.plan.launchBodyId) return false;
@@ -1092,7 +1092,7 @@ export class Simulator {
         if (isReturnHome && outboundTarget && !this.state.reachedBodyIds.has(outboundTarget)) {
           return false;
         }
-        // ...and not before the outbound landing + relaunch on a land-return.
+        // ...and not before the outbound landing + relaunch in a plan that lands first.
         if (this.returnLegBlocked(t.targetBodyId)) return false;
         // Launching from a moon toward its host planet, the craft STARTS inside
         // the host's SOI (the moon orbits within it), so a plain containment test

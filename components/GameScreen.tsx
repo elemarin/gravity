@@ -1,17 +1,24 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import Link from 'next/link';
 import type { Game } from '@/lib/game/Game';
 import type { FlightState, MissionResult, RocketBuild } from '@/lib/game/types';
 import { MISSION_LABELS, type FlightPlan } from '@/lib/game/plan/FlightPlan';
 import { buildFlightBodies, destinationTargetId, bodyDef } from '@/lib/game/bodies';
 import { autoPlan, defaultOrbitKm } from '@/lib/game/plan/AutoPlan';
 import {
-  loadBuild, loadCompletedMilestones, addCompletedMilestone, addUnlockedParts,
+  loadBuild, loadCompletedMilestones, addCompletedMilestone,
   loadPlan, savePlan, loadBases, addBase, loadGoals, addGoal, loadDevMode,
+  loadActiveContract, saveActiveContract, addCompletedContract, loadCompletedContracts,
+  addMoney, addReputation, loadMoney, loadReputation,
 } from '@/lib/storage';
+import { rankForReputation } from '@/lib/game/career/Rank';
 import { MILESTONES } from '@/lib/game/career/Milestones';
 import { evaluateGoals, campaignGoal, stationGoalId, baseGoalId } from '@/lib/game/career/Progress';
+import { Contract, evaluateContract } from '@/lib/game/career/Contracts';
+import { fmtMoney } from '@/lib/game/career/Economy';
+import { CONTRACT_FAILED_LINE } from '@/lib/game/career/Flavor';
 import { getPart } from '@/lib/game/career/Parts';
 import { estimateBuildDeltaV } from '@/lib/game/BuildSpec';
 import {
@@ -65,15 +72,12 @@ function missionObjective(plan: FlightPlan | null): string {
   const targetId = destinationTargetId(plan.destinationId, plan.launchBodyId);
   if (targetId) {
     const target = bodyNameWithArticle(targetId);
-    if (kind === 'orbit') return `Orbit ${target}`;
-    if (kind === 'land') return `Land on ${target}`;
-    return `${MISSION_LABELS[kind].replace(' & ', ' and ')} from ${target}`;
+    return kind === 'land' ? `Land on ${target}` : `Orbit ${target}`;
   }
   const launchBody = bodyNameWithArticle(plan.launchBodyId);
-  const label = MISSION_LABELS[kind].replace(' & ', ' and ');
-  return kind === 'land' || kind === 'land-return'
-    ? `${label} on ${launchBody}`
-    : `${label} around ${launchBody}`;
+  return kind === 'land'
+    ? `${MISSION_LABELS[kind]} on ${launchBody}`
+    : `${MISSION_LABELS[kind]} around ${launchBody}`;
 }
 
 export default function GameScreen() {
@@ -98,7 +102,32 @@ export default function GameScreen() {
   const [buildDeltaV, setBuildDeltaV] = useState(0);
   const [devMode, setDevModeState] = useState(false);
   const [logCopied, setLogCopied] = useState(false);
+  const [contract, setContract] = useState<Contract | null>(null);
+  const [hasCapsule, setHasCapsule] = useState(false);
+  const [hasSatelliteBus, setHasSatelliteBus] = useState(false);
+  const [hasPayloadFairing, setHasPayloadFairing] = useState(false);
+  const [payout, setPayout] = useState<{ title: string; amount: number; line: string } | null>(null);
+  const [money, setMoney] = useState(0);
+  const [rankTitle, setRankTitle] = useState('');
+  const contractRef = useRef<Contract | null>(null);
+  // Body a base module was surface-deployed on this flight (for base contracts).
+  const surfaceDeployRef = useRef<string | null>(null);
+  // How the last mission's contract settlement went — included in the debug log.
+  const settlementRef = useRef<{
+    skipped?: string;
+    contractId?: string;
+    contract?: Contract;
+    context?: Record<string, unknown>;
+    completed?: boolean;
+    payout?: number;
+  } | null>(null);
   const toastId = useRef(0);
+
+  /** Re-read the wallet + rank after any award so the plan-mode chip is live. */
+  const refreshWallet = useCallback(() => {
+    setMoney(loadMoney());
+    setRankTitle(rankForReputation(loadReputation()).title);
+  }, []);
 
   const setPlan = useCallback((p: FlightPlan | null) => {
     planRef.current = p;
@@ -120,8 +149,15 @@ export default function GameScreen() {
     setPlan(initialPlan);
     setBuildDeltaV(estimateBuildDeltaV(build));
     setHasLander(!!build.landerId);
+    setHasCapsule(getPart(build.noseId)?.type === 'capsule');
+    setHasSatelliteBus(build.noseId === 'satellite-bus');
+    setHasPayloadFairing(build.noseId === 'nose-fairing');
     setBases(loadBases());
     setDevModeState(loadDevMode());
+    const activeContract = loadActiveContract();
+    contractRef.current = activeContract;
+    setContract(activeContract);
+    refreshWallet();
     setMode('plan');
 
     (async () => {
@@ -155,6 +191,7 @@ export default function GameScreen() {
           onLanderDeploy: () => { hapticDeploy(); soundStage(); },
           onStationDeploy: (bodyId, onSurface) => {
             hapticDeploy(); soundStage();
+            if (onSurface) surfaceDeployRef.current = bodyId;
             const id = onSurface ? baseGoalId(bodyId) : stationGoalId(bodyId);
             if (id) awardGoalById(id);
           },
@@ -162,18 +199,20 @@ export default function GameScreen() {
             soundTouchdown(outcome === 'landed');
             outcome === 'landed' ? hapticLanding() : hapticCrash();
           },
-          onMilestoneComplete: (id, unlocks) => {
+          onMilestoneComplete: (id) => {
             const m = MILESTONES.find((x) => x.id === id);
             if (!m) return;
             addCompletedMilestone(id);
-            addUnlockedParts(unlocks);
-            pushToast(m.name, m.description);
+            addMoney(m.cash);
+            refreshWallet();
+            pushToast(`★ ${m.name}`, `+${fmtMoney(m.cash)} · ${m.description}`);
             const next = game.getNextMilestone();
             setNextTarget(next ? next.description : 'All milestones complete!');
           },
           onMissionEnd: (r) => {
             setMissionResult(r);
             awardGoals(r);
+            settleContract(r);
           },
         },
       });
@@ -199,20 +238,21 @@ export default function GameScreen() {
     if (gameRef.current) gameRef.current.timeScale = timeScale;
   }, [timeScale]);
 
-  /** Grant a single campaign goal (base + part unlocks + toast), if new. */
+  /** Grant a single campaign goal (cash + reputation + base + toast), if new. */
   const awardGoalById = useCallback((id: string) => {
     if (loadGoals().includes(id)) return;
     addGoal(id);
     const g = campaignGoal(id);
-    if (g?.baseUnlock) { addBase(g.baseUnlock); setBases(loadBases()); }
-    if (g?.partUnlocks?.length) addUnlockedParts(g.partUnlocks);
-    if (g) {
-      const subtitle = g.partUnlocks?.length
-        ? `Unlocked: ${g.partUnlocks.map((p) => getPart(p)?.name ?? p).join(', ')}`
-        : g.baseUnlock ? 'New launch site unlocked!' : g.description;
-      pushToast(`🏆 ${g.name}`, subtitle);
-    }
-  }, [pushToast]);
+    if (!g) return;
+    if (g.baseUnlock) { addBase(g.baseUnlock); setBases(loadBases()); }
+    addMoney(g.cash);
+    addReputation(g.reputation);
+    refreshWallet();
+    const subtitle = g.baseUnlock
+      ? `+${fmtMoney(g.cash)} · New launch site: ${bodyDef(g.baseUnlock).name}!`
+      : `+${fmtMoney(g.cash)} · +${g.reputation} reputation`;
+    pushToast(`🏆 ${g.name}`, subtitle);
+  }, [pushToast, refreshWallet]);
 
   /** Award landing/base campaign goals at mission end. */
   const awardGoals = useCallback((result: MissionResult) => {
@@ -222,6 +262,43 @@ export default function GameScreen() {
     const newly = evaluateGoals({ result, build, launchBodyId: p.launchBodyId }, loadGoals());
     newly.forEach(awardGoalById);
   }, [awardGoalById]);
+
+  /** Settle the accepted contract against the flight's MissionResult. */
+  const settleContract = useCallback((result: MissionResult) => {
+    const c = contractRef.current;
+    if (!c) {
+      setPayout(null);
+      settlementRef.current = { skipped: 'no-active-contract' };
+      return;
+    }
+    if (loadCompletedContracts().includes(c.id)) {
+      settlementRef.current = { skipped: 'already-completed', contractId: c.id };
+      return;
+    }
+    const build = buildRef.current;
+    const ctx = {
+      surfaceDeployBodyId: surfaceDeployRef.current,
+      hasCapsule: build ? getPart(build.noseId)?.type === 'capsule' : false,
+      hasSatelliteBus: build?.noseId === 'satellite-bus',
+      hasPayloadFairing: build?.noseId === 'nose-fairing',
+    };
+    const ev = evaluateContract(c, result, ctx);
+    settlementRef.current = { contractId: c.id, contract: c, context: ctx, completed: ev.completed, payout: ev.payout };
+    if (ev.completed) {
+      addMoney(ev.payout);
+      addReputation(c.reputation);
+      addCompletedContract(c.id);
+      saveActiveContract(null);
+      contractRef.current = null;
+      setContract(null);
+      refreshWallet();
+      setPayout({ title: c.title, amount: ev.payout, line: ev.line });
+      const contractToast = c.payloadType === 'satellite' ? '🛰 Satellite deployed!' : '💰 Contract complete';
+      pushToast(contractToast, `${c.title} · +${fmtMoney(ev.payout)}`);
+    } else {
+      setPayout({ title: c.title, amount: 0, line: CONTRACT_FAILED_LINE });
+    }
+  }, [pushToast, refreshWallet]);
 
   const handlePlanChange = useCallback((next: FlightPlan) => {
     const prev = planRef.current;
@@ -239,6 +316,9 @@ export default function GameScreen() {
 
   const handlePlay = useCallback(() => {
     setMissionResult(null);
+    setPayout(null);
+    surfaceDeployRef.current = null;
+    settlementRef.current = null;
     setTimeScale(1);
     // Called from a click, so this satisfies the browser's autoplay gesture rule.
     startFlightAudio();
@@ -247,6 +327,9 @@ export default function GameScreen() {
 
   const handleEdit = useCallback(() => {
     setMissionResult(null);
+    setPayout(null);
+    surfaceDeployRef.current = null;
+    settlementRef.current = null;
     setTimeScale(1);
     stopFlightAudio();
     gameRef.current?.edit();
@@ -254,6 +337,9 @@ export default function GameScreen() {
 
   const handleReplay = useCallback(() => {
     setMissionResult(null);
+    setPayout(null);
+    surfaceDeployRef.current = null;
+    settlementRef.current = null;
     setTimeScale(1);
     stopFlightAudio();
     gameRef.current?.edit();
@@ -295,10 +381,21 @@ export default function GameScreen() {
   const handleCopyLog = useCallback(() => {
     // The full flight log — build, plan, system, final state, result, and the
     // event timeline — assembled by the Game so a failing run can be shared and
-    // reproduced from a single paste.
+    // reproduced from a single paste. The career layer (contract, settlement,
+    // wallet) lives in this component, so it's merged in here.
     const log = gameRef.current?.buildDebugLog();
     if (!log) return;
-    navigator.clipboard.writeText(JSON.stringify(log, null, 2));
+    const reputation = loadReputation();
+    const career = {
+      activeContract: contractRef.current,
+      settlement: settlementRef.current,
+      surfaceDeployBodyId: surfaceDeployRef.current,
+      money: loadMoney(),
+      reputation,
+      rank: rankForReputation(reputation),
+      completedContractIds: loadCompletedContracts(),
+    };
+    navigator.clipboard.writeText(JSON.stringify({ ...log, career }, null, 2));
     setLogCopied(true);
     setTimeout(() => setLogCopied(false), 2000);
   }, []);
@@ -309,11 +406,7 @@ export default function GameScreen() {
     const cur = planRef.current;
     if (!cur || cur.launchBodyId === id) return;
     const mission = cur.mission ?? { kind: 'orbit' as const, orbitKm: defaultOrbitKm(id) };
-    const targetId = destinationTargetId(cur.destinationId, id);
-    const kind = targetId
-      ? mission.kind
-      : (mission.kind === 'land' || mission.kind === 'land-return' ? 'land' : 'orbit');
-    handlePlanChange(autoPlan(id, cur.destinationId, { ...mission, kind }));
+    handlePlanChange(autoPlan(id, cur.destinationId, mission));
   }, [handlePlanChange]);
 
   const phase = flightState?.phase ?? 'prelaunch';
@@ -352,7 +445,9 @@ export default function GameScreen() {
             state={flightState}
             nextTarget={nextTarget}
             timeScale={timeScale}
-            objective={missionObjective(plan)}
+            objective={contract
+              ? `${missionObjective(plan)} · 📋 ${contract.title} (${fmtMoney(contract.reward)})`
+              : missionObjective(plan)}
           />
           <StageStack state={flightState} />
         </>
@@ -360,6 +455,21 @@ export default function GameScreen() {
 
       <NavDrawer title="Flight Menu" />
       <SoundToggle />
+
+      {/* Wallet + rank — the career at a glance while planning. */}
+      {mode === 'plan' && (
+        <Link
+          href="/career"
+          className="absolute z-30 top-[calc(3.9rem+env(safe-area-inset-top))]
+                     right-[calc(0.75rem+env(safe-area-inset-right))]
+                     panel flex flex-col items-end gap-0.5 px-2.5 py-1.5 hover:border-cyan/45"
+        >
+          <span className="text-[11px] font-black tabular-nums text-green leading-none">
+            {fmtMoney(money)}
+          </span>
+          <span className="text-[10px] font-bold text-yellow/90 leading-none">★ {rankTitle}</span>
+        </Link>
+      )}
 
       {/* Launch-site selector — a dropdown so it scales on mobile as more bases
           (every landable world) become available. */}
@@ -383,6 +493,11 @@ export default function GameScreen() {
           hasLander={hasLander}
           preview={preview}
           buildDeltaV={buildDeltaV}
+          contract={contract}
+          hasStation={hasStation}
+          hasCapsule={hasCapsule}
+          hasSatelliteBus={hasSatelliteBus}
+          hasPayloadFairing={hasPayloadFairing}
           onChange={handlePlanChange}
           onPlay={handlePlay}
         />
@@ -422,6 +537,7 @@ export default function GameScreen() {
       {missionResult && (
         <MissionSummary
           result={missionResult}
+          payout={payout}
           onRestart={handleReplay}
           onCopyLog={devMode ? handleCopyLog : undefined}
           logCopied={logCopied}

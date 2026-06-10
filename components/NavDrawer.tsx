@@ -5,10 +5,10 @@ import Link from 'next/link';
 import { loadDevMode, saveDevMode } from '@/lib/storage';
 
 const MENU_ITEMS = [
-  { href: '/', label: 'Home', icon: '⌂' },
-  { href: '/play', label: 'Launch', icon: '▶' },
+  { href: '/', label: 'Launch', icon: '▶' },
   { href: '/builder', label: 'Rocket Builder', icon: '🛠' },
-  { href: '/career', label: 'Career', icon: '★' },
+  { href: '/career', label: 'Contracts & Career', icon: '📋' },
+  { href: '/models', label: 'Celestial Models', icon: '🪐' },
 ];
 
 export default function NavDrawer({

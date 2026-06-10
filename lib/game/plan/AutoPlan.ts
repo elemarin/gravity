@@ -4,11 +4,11 @@ import { KARMAN_LINE } from '../constants';
 
 /**
  * Guided flight-plan generator. Produces a ready-to-fly plan for a launch body,
- * a destination, and an objective (orbit / land, optionally with a return leg).
+ * a destination, and an objective (orbit or land — all missions are one-way).
  *
  * The plan is expressed entirely as position-based maneuver nodes the
  * deterministic Simulator understands, so the whole mission — ascent, transfer,
- * capture/descent, and the trip home — replays identically every time. The
+ * and capture/descent — replays identically every time. The
  * geometry is derived from the bodies, so the same recipe scales to any target;
  * the player just needs a rocket capable enough to carry the delta-v.
  */
@@ -111,7 +111,7 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
 
   if (!targetId) {
     // Orbiting (or de-orbiting onto) the launch world itself.
-    if (kind === 'land' || kind === 'land-return') {
+    if (kind === 'land') {
       // Drop periapsis into the atmosphere and ride it down under chute/descent.
       nodes.push(node(needsAscentAssist(launchId) ? 'after-orbit' : 'at-apoapsis', undefined, undefined, { attitude: 'retrograde', throttle: 1 }));
       nodes.push(node('at-periapsis-altitude', -1, undefined, { throttle: 0 }));
@@ -133,15 +133,10 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
     // de-orbiting, so the craft can't swing back out into the moon and get
     // recaptured (which would land it back on the moon).
     nodes.push(node('after-orbit', undefined, targetId, { depart: true }));
-    if (kind === 'orbit' || kind === 'orbit-return') {
+    if (kind === 'orbit') {
       nodes.push(node('at-soi-entry', undefined, targetId, { capture: true }));
-      if (kind === 'orbit-return') addReturnLeg(nodes, launchId, targetId);
     } else {
       nodes.push(node('at-soi-entry', undefined, targetId, { descend: true }));
-      if (kind === 'land-return') {
-        nodes.push(node('on-manual-relaunch', undefined, undefined, { ascend: true }));
-        addReturnLeg(nodes, launchId, targetId);
-      }
     }
     return finish(launchId, destId, kind, orbitKm, nodes);
   }
@@ -169,62 +164,19 @@ export function autoPlan(launchId: string, destId: string, opts: AutoPlanOptions
   }
   nodes.push(node('after-orbit', undefined, targetId, { transfer: true }));
 
-  if (kind === 'orbit' || kind === 'orbit-return') {
+  if (kind === 'orbit') {
     // Capture autopilot brakes the arrival into a near-circular orbit once the
     // target's gravity dominates.
     nodes.push(node('at-soi-entry', undefined, targetId, { capture: true }));
-    if (kind === 'orbit-return') {
-      addReturnLeg(nodes, launchId, targetId);
-    }
   } else {
     // Land (one-way) — brake the arrival on the upper stage with the powered
     // descent autopilot; the lander (if fitted) auto-separates late and slow for
     // the final touchdown, so its small tank is never asked to kill the whole
     // arrival speed alone.
     nodes.push(node('at-soi-entry', undefined, targetId, { descend: true }));
-    if (kind === 'land-return') {
-      // After touchdown, fly the ascent autopilot back to orbit, then head home.
-      nodes.push(node('on-manual-relaunch', undefined, undefined, { ascend: true }));
-      addReturnLeg(nodes, launchId, targetId);
-    }
   }
 
   return finish(launchId, destId, kind, orbitKm, nodes);
-}
-
-/**
- * Append the trip home once the craft has established orbit around the target.
- *
- * For a MOON of the launch world (nested inside the launch world's SOI), a single
- * `depart` burn escapes the moon and drops into the launch world's atmosphere.
- *
- * For a MOON of another planet (e.g. Titan), first escape the moon into its
- * host's system, then fly the interplanetary cruise home and descend.
- *
- * For a PLANET (its own heliocentric orbit), going home is a full interplanetary
- * transfer: home the craft back to the launch world with the same Lambert cruise
- * the outbound leg uses, then capture-descend into its atmosphere. A lone
- * `depart` burn can't cross interplanetary space to a moving launch world — it
- * just escapes the target's SOI and strands the craft in solar orbit.
- */
-function addReturnLeg(nodes: Maneuver[], launchId: string, targetId: string) {
-  const targetDef = bodyDef(targetId);
-  const host = targetDef.parent && targetDef.parent !== 'sun' ? targetDef.parent : null;
-  const hostIsLaunch = host === launchId;
-  if (host && hostIsLaunch) {
-    // A moon of the launch world (e.g. Earth's Moon): one depart burn drops home.
-    nodes.push(node('after-orbit', undefined, launchId, { depart: true }));
-  } else if (host) {
-    // A moon of another planet: escape the moon into the host's system, then run
-    // the interplanetary cruise back to the launch world and descend.
-    nodes.push(node('after-orbit', undefined, host, { depart: true }));
-    nodes.push(node('after-orbit', undefined, launchId, { transfer: true }));
-    nodes.push(node('at-soi-entry', undefined, launchId, { descend: true }));
-  } else {
-    // Interplanetary return: transfer back to the launch world, then descend.
-    nodes.push(node('after-orbit', undefined, launchId, { transfer: true }));
-    nodes.push(node('at-soi-entry', undefined, launchId, { descend: true }));
-  }
 }
 
 function finish(launchBodyId: string, destinationId: string, kind: MissionKind, orbitKm: number, nodes: Maneuver[]): FlightPlan {
