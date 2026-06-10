@@ -112,6 +112,15 @@ export default function GameScreen() {
   const contractRef = useRef<Contract | null>(null);
   // Body a base module was surface-deployed on this flight (for base contracts).
   const surfaceDeployRef = useRef<string | null>(null);
+  // How the last mission's contract settlement went — included in the debug log.
+  const settlementRef = useRef<{
+    skipped?: string;
+    contractId?: string;
+    contract?: Contract;
+    context?: Record<string, unknown>;
+    completed?: boolean;
+    payout?: number;
+  } | null>(null);
   const toastId = useRef(0);
 
   /** Re-read the wallet + rank after any award so the plan-mode chip is live. */
@@ -257,15 +266,24 @@ export default function GameScreen() {
   /** Settle the accepted contract against the flight's MissionResult. */
   const settleContract = useCallback((result: MissionResult) => {
     const c = contractRef.current;
-    if (!c) { setPayout(null); return; }
-    if (loadCompletedContracts().includes(c.id)) return;
+    if (!c) {
+      setPayout(null);
+      settlementRef.current = { skipped: 'no-active-contract' };
+      return;
+    }
+    if (loadCompletedContracts().includes(c.id)) {
+      settlementRef.current = { skipped: 'already-completed', contractId: c.id };
+      return;
+    }
     const build = buildRef.current;
-    const ev = evaluateContract(c, result, {
+    const ctx = {
       surfaceDeployBodyId: surfaceDeployRef.current,
       hasCapsule: build ? getPart(build.noseId)?.type === 'capsule' : false,
       hasSatelliteBus: build?.noseId === 'satellite-bus',
       hasPayloadFairing: build?.noseId === 'nose-fairing',
-    });
+    };
+    const ev = evaluateContract(c, result, ctx);
+    settlementRef.current = { contractId: c.id, contract: c, context: ctx, completed: ev.completed, payout: ev.payout };
     if (ev.completed) {
       addMoney(ev.payout);
       addReputation(c.reputation);
@@ -300,6 +318,7 @@ export default function GameScreen() {
     setMissionResult(null);
     setPayout(null);
     surfaceDeployRef.current = null;
+    settlementRef.current = null;
     setTimeScale(1);
     // Called from a click, so this satisfies the browser's autoplay gesture rule.
     startFlightAudio();
@@ -310,6 +329,7 @@ export default function GameScreen() {
     setMissionResult(null);
     setPayout(null);
     surfaceDeployRef.current = null;
+    settlementRef.current = null;
     setTimeScale(1);
     stopFlightAudio();
     gameRef.current?.edit();
@@ -319,6 +339,7 @@ export default function GameScreen() {
     setMissionResult(null);
     setPayout(null);
     surfaceDeployRef.current = null;
+    settlementRef.current = null;
     setTimeScale(1);
     stopFlightAudio();
     gameRef.current?.edit();
@@ -360,10 +381,21 @@ export default function GameScreen() {
   const handleCopyLog = useCallback(() => {
     // The full flight log — build, plan, system, final state, result, and the
     // event timeline — assembled by the Game so a failing run can be shared and
-    // reproduced from a single paste.
+    // reproduced from a single paste. The career layer (contract, settlement,
+    // wallet) lives in this component, so it's merged in here.
     const log = gameRef.current?.buildDebugLog();
     if (!log) return;
-    navigator.clipboard.writeText(JSON.stringify(log, null, 2));
+    const reputation = loadReputation();
+    const career = {
+      activeContract: contractRef.current,
+      settlement: settlementRef.current,
+      surfaceDeployBodyId: surfaceDeployRef.current,
+      money: loadMoney(),
+      reputation,
+      rank: rankForReputation(reputation),
+      completedContractIds: loadCompletedContracts(),
+    };
+    navigator.clipboard.writeText(JSON.stringify({ ...log, career }, null, 2));
     setLogCopied(true);
     setTimeout(() => setLogCopied(false), 2000);
   }, []);
