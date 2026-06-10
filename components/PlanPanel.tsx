@@ -193,14 +193,16 @@ export default function PlanPanel({
               <div className={`rounded-lg border p-2 ${contractMatches
                 ? 'border-yellow/40 bg-yellow/[0.06]'
                 : 'border-orange/50 bg-orange/[0.08]'}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[9px] tracking-[0.2em] uppercase text-yellow/80 font-black">📋 Contract</span>
-                  <span className="text-[10px] font-black text-green tabular-nums">{fmtMoney(contract.reward)}</span>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[9px] tracking-[0.18em] uppercase text-yellow/80 font-black">📋 </span>
+                    <span className="text-[11px] font-bold text-ink leading-snug">{contract.title}</span>
+                  </div>
+                  <span className="shrink-0 text-[11px] font-black text-green tabular-nums">{fmtMoney(contract.reward)}</span>
                 </div>
-                <div className="mt-0.5 text-[11px] font-bold text-ink leading-snug">{contract.title}</div>
-                <div className="text-[10px] text-dim leading-snug">
+                <div className="mt-0.5 text-[10px] text-dim leading-snug">
                   {PAYLOAD_LABELS[contract.payloadType]} → {destinationName(contract.destinationId, contract.launchBodyId)}
-                  {' · '}{MISSION_LABELS[contract.missionKind]}
+                  {contract.payloadType === 'satellite' && ' · auto-deploys at orbit'}
                 </div>
                 {!contractMatches && (
                   <button
@@ -208,25 +210,25 @@ export default function PlanPanel({
                     className="mt-1.5 w-full rounded-md border border-orange/60 bg-orange/15 py-1
                                text-[10px] font-black text-orange active:scale-95"
                   >
-                    ⚠ Plan doesn’t match the contract — tap to plan {destinationName(contract.destinationId, contract.launchBodyId)} · {MISSION_LABELS[contract.missionKind]}
+                    ⚠ Re-plan → {destinationName(contract.destinationId, contract.launchBodyId)}
                   </button>
                 )}
                 {(contract.payloadType === 'station' || contract.payloadType === 'base') && hasStation === false && (
-                  <div className="mt-1 text-[10px] text-orange/90 leading-snug">
-                    🏗 This job needs a Station Module on top — fit one in the Builder (Payload tab).
+                  <div className="mt-1 text-[10px] text-orange/90">
+                    🏗 Needs Station Module — add one in Builder.
                   </div>
                 )}
                 {contract.requiredPartType === 'capsule' && hasCapsule === false && (
-                  <div className="mt-1 text-[10px] text-orange/90 leading-snug">
-                    🧳 The tourist insists on a seat — fit a capsule-type payload in the Builder.
+                  <div className="mt-1 text-[10px] text-orange/90">
+                    🧳 Tourist needs a capsule payload — add one in Builder.
                   </div>
                 )}
               </div>
             ) : (
               <Link href="/career"
                 className="rounded-lg border border-dashed border-yellow/40 bg-yellow/[0.04] p-2
-                           text-[10px] text-yellow/90 leading-snug hover:bg-yellow/10">
-                📋 No contract accepted — free flying pays exactly $0. Visit the <b>Contract Board</b> to get a job →
+                           text-[10px] text-yellow/90 hover:bg-yellow/10">
+                📋 No contract — <b>get a job →</b>
               </Link>
             )}
 

@@ -269,7 +269,8 @@ export default function GameScreen() {
       setContract(null);
       refreshWallet();
       setPayout({ title: c.title, amount: ev.payout, line: ev.line });
-      pushToast('💰 Contract complete', `${c.title} · +${fmtMoney(ev.payout)}`);
+      const contractToast = c.payloadType === 'satellite' ? '🛰 Satellite deployed!' : '💰 Contract complete';
+      pushToast(contractToast, `${c.title} · +${fmtMoney(ev.payout)}`);
     } else {
       setPayout({ title: c.title, amount: 0, line: CONTRACT_FAILED_LINE });
     }
@@ -428,7 +429,7 @@ export default function GameScreen() {
           <span className="text-[11px] font-black tabular-nums text-green leading-none">
             {fmtMoney(money)}
           </span>
-          <span className="text-[8px] font-bold text-yellow/90 leading-none">★ {rankTitle}</span>
+          <span className="text-[10px] font-bold text-yellow/90 leading-none">★ {rankTitle}</span>
         </Link>
       )}
 
